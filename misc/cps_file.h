@@ -2,7 +2,7 @@
 
 #include "cc_structures.h"
 #include "image_file.h"
-#include "palet.h"
+#include "palette.h"
 
 class Ccps_file : public Cimage_file<t_cps_header>
 {
@@ -28,13 +28,13 @@ public:
 
 	const byte* get_image() const
 	{
-		return data() + sizeof(t_cps_header) + header().palet_size;
+		return data() + sizeof(t_cps_header) + header().palette_size;
 	}
 
-	const t_palet_entry* palet() const
+	const t_palette_entry* palette() const
 	{
-		return header().palet_size ? reinterpret_cast<const t_palet_entry*>(data() + sizeof(t_cps_header)) : NULL;
+		return header().palette_size ? reinterpret_cast<const t_palette_entry*>(data() + sizeof(t_cps_header)) : NULL;
 	}
 };
 
-Cvirtual_binary cps_file_write(const byte* s, const t_palet_entry* palet);
+Cvirtual_binary cps_file_write(const byte* s, const t_palette_entry* palette);

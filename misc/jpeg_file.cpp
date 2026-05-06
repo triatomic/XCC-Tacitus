@@ -1,9 +1,8 @@
 #include "stdafx.h"
 #include "jpeg_file.h"
-
+#include "png_file.h"
 #include <jpeglib.h>
 #include "fname.h"
-#include "png_file.h"
 
 class Csource_manager
 {
@@ -74,8 +73,8 @@ int Cjpeg_file::decode(Cvirtual_image& d) const
 
 	if (cb_pixel == 1)
 	{
-		t_palet palet;
-		d.load(image, cx, cy, cb_pixel, palet);
+		t_palette palette;
+		d.load(image, cx, cy, cb_pixel, palette);
 	}
 	else
 		d.load(image, cx, cy, cb_pixel, NULL);
@@ -87,10 +86,10 @@ int Cjpeg_file::decode(Cvirtual_image& d) const
 	return 0;
 }
 
-int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* palet, int cx, int cy, int q, int pixel)
+int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palette_entry* palette, int cx, int cy, int q, int pixel)
 {
 	string temp_fname = get_temp_fname();
-	int error = jpeg_file_write(temp_fname, image, palet, cx, cy, q, pixel);
+	int error = jpeg_file_write(temp_fname, image, palette, cx, cy, q, pixel);
 	if (!error)
 	{
 		Cvirtual_binary s;
@@ -100,22 +99,22 @@ int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* pa
 	return error;
 }
 
-int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* palet, int cx, int cy, int q, int pixel)
+int jpeg_file_write(const string& name, const byte* image, const t_palette_entry* palette, int cx, int cy, int q, int pixel)
 {
-	t_palet_entry* s;
-	if (palet)
+	t_palette_entry* s;
+	if (palette)
 	{
 		int count = cx * cy;
-		s = new t_palet_entry[count];
+		s = new t_palette_entry[count];
 		const byte* r = image;
-		t_palet_entry* w = s;
+		t_palette_entry* w = s;
 		while (count--)
 		{
-			*w++ = palet[*r++];
+			*w++ = palette[*r++];
 		}
 	}
-	// else
-	// 	s = const_cast<t_palet_entry*>(reinterpret_cast<const t_palet_entry*>(image));
+	//else
+	//	s = const_cast<t_palette_entry*>(reinterpret_cast<const t_palette_entry*>(image));
 	jpeg_compress_struct cinfo;
 	jpeg_error_mgr jerr;
 
@@ -135,9 +134,9 @@ int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* 
 		jpeg_set_quality(&cinfo, q, true);
 	jpeg_start_compress(&cinfo, TRUE);
 
-	if (palet || pixel == 3)
+	if (palette || pixel == 3)
 	{
-		auto r = reinterpret_cast<const t_palet_entry*>(image);
+		auto r = reinterpret_cast<const t_palette_entry*>(image);
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
 			jpeg_write_scanlines(&cinfo, const_cast<byte**>(reinterpret_cast<const byte**>(&r)), 1);
@@ -151,7 +150,7 @@ int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* 
 		{
 		case 4:
 		{
-			auto r = reinterpret_cast<const t_palet32_entry*>(image);
+			auto r = reinterpret_cast<const t_palette32_entry*>(image);
 			while (cinfo.next_scanline < cinfo.image_height)
 			{
 				for (int i = 0; i < cx; ++i)
@@ -165,7 +164,7 @@ int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* 
 		}
 		case 6:
 		{
-			auto r48 = reinterpret_cast<const t_palet48_entry*>(image);
+			auto r48 = reinterpret_cast<const t_palette48_entry*>(image);
 			while (cinfo.next_scanline < cinfo.image_height)
 			{
 				for (int i = 0; i < 3 * cx; )
@@ -182,7 +181,7 @@ int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* 
 		}
 		case 8:
 		{
-			auto r64 = reinterpret_cast<const t_palet64_entry*>(image);
+			auto r64 = reinterpret_cast<const t_palette64_entry*>(image);
 			while (cinfo.next_scanline < cinfo.image_height)
 			{
 				for (int i = 0; i < 3 * cx; )
@@ -203,12 +202,14 @@ int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* 
 		delete[] tmp_line;
 	}
 
+
+	
 	jpeg_finish_compress(&cinfo);
 	jpeg_destroy_compress(&cinfo);
 
     fclose(f);
 
-	if (palet)
+	if (palette)
 		delete[] s;
 	return 0;
 }
@@ -218,12 +219,12 @@ int Cjpeg_file::decode(Cvirtual_image& d) const
 	return 1;
 }
 
-int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* palet, int cx, int cy, int q)
+int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palette_entry* palette, int cx, int cy, int q)
 {
 	return 1;
 }
 
-int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* palet, int cx, int cy, int q)
+int jpeg_file_write(const string& name, const byte* image, const t_palette_entry* palette, int cx, int cy, int q)
 {
 	return 1;
 }

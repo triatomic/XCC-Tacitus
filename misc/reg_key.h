@@ -1,10 +1,9 @@
 #pragma once
 
-#include <boost/noncopyable.hpp>
 #include <string>
 #include <windows.h>
 
-class Creg_key : boost::noncopyable
+class Creg_key
 {
 public:
 	Creg_key() = default;

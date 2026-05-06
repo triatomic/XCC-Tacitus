@@ -21,7 +21,7 @@
 //
 // DISCLAIMER:
 //
-// This Sourcecode and all accompaning material is ©1998-1999 Erwin Tratar. 
+// This Sourcecode and all accompaning material is Â©1998-1999 Erwin Tratar. 
 // All rights reserved.
 //
 // The source code may be used in compiled form in any way you desire 
@@ -128,7 +128,7 @@
 // 2000/03/07   Fixed growing Dialog after minimizing and restoring
 // 2000/05/22   Whole Statusbar (Gripper) is not excluded anymore in EraseBkgnd()
 //              instead only the triangular Gripper is excluded
-// 2000/05/31   Fix for PropertySheets with PSH_WIZARDHASFINISH [Thömmi]
+// 2000/05/31   Fix for PropertySheets with PSH_WIZARDHASFINISH [ThÃ¶mmi]
 // 2000/05/31   Fix for UpDown-Controls with EditCtrl Buddy in PropertyPages.
 //              These were not repositioned every time the page is being show
 //              until the first resize
@@ -546,15 +546,11 @@ void ETSLayoutMgr::EraseBkgnd(CDC* pDC)
 		pWndChild = pWndChild->GetNextWindow();
 	}
 
-
-	HBRUSH hBrBack = (HBRUSH) ::GetClassLong(GetWnd()->GetSafeHwnd(), GCL_HBRBACKGROUND) ;
+	HBRUSH hBrBack = (HBRUSH) ::GetClassLong(GetWnd()->GetSafeHwnd(), -10) ;
 	if( hBrBack == 0 )
 		hBrBack = ::GetSysColorBrush(COLOR_BTNFACE);
-
-	pDC->FillRgn( &rgn, 
-		CBrush::FromHandle( hBrBack )
-		);
 	
+	pDC->FillRgn( &rgn, CBrush::FromHandle( hBrBack ));
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2303,7 +2299,7 @@ END_MESSAGE_MAP()
 
 
 /////////////////////////////////////////////////////////////////////////////
-// Behandlungsroutinen für Nachrichten ETSLayoutPropertyPage 
+// Behandlungsroutinen fÃ¼r Nachrichten ETSLayoutPropertyPage 
 
 
 
@@ -2522,7 +2518,7 @@ BEGIN_MESSAGE_MAP(ETSLayoutPropertySheet, CPropertySheet)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
-// Behandlungsroutinen für Nachrichten ETSLayoutPropertySheet 
+// Behandlungsroutinen fÃ¼r Nachrichten ETSLayoutPropertySheet 
 
 BOOL ETSLayoutPropertySheet::OnEraseBkgnd(CDC* pDC) 
 {
@@ -2547,7 +2543,7 @@ void ETSLayoutPropertySheet::Resize(int cx, int cy)
 	{
 		UpdateLayout();
 
-		// Fix for PSH_WIZARDHASFINISH [Thömmi]
+		// Fix for PSH_WIZARDHASFINISH [ThÃ¶mmi]
 		if (IsWizard() && !(m_psh.dwFlags & PSH_WIZARDHASFINISH) )
 		{
 			// manual reposition of the FINISH button
@@ -2650,7 +2646,7 @@ void ETSLayoutPropertySheet::AddButtons(CPane paneBottom)
 	bool bFirst = true;
 	for(int i = 0; i < (sizeof(_PropertySheetIDs) / sizeof(long)) ; i++)
 	{
-		// Prevent movement of finish button, if it is not shown explicitly [Thömmi]
+		// Prevent movement of finish button, if it is not shown explicitly [ThÃ¶mmi]
 		if( IsWizard() 
 			&& _PropertySheetIDs[i] == ID_WIZFINISH 
 			&& !(m_psh.dwFlags & PSH_WIZARDHASFINISH) ) 

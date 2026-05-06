@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cc_structures.h"
-#include "palet.h"
+#include "palette.h"
 #include "video_file.h"
 #include "virtual_file.h"
 #include "virtual_image.h"
@@ -16,7 +16,7 @@ public:
 	{
 		Cvirtual_binary image;
 		decode(image.write_start(this->cb_image()));
-		return Cvirtual_image(image, this->cx(), this->cy(), this->cb_pixel(), this->palet());
+		return Cvirtual_image(image, this->cx(), this->cy(), this->cb_pixel(), this->palette());
 	}
 	
 	int cf() const override
@@ -25,6 +25,6 @@ public:
 	}
 };
 
-int image_file_write(Cvirtual_file&, t_file_type, const byte* image, const t_palet_entry*, int cx, int cy, int pixel = 3);
-Cvirtual_file image_file_write(t_file_type, const byte* image, const t_palet_entry*, int cx, int cy, int pixel = 3);
-int image_file_write(const string& name, t_file_type, const byte* image, const t_palet_entry*, int cx, int cy, int pixel = 3);
+int image_file_write(Cvirtual_file&, t_file_type, const byte* image, const t_palette_entry*, int cx, int cy, int pixel = 3);
+Cvirtual_file image_file_write(t_file_type, const byte* image, const t_palette_entry*, int cx, int cy, int pixel = 3);
+int image_file_write(const string& name, t_file_type, const byte* image, const t_palette_entry*, int cx, int cy, int pixel = 3);

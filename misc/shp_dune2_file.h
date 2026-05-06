@@ -3,12 +3,12 @@
 #include "cc_file_sh.h"
 #include "cc_structures.h"
 #include "fname.h"
-#include "palet.h"
+#include "palette.h"
 
 class Cshp_dune2_file : public Ccc_file_sh<t_shp_dune2_header>  
 {
 public:
-	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet _palet) const;
+	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette) const;
 	bool is_valid() const;
 
 	int get_c_images() const
@@ -59,7 +59,7 @@ public:
 		return r;
 	}
 
-	const byte* get_reference_palet(int i) const
+	const byte* get_reference_palette(int i) const
 	{
 		return get_image_header(i)->compression & 1 ? reinterpret_cast<const byte*>(get_image_header(i) + 1) : NULL;
 	}

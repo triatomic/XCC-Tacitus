@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "XCCFileView.h"
-
+#include <csf_file.h>
 #include <aud_file.h>
 #include <big_file.h>
 #include <cmath>
@@ -26,7 +26,6 @@
 #include <shp_file.h>
 #include <shp_images.h>
 #include <shp_ts_file.h>
-#include <sound_ts_ini_reader.h>
 #include <sstream>
 #include <st_file.h>
 #include <string_conversion.h>
@@ -42,11 +41,11 @@
 #include <wav_file.h>
 #include <wsa_dune2_file.h>
 #include <wsa_file.h>
-#include <csf_file.h>
 #include <png_file.h>
+#include <numbers>
 #include "theme.h"
 
-IMPLEMENT_DYNCREATE(CXCCFileView, CScrollView)
+IMPLEMENT_DYNCREATE(CXCCFileView, CListView)
 
 CXCCFileView::CXCCFileView()
 {
@@ -57,37 +56,64 @@ CXCCFileView::~CXCCFileView()
 }
 
 BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
-	//{{AFX_MSG_MAP(CXCCFileView)
 	ON_UPDATE_COMMAND_UI(ID_FILE_NEW, OnDisable)
 	ON_UPDATE_COMMAND_UI(ID_FILE_OPEN, OnDisable)
 	ON_UPDATE_COMMAND_UI(ID_FILE_CLOSE, OnDisable)
+	ON_WM_MOUSEWHEEL()
+	ON_WM_MOUSEHWHEEL()
 	ON_WM_ERASEBKGND()
-	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
 BOOL CXCCFileView::OnEraseBkgnd(CDC* pDC)
 {
+	GetClientRect(clientRect);
 	if (theme::is_dark())
+		pDC->FillSolidRect(clientRect, theme::bg());
+	else
+		pDC->FillRect(clientRect, &test_brush);
+	return TRUE;
+}
+
+BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	CPoint position = GetScrollPosition();
+	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
+
+	if (shiftState)
 	{
-		CRect r;
-		GetClientRect(&r);
-		pDC->FillSolidRect(&r, theme::bg());
-		return TRUE;
+		ScrollToPosition(CPoint(position.x - zDelta, position.y));
+		return false;
 	}
-	return CScrollView::OnEraseBkgnd(pDC);
+	ScrollToPosition(CPoint(position.x, position.y - zDelta));
+	return false;
+}
+
+void CXCCFileView::OnMouseHWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	CPoint position = GetScrollPosition();
+	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
+
+	if (shiftState)
+	{
+		ScrollToPosition(CPoint(position.x, position.y + zDelta));
+		return;
+	}
+	ScrollToPosition(CPoint(position.x + zDelta, position.y));
+	return;
 }
 
 void CXCCFileView::OnInitialUpdate()
 {
 	CScrollView::OnInitialUpdate();
-	SetScrollSizes(MM_TEXT, CSize(0, 0));
-	m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Courier New");
+	test_brush.CreateSolidBrush(m_colour);
+	//m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Courier New");
+	m_font.CreateFont(12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Lucida Console");
+	//m_font.CreateFont(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Consolas");
+	//m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, ""); //default font, but if it isn't monospace it sucks
 }
 
-void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d, int y_d)
+void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d)
 {
-	if (!CRect().IntersectRect(m_clip_rect, CRect(CPoint(x_d, y_d), CSize(cx_s, cy_s))))
-		return;
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -104,21 +130,19 @@ void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int 
 		mh_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&mp_dib), 0, 0);
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
-	for (int y = 0; y < cy_s; y++)
+	for (unsigned int y = 0; y < cy_s; y++)
 	{
-		for (int x = 0; x < cx_s; x++)
+		for (unsigned int x = 0; x < cx_s; x++)
 			mp_dib[x + cx_s * y] = m_color_table[s[x + cx_s * y]];
 	}
-	pDC->BitBlt(x_d, y_d, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	pDC->BitBlt(x_d, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
 	m_x = max(m_x, x_d + cx_s);
 }
 
-void CXCCFileView::draw_image24(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d, int y_d)
+void CXCCFileView::draw_image24(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
-	if (!CRect().IntersectRect(m_clip_rect, CRect(CPoint(x_d, y_d), CSize(cx_s, cy_s))))
-		return;
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -135,28 +159,25 @@ void CXCCFileView::draw_image24(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 		mh_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&mp_dib), 0, 0);
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
-	const byte* r = s;
-	for (int y = 0; y < cy_s; y++)
+	t_palette32bgr_entry v{};
+	for (unsigned int y = 0; y < cy_s; y++)
 	{
-		for (int x = 0; x < cx_s; x++)
+		for (unsigned int x = 0; x < cx_s; x++)
 		{
-			t_palet32bgr_entry v;
 			v.r = *s++;
 			v.g = *s++;
 			v.b = *s++;
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(x_d, y_d, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, x_d + cx_s);
+	m_x = max(m_x, offset + cx_s);
 }
 
-void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d, int y_d)
+void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
-	if (!CRect().IntersectRect(m_clip_rect, CRect(CPoint(x_d, y_d), CSize(cx_s, cy_s))))
-		return;
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -174,11 +195,11 @@ void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
 	const byte* r = s;
-	for (int y = 0; y < cy_s; y++)
+	t_palette32bgr_entry v{};
+	for (unsigned int y = 0; y < cy_s; y++)
 	{
-		for (int x = 0; x < cx_s; x++)
+		for (unsigned int x = 0; x < cx_s; x++)
 		{
-			t_palet32bgr_entry v;
 			v.r = *s++;
 			v.g = *s++;
 			v.b = *s++;
@@ -186,16 +207,14 @@ void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(x_d, y_d, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, x_d + cx_s);
+	m_x = max(m_x, offset + cx_s);
 }
 
-void CXCCFileView::draw_image48(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d, int y_d)
+void CXCCFileView::draw_image48(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
-	if (!CRect().IntersectRect(m_clip_rect, CRect(CPoint(x_d, y_d), CSize(cx_s, cy_s))))
-		return;
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -213,27 +232,25 @@ void CXCCFileView::draw_image48(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
 	auto r = reinterpret_cast<const unsigned short*>(s);
-	for (int y = 0; y < cy_s; y++)
+	t_palette32bgr_entry v{};
+	for (unsigned int y = 0; y < cy_s; y++)
 	{
-		for (int x = 0; x < cx_s; x++)
+		for (unsigned int x = 0; x < cx_s; x++)
 		{
-			t_palet32bgr_entry v;
 			v.r = linear2sRGB(*r++);
 			v.g = linear2sRGB(*r++);
 			v.b = linear2sRGB(*r++);
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(x_d, y_d, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, x_d + cx_s);
+	m_x = max(m_x, offset + cx_s);
 }
 
-void CXCCFileView::draw_image64(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d, int y_d)
+void CXCCFileView::draw_image64(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
-	if (!CRect().IntersectRect(m_clip_rect, CRect(CPoint(x_d, y_d), CSize(cx_s, cy_s))))
-		return;
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -251,11 +268,11 @@ void CXCCFileView::draw_image64(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
 	auto r = reinterpret_cast<const unsigned short*>(s);
-	for (int y = 0; y < cy_s; y++)
+	t_palette32bgr_entry v{};
+	for (unsigned int y = 0; y < cy_s; y++)
 	{
-		for (int x = 0; x < cx_s; x++)
+		for (unsigned int x = 0; x < cx_s; x++)
 		{
-			t_palet32bgr_entry v;
 			v.r = linear2sRGB(*r++);
 			v.g = linear2sRGB(*r++);
 			v.b = linear2sRGB(*r++);
@@ -263,10 +280,10 @@ void CXCCFileView::draw_image64(const byte* s, int cx_s, int cy_s, CDC* pDC, int
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(x_d, y_d, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, x_d + cx_s);
+	m_x = max(m_x, offset + cx_s);
 }
 
 static CMainFrame* GetMainFrame()
@@ -274,29 +291,29 @@ static CMainFrame* GetMainFrame()
 	return reinterpret_cast<CMainFrame*>(AfxGetMainWnd());
 }
 
-const t_palet_entry* CXCCFileView::get_default_palet()
+const t_palette_entry* CXCCFileView::get_default_palette()
 {
-	const t_palet_entry* p = GetMainFrame()->get_pal_data();
+	const t_palette_entry* p = GetMainFrame()->get_pal_data();
 	if (p)
 		return p;
-	if (m_palet)
-		return m_palet;
-	return GetMainFrame()->get_game_palet(m_game);
+	if (m_palette)
+		return m_palette;
+	return GetMainFrame()->get_game_palette(m_game);
 }
 
-void CXCCFileView::load_color_table(const t_palet palet, bool convert_palet)
+void CXCCFileView::load_color_table(const t_palette palette, bool convert_palette)
 {
-	t_palet p;
-	if (!palet)
+	t_palette p;
+	if (!palette)
 	{
-		convert_palet = true;
-		palet = get_default_palet();
+		convert_palette = true;
+		palette = get_default_palette();
 	}
-	memcpy(p, palet, sizeof(t_palet));
-	if (convert_palet)
-		convert_palet_18_to_24(p);
-	t_palet32bgr_entry* color_table = reinterpret_cast<t_palet32bgr_entry*>(m_color_table);
-	for (long i = 0; i < 256; i++)
+	memcpy(p, palette, sizeof(t_palette));
+	if (convert_palette)
+		convert_palette_18_to_24(p);
+	t_palette32bgr_entry* color_table = reinterpret_cast<t_palette32bgr_entry*>(m_color_table);
+	for (unsigned short i = 0; i < 256; i++)
 	{
 		color_table[i].r = p[i].r;
 		color_table[i].g = p[i].g;
@@ -329,15 +346,19 @@ void CXCCFileView::draw_info(string n, string d)
 		n = t2s(n);
 		d = t2s(d);
 		t_text_cache_entry e;
-		e.text_extent = CRect(CPoint(0, m_y), m_dc->GetTextExtent(n.c_str()));
+
+		CSize size;
+		size.SetSize(1, 1);
+
+		e.text_extent = CRect(CPoint(offset, m_y + offset), size);
 		e.t = n;
 		m_text_cache.push_back(e);
 		if (!d.empty())
 		{
-			e.text_extent = CRect(CPoint(128, m_y), m_dc->GetTextExtent(n.c_str()));
+			e.text_extent = CRect(CPoint(offset * 32, m_y + offset), size);
 			e.t = d;
 			m_text_cache.push_back(e);
-			m_x = max<int>(m_x, 128 + e.text_extent.right);
+			m_x = max<int>(m_x, (offset * 32) + e.text_extent.right);
 		}
 		else
 			m_x = max<int>(m_x, e.text_extent.right);
@@ -380,8 +401,6 @@ struct t_vector
 	double y;
 	double z;
 };
-
-const double pi = 3.141592654;
 
 t_vector rotate_x(t_vector v, double a)
 {
@@ -430,23 +449,29 @@ int get_size(unsigned int v)
 
 void CXCCFileView::OnDraw(CDC* pDC)
 {
+	//pDC->SetTextColor(RGB(249, 245, 215));
+
 	const char* b2a[] = {"no", "yes"};
 	pDC->SelectObject(&m_font);
+
 	if (theme::is_dark())
 	{
 		pDC->SetTextColor(theme::text());
 		pDC->SetBkColor(theme::bg());
 		pDC->SetBkMode(TRANSPARENT);
 	}
+
+	//pDC->SetBkColor(m_colour);
+
 	if (m_is_open)
 	{
-		pDC->GetClipBox(&m_clip_rect);
 		TEXTMETRIC tm;
 		pDC->GetTextMetrics(&tm);
 		m_dc = pDC;
 		m_x = 0;
 		m_y = 0;
 		m_y_inc = tm.tmHeight;
+
 		draw_info("ID:", nh(8, m_id));
 		draw_info("Size:", n(m_size));
 		draw_info("Type:", ft_name[m_ft]);
@@ -457,8 +482,8 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Caud_file f;
 				f.load(m_data);
-				draw_info("Audio:", n(f.get_samplerate()) + " hz, " + n(f.get_cb_sample() << 3) + " bit, " + (f.get_c_channels() == 1 ? "mono" : "stereo"));
-				draw_info("Count samples:", n(f.get_c_samples()));
+				draw_info("Audio:", n(f.get_samplerate()) + " hz, " + n(f.get_cb_sample() << 3) + " bit, " + (f.get_c_channels() == 1 ? "Mono" : "Stereo"));
+				draw_info("Samples:", n(f.get_c_samples()));
 				draw_info("Compression:", nh(2, f.header().compression));
 				break;
 			}
@@ -467,7 +492,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cbig_file f;
 				f.load(m_data, m_size);
 				const int c_files = f.get_c_files();
-				draw_info("Count files:", n(c_files));
+				draw_info("Files:", n(c_files));
 				m_y += m_y_inc;
 				for (int i = 0; i < c_files; i++)
 				{
@@ -476,15 +501,30 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				}
 				break;
 			}
+		case ft_csf:
+		{
+			Ccsf_file_rd f;
+			f.load(m_data, m_size);
+			const int c_strs = f.header().count1;
+			auto& c_strmaps = f.get_map();
+			draw_info("Strings:", n(c_strs));
+			m_y += m_y_inc;
+			draw_info("Name", "Value\t\tExtra Value");
+			for (auto i : c_strmaps)
+			{
+				draw_info(i.first, Ccsf_file::convert2string(i.second.value) + "\t\t" + i.second.extra_value);
+			}
+			break;
+		}
 		case ft_cps:
 			{
 				Ccps_file f;
 				f.load(m_data);
-				draw_info("Palet:", f.palet() ? "yes" : "no");
+				draw_info("Paletted:", f.palette() ? "Yes" : "No");
 				m_y += m_y_inc;
-				load_color_table(f.palet(), true);
+				load_color_table(f.palette(), true);
 				Cvirtual_image image = f.vimage();
-				draw_image8(image.image(), image.cx(), image.cy(), pDC, 0, m_y);
+				draw_image8(image.image(), image.cx(), image.cy(), pDC, offset);
 				m_y += 200 + m_y_inc;
 				break;
 			}
@@ -502,11 +542,13 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				if (ddsd.dwFlags & DDSD_DEPTH)
 					draw_info("Depth: ", n(ddsd.dwDepth));
 				if (ddsd.dwFlags & DDSD_MIPMAPCOUNT)
-					draw_info("Mip map count: ", n(ddsd.dwMipMapCount));
+					draw_info("Mipmaps: ", n(ddsd.dwMipMapCount));
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_FOURCC)
-					draw_info("Pixel format: ", dump_four_cc(ddsd.ddpfPixelFormat.dwFourCC));
+					draw_info("Pixel Format: ", dump_four_cc(ddsd.ddpfPixelFormat.dwFourCC));
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_RGB)
-					draw_info("Pixel format: ", n(ddsd.ddpfPixelFormat.dwRGBBitCount) + " bits (" + nwzl(4, 1000 * get_size(ddsd.ddpfPixelFormat.dwRGBAlphaBitMask) + 100 * get_size(ddsd.ddpfPixelFormat.dwRBitMask) + 10 * get_size(ddsd.ddpfPixelFormat.dwGBitMask) + get_size(ddsd.ddpfPixelFormat.dwBBitMask)) + ')');		
+					draw_info("Pixel Format: ", n(ddsd.ddpfPixelFormat.dwRGBBitCount) +
+						" bits (" + nwzl(4, 1000 * get_size(ddsd.ddpfPixelFormat.dwRGBAlphaBitMask) + 100 * get_size(ddsd.ddpfPixelFormat.dwRBitMask) + 10
+							* get_size(ddsd.ddpfPixelFormat.dwGBitMask) + get_size(ddsd.ddpfPixelFormat.dwBBitMask)) + ')');		
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_FOURCC)
 				{					
 					Cvirtual_image image = f.vimage();
@@ -514,14 +556,14 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					{
 						image.remove_alpha();
 						m_y += m_y_inc;
-						draw_image24(image.image(), f.cx(), f.cy(), pDC, 0, m_y);
+						draw_image24(image.image(), f.cx(), f.cy(), pDC);
 						m_y += f.cy() + m_y_inc;
 					}
 				}
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_RGB && ddsd.ddpfPixelFormat.dwRGBBitCount == 24)
 				{
 					m_y += m_y_inc;
-					draw_image24(f.image(), f.cx(), f.cy(), pDC, 0, m_y);
+					draw_image24(f.image(), f.cx(), f.cy(), pDC);
 					m_y += f.cy() + m_y_inc;
 				}
 				break;
@@ -531,12 +573,13 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cfnt_file f;
 				f.load(m_data);
 				const int c_chars = f.get_c_chars();
+				const int cy_test = f.get_cy();
 				const t_fnt_header& header = f.header();
-				draw_info("Count chars:", n(c_chars));
-				draw_info("Size:", n(f.get_cmax_x()) + " x " + n(f.get_cy()));
+				draw_info("Characters:", n(c_chars));
+				draw_info("Size:", n(f.get_cmax_x()) + " x " + n(cy_test));
 				m_y += m_y_inc;
 				byte* d = new byte[f.get_cmax_x() * f.get_cy()];
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				for (int i = 0; i < c_chars; i++)
 				{
 					const int cx = f.get_cx(i);
@@ -545,8 +588,9 @@ void CXCCFileView::OnDraw(CDC* pDC)
 						continue;
 					fnt_decode(f.get_image(i), d, cx, cy);
 					fnt_adjust(d, cx * cy);
-					draw_image8(d, cx, cy, pDC, 400, m_y);
-					draw_info(nwzl(3, i), n(cx) + " x " + n(cy) + " at " + n(f.get_image(i) - f.get_data()));
+					draw_image8(d, cx, cy, pDC, offset);
+					draw_info("", nwzl(3, i) + " - " + n(cx) + " x " + n(cy) + " at " + n(f.get_image(i) - f.get_data()));
+					m_y += cy;	//add y height to make any character always be visible no matter text height
 				}
 				delete[] d;
 				break;
@@ -555,8 +599,8 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Chva_file f;
 				f.load(m_data, m_size);
-				draw_info("Count frames:", n(f.get_c_frames()));
-				draw_info("Count sections:", n(f.get_c_sections()));
+				draw_info("Frames:", n(f.get_c_frames()));
+				draw_info("Sections:", n(f.get_c_sections()));
 				break;
 			}
 		case ft_jpeg:
@@ -567,26 +611,26 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				{
 					const int cx = image.cx();
 					const int cy = image.cy();
-					draw_info("Bits/pixel:", n(8 * image.cb_pixel()));
+					draw_info("Bits/Pixel:", n(8 * image.cb_pixel()));
 					draw_info("Size:", n(cx) + " x " + n(cy));
 					m_y += m_y_inc;
 					switch (image.cb_pixel())
 					{
 					case 1:
-						load_color_table(image.palet(), false);
-						draw_image8(image.image(), cx, cy, pDC, 0, m_y);
+						load_color_table(image.palette(), false);
+						draw_image8(image.image(), cx, cy, pDC, offset);
 						break;
 					case 3:
-						draw_image24(image.image(), cx, cy, pDC, 0, m_y);
+						draw_image24(image.image(), cx, cy, pDC);
 						break;
 					case 4:
-						draw_image32(image.image(), cx, cy, pDC, 0, m_y);
+						draw_image32(image.image(), cx, cy, pDC);
 						break;
 					case 6:
-						draw_image48(image.image(), cx, cy, pDC, 0, m_y);
+						draw_image48(image.image(), cx, cy, pDC);
 						break;
 					case 8:
-						draw_image64(image.image(), cx, cy, pDC, 0, m_y);
+						draw_image64(image.image(), cx, cy, pDC);
 						break;
 					default:
 						break;
@@ -608,6 +652,10 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Name:", ir.get_basic_data().name);
 				draw_info("Size:", n(md.cx) + " x " + n(md.cy));
 				draw_info("Theater:", ir.get_map_data().theater);
+				m_y += m_y_inc;
+				tf.load_data(m_data);
+				while (!tf.eof())
+					draw_info(tf.read_line(), "");
 				break;
 			}
 		case ft_map_ra:
@@ -623,6 +671,10 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Name:", ir.get_basic_data().name);
 				draw_info("Size:", n(md.cx) + " x " + n(md.cy));
 				draw_info("Theater:", ir.get_map_data().theater);
+				m_y += m_y_inc;
+				tf.load_data(m_data);
+				while (!tf.eof())
+					draw_info(tf.read_line(), "");
 				break;
 			}
 		case ft_map_ts:
@@ -640,27 +692,52 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Name:", ir.get_basic_data().name);
 				draw_info("Size:", n(md.size_right) + " x " + n(md.size_bottom));
 				draw_info("Theater:", ir.get_map_data().theater);
-				draw_info("Max players:", n(ir.max_players()));
+				draw_info("Max Players:", n(ir.max_players()));
+
 				if (pd.cx && pd.cy && ppd != "BIACcgAEwBtAMnRABAAaQCSANMAVQASAAnIABMAbQDJ0QAQAGkAkgDTAFUAEgAJyAATAG0yAsAIAXQ5PDQ5PDQ6JQATAEE6PDQ4PDI4JgBTAFEAkgAJyAATAG0AydEAEABpAJIA0wBVA")
 				{
 					m_y += m_y_inc;
 					Cvirtual_binary s = decode64(ppd);
 					Cvirtual_binary image;
+
+					if ((pd.cx * pd.cy) / 33 > ppd.size())	//test to not try to render weirdly small (corrupted) preview images
+					{
+						m_y += m_y_inc;
+						tf.load_data(m_data);
+						while (!tf.eof())
+							draw_info(tf.read_line(), "");
+						break;
+					}
 					decode5(s.data(), image.write_start(pd.cx * pd.cy * 3), s.size(), 5);
-					draw_image24(image.data(), pd.cx, pd.cy, pDC, 0, m_y);
+					draw_image24(image.data(), pd.cx, pd.cy, pDC);
+					m_y += m_y_inc + pd.cy;
+					tf.load_data(m_data);
+					while (!tf.eof())
+						draw_info(tf.read_line(), "");
+				}
+				else
+				{
+					m_y += m_y_inc;
+					tf.load_data(m_data);
+					while (!tf.eof())
+						draw_info(tf.read_line(), "");
 				}
 				break;
 			}
 		case ft_mix:
 			{
-				Cmix_file_rd f;
+				Cmix_file f;
 				f.load(m_data, m_size);
 				const int c_files = f.get_c_files();
 				const t_game game = f.get_game();
-				draw_info("Count files:", n(c_files));
-				draw_info("Checksum:", n(f.has_checksum()));
-				draw_info("Encrypted:", n(f.is_encrypted()));
+				draw_info("Files:", n(c_files));
+				draw_info("Checksum:", f.has_checksum() ? "Yes" : "No");
+				draw_info("Encrypted:", f.is_encrypted() ? "Yes" : "No");
 				draw_info("Game:", game_name[game]);
+				if (game > game_td)
+				{
+					draw_info("Raw Flags:", nh(8, f.rawflags()));
+				}
 				m_y += m_y_inc;
 				for (int i = 0; i < c_files; i++)
 				{
@@ -674,7 +751,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cpak_file f;
 				f.load(m_data, m_size);
 				const int c_files = f.get_c_files();
-				draw_info("Count files:", n(c_files));
+				draw_info("Files:", n(c_files));
 				m_y += m_y_inc;
 				for (int i = 0; i < c_files; i++)
 				{
@@ -688,15 +765,15 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				f.load(m_data, m_size);
 				const Cmp3_frame_header& header = f.header();
 				draw_info("Bitrate:", n(header.bitrate()));
-				draw_info("Channel mode:", mpcm_name[header.channel_mode()]);
-				draw_info("Copyright:", header.copyright() ? "yes" : "no");
-				draw_info("CRC:", header.crc() ? "yes" : "no");
+				draw_info("Channel Mode:", mpcm_name[header.channel_mode()]);
+				draw_info("Copyright:", header.copyright() ? "Yes" : "No");
+				draw_info("CRC:", header.crc() ? "Yes" : "no");
 				draw_info("Emphasis:", n(header.emphasis()));
 				draw_info("Layer:", n(header.layer()));
-				draw_info("Mode extension:", n(header.mode_extension()));
-				draw_info("Original:", header.original() ? "yes" : "no");
-				draw_info("Padding:", header.padding() ? "yes" : "no");
-				draw_info("Samplerate:", n(header.samplerate()));
+				draw_info("Mode Extension:", n(header.mode_extension()));
+				draw_info("Original:", header.original() ? "Yes" : "No");
+				draw_info("Padding:", header.padding() ? "Yes" : "No");
+				draw_info("Sample Rate:", n(header.samplerate()));
 				draw_info("Version:", mpv_name[header.version()]);
 				break;
 			}
@@ -705,13 +782,16 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cpal_file f;
 				f.load(m_data);
 				int y = m_y;
-				const t_palet_entry* palet = f.get_palet();
+				const t_palette_entry* palette = f.get_palette();
 				for (int i = 0; i < 256; i++)
 				{
+					CBrush box;
 					CBrush brush;
-					brush.CreateSolidBrush(RGB(palet[i].r * 255 / 63, palet[i].g * 255 / 63, palet[i].b * 255 / 63));
+					box.CreateSolidBrush(RGB(0, 0, 0));
+					brush.CreateSolidBrush(RGB(palette[i].r * 255 / 63, palette[i].g * 255 / 63, palette[i].b * 255 / 63));
 					y += m_y_inc;
-					pDC->FillRect(CRect(CPoint(100, y), CSize(24, m_y_inc * 2 / 3)), &brush);
+					pDC->FillRect(CRect(CPoint(99, y + 4), CSize(26, m_y_inc * 2 / 3 + 2)), &box);
+					pDC->FillRect(CRect(CPoint(100, y + 5), CSize(24, m_y_inc * 2 / 3)), &brush);
 				}
 				break;
 			}
@@ -722,18 +802,18 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				const int c_planes = f.cb_pixel();
 				const int cx = f.cx();
 				const int cy = f.cy();
-				draw_info("Bits/pixel:", n(8 * c_planes));
+				draw_info("Bits/Pixel:", n(8 * c_planes));
 				draw_info("Size:", n(cx) + " x " + n(cy));
 				m_y += m_y_inc;
 				Cvirtual_binary image;
 				f.decode(image.write_start(c_planes * cx * cy));
 				if (c_planes == 1)
 				{
-					load_color_table(*f.get_palet(), false);
-					draw_image8(image.data(), cx, cy, pDC, 0, m_y);
+					load_color_table(*f.get_palette(), false);
+					draw_image8(image.data(), cx, cy, pDC, offset);
 				}
 				else
-					draw_image24(image.data(), cx, cy, pDC, 0, m_y);
+					draw_image24(image.data(), cx, cy, pDC);
 				m_y += cy + m_y_inc;
 				break;
 			}
@@ -742,10 +822,10 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cshp_dune2_file f;
 				f.load(m_data);
 				const int c_images = f.get_c_images();
-				draw_info("Count images:", n(c_images));
-				draw_info("Offset size:", n(f.get_cb_ofs()));
+				draw_info("Images:", n(c_images));
+				draw_info("Offset Size:", n(f.get_cb_ofs()));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				for (int i = 0; i < c_images; i++)
 				{
 					const int cx = f.get_cx(i);
@@ -754,12 +834,12 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					if (f.is_compressed(i))
 					{
 						byte* d = new byte[f.get_image_header(i)->size_out];
-						decode2(d, image, decode80(f.get_image(i), d), f.get_reference_palet(i));
+						decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
 						delete[] d;
 					}
 					else
-						decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palet(i));
-					draw_image8(image, cx, cy, pDC, 0, m_y);
+						decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
+					draw_image8(image, cx, cy, pDC, offset);
 					delete[] image;
 					m_y += cy + m_y_inc;
 				}
@@ -769,20 +849,19 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Cshp_file f;
 				f.load(m_data);
-				draw_info("Count images:", n(f.cf()));
+				draw_info("Frames:", n(f.cf()));
 				draw_info("Size:", n(f.cx()) + " x " + n(f.cy()));
-#ifndef NDEBUG
-				draw_info("Unknown1:", n(f.header().unknown1));
-				draw_info("Unknown2:", n(f.header().unknown2));
-				draw_info("Unknown3:", n(f.header().unknown3));
-#endif
+				draw_info("X:", n(f.header().xpos));
+				draw_info("Y:", n(f.header().ypos));
+				draw_info("Delta Size:", n(f.header().delta));
+				draw_info("Flags:", n(f.header().flags));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				Cvirtual_image image = f.vimage();
 				const byte* r = image.image();
 				for (int i = 0; i < f.cf(); i++)
 				{
-					draw_image8(r, f.cx(), f.cy(), pDC, 0, m_y);
+					draw_image8(r, f.cx(), f.cy(), pDC, offset);
 					r += f.cb_image();
 					m_y += f.cy() + m_y_inc;
 				}
@@ -795,14 +874,26 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				const int c_images = f.cf();
 				const int cx = m_cx = f.cx();
 				const int cy = m_cy = f.cy();
-				draw_info("Count images:", n(c_images));
+				const int zero = f.zero();
+				draw_info("Images:", n(c_images));
 				draw_info("Size:", n(cx) + " x " + n(cy));
+				draw_info("Unknown:", nh(8, zero));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				for (int i = 0; i < c_images; i++)
 				{
-#ifndef NDEBUG
-					draw_info("Unknown:", nh(8, f.get_image_header(i)->unknown));
+#ifndef NDEBUG	//this doesn't display right and i don't know if it's useful information at all
+					draw_info("Radar Color:", "R:" + nwzl(3, f.get_image_header(i)->red) + " G:" + nwzl(3, f.get_image_header(i)->green) + " B:" + nwzl(3, f.get_image_header(i)->blue) + " A:" + nwzl(3, f.get_image_header(i)->alpha));
+					CBrush box;
+					CBrush color;
+					box.CreateSolidBrush(RGB(0, 0, 0));
+					color.CreateSolidBrush(RGB(f.get_image_header(i)->red, f.get_image_header(i)->green, f.get_image_header(i)->blue));
+					//Draw box that will fill the background edges, needed for light colors
+					pDC->FillRect(CRect(CPoint(94, m_y - 12), CSize(26, m_y_inc * 2 / 3 + 2)), &box);
+					//Draw the actual color
+					pDC->FillRect(CRect(CPoint(95, m_y - 11), CSize(24, m_y_inc * 2 / 3)), &color);
+					draw_info("Frame Flags:", nh(8, f.get_image_header(i)->flags));
+					draw_info("Unknown:", nh(8, f.get_image_header(i)->zero));
 #endif
 					const int cx = f.get_cx(i);
 					const int cy = f.get_cy(i);
@@ -811,11 +902,11 @@ void CXCCFileView::OnDraw(CDC* pDC)
 						if (f.is_compressed(i))
 						{
 							Cvirtual_binary image;
-							decode3(f.get_image(i), image.write_start(cx * cy), cx, cy);
-							draw_image8(image.data(), cx, cy, pDC, 0, m_y);
+							RLEZeroTSDecompress(f.get_image(i), image.write_start(cx * cy), cx, cy);
+							draw_image8(image.data(), cx, cy, pDC, offset);
 						}
 						else
-							draw_image8(f.get_image(i), cx, cy, pDC, 0, m_y);
+							draw_image8(f.get_image(i), cx, cy, pDC, offset);
 						m_y += cy + m_y_inc;
 					}
 				}
@@ -830,51 +921,17 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				{
 					const int cx = image.cx();
 					const int cy = image.cy();
-					draw_info("Bits/pixel:", n(8 * image.cb_pixel()));
+					draw_info("Bits/Pixel:", n(8 * image.cb_pixel()));
 					draw_info("Size:", n(cx) + " x " + n(cy));
 					m_y += m_y_inc;
 					if (image.cb_pixel() == 1)
 					{
-						load_color_table(image.palet(), false);
-						draw_image8(image.image(), cx, cy, pDC, 0, m_y);
+						load_color_table(image.palette(), false);
+						draw_image8(image.image(), cx, cy, pDC, offset);
 					}
 					else if (image.cb_pixel() == 3)
-						draw_image24(image.image(), cx, cy, pDC, 0, m_y);
+						draw_image24(image.image(), cx, cy, pDC);
 					m_y += cy + m_y_inc;
-				}
-				break;
-			}
-		case ft_theme_ini_ts:
-			{
-				Cvirtual_tfile tf;
-				tf.load_data(m_data);
-				Ctheme_ts_ini_reader ir;
-				while (!tf.eof())
-				{
-					ir.process_line(tf.read_line());
-				}
-				const Ctheme_ts_ini_reader::t_theme_list& tl = ir.get_theme_list();
-				draw_info("Count themes:", n(tl.size()));
-				m_y += m_y_inc;
-				size_t column_size[] = {0, 6, 3, 0};
-				for (auto& i : tl)
-				{
-					const Ctheme_data& td = i.second;
-					column_size[0] = max(column_size[0], td.name().size());
-					column_size[3] = max(column_size[3], td.side().size());
-				}
-				for (auto& i : tl)
-				{
-					const Ctheme_data& td = i.second;
-					float length = td.length();
-					string line = swsr(column_size[0], td.name()) + nwsl(3, length) + ':' + nwzl(2, static_cast<int>(length * 60) % 60)
-						+ nwsl(3, td.scenario())
-						+ ' ' + swsr(column_size[3], td.side());
-					if (td.normal())
-						line += " normal";
-					if (td.repeat())
-						line += " repeat";
-					draw_info(line, "");
 				}
 				break;
 			}
@@ -883,14 +940,14 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Ctmp_file f;
 				f.load(m_data);
 				const int c_tiles = f.get_c_tiles();
-				draw_info("Count tiles:", n(c_tiles));
+				draw_info("Icons:", n(c_tiles));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				for (int i = 0; i < c_tiles; i++)
 				{
 					if (f.get_index1()[i] != 0xff)
 					{
-						draw_image8(f.get_image(i), 24, 24, pDC, 0, m_y);
+						draw_image8(f.get_image(i), 24, 24, pDC, offset);
 						m_y += 24 + m_y_inc;
 					}
 				}
@@ -901,20 +958,28 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Ctmp_ra_file f;
 				f.load(m_data);
 				const int c_tiles = f.get_c_tiles();
-				const int cx = f.get_cblocks_x();
-				const int cy = f.get_cblocks_y();
-				draw_info("Count tiles:", n(c_tiles));
+				static const int size = 24;
+				int sx = f.cx();
+				int sy = f.cy();
+				int cx = f.get_cblocks_x();
+				int cy = f.get_cblocks_y();
+				if (cx == -1 && cy == -1)
+				{
+					cx = 1;
+					cy = c_tiles;
+				}
+				draw_info("Icons:", n(c_tiles));
 				draw_info("Size:", n(cx) + " x " + n(cy));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				if (cx == 1 && cy == 1)
 				{
 					for (int i = 0; i < c_tiles; i++)
 					{
 						if (f.get_index1()[i] != 0xff)
 						{
-							draw_image8(f.get_image(i), 24, 24, pDC, 0, m_y);
-							m_y += 24 + m_y_inc;
+							draw_image8(f.get_image(i), size, size, pDC, offset);
+							m_y += size + m_y_inc;
 						}
 					}
 				}
@@ -927,11 +992,11 @@ void CXCCFileView::OnDraw(CDC* pDC)
 						{
 							if (f.get_index1()[i] != 0xff)
 							{
-								draw_image8(f.get_image(i), 24, 24, pDC, 24 * x, m_y);
+								draw_image8(f.get_image(i), size, size, pDC, (size * x) + offset);
 							}
 							i++;
 						}
-						m_y += 24;
+						m_y += size;
 					}
 					m_y += m_y_inc;
 				}
@@ -944,15 +1009,15 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				const int c_tiles = f.get_c_tiles();
 				m_cx = f.get_cx();
 				m_cy = f.get_cy();
-				draw_info("Count tiles:", n(c_tiles));
+				draw_info("Tiles:", n(c_tiles));
 				draw_info("Size:", n(f.get_cblocks_x()) + " x " + n(f.get_cblocks_y()));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				int x, y, cx, cy;
 				f.get_rect(x, y, cx, cy);
 				byte* d = new byte[cx * cy];
 				f.draw(d);
-				draw_image8(d, cx, cy, pDC, 0, m_y);
+				draw_image8(d, cx, cy, pDC, 4);
 				m_y += cy + m_y_inc;
 #ifndef NDEBUG
 				for (int i = 0; i < f.get_c_tiles(); i++)
@@ -996,8 +1061,8 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Cvoc_file f;
 				f.load(m_data);
-				draw_info("Audio:", n(f.get_samplerate()) + " hz, 8 bit, mono");
-				draw_info("Count samples:", n(f.get_c_samples()));
+				draw_info("Audio:", n(f.get_samplerate()) + " hz, 8 bit, Mono");
+				draw_info("Samples:", n(f.get_c_samples()));
 				break;
 			}
 		case ft_vqa:
@@ -1005,11 +1070,11 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cvqa_file f;
 				f.load(m_data);
 				draw_info("Version:", n(f.header().version));
-				draw_info("Video flags:", nh(4, f.header().video_flags));
-				draw_info("Count frames:", n(f.get_c_frames()));
+				draw_info("Video Flags:", nh(4, f.header().video_flags));
+				draw_info("Frames:", n(f.get_c_frames()));
 				draw_info("Size:", n(f.get_cx()) + " x " + n(f.get_cy()));
-				draw_info("Block size:", n(f.get_cx_block()) + " x " + n(f.get_cy_block()));
-				draw_info("Audio:", n(f.get_samplerate()) + " hz, " + n(f.get_cbits_sample()) + " bit, " + (f.get_c_channels() == 1 ? "mono" : "stereo"));
+				draw_info("Block Size:", n(f.get_cx_block()) + " x " + n(f.get_cy_block()));
+				draw_info("Audio:", n(f.get_samplerate()) + " hz, " + n(f.get_cbits_sample()) + " bit, " + (f.get_c_channels() == 1 ? "Mono" : "Stereo"));
 				break;
 			}
 		case ft_vxl:
@@ -1018,7 +1083,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				Cvxl_file f;
 				f.load(m_data);
 				int vxl_mode = GetMainFrame()->get_vxl_mode();
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				for (int i = 0; i < f.get_c_section_headers(); i++)
 				{
 					const t_vxl_section_tailer& section_tailer = *f.get_section_tailer(i);
@@ -1044,21 +1109,21 @@ void CXCCFileView::OnDraw(CDC* pDC)
 						draw_info(n(ty), s);
 					}
 					draw_info("Scale:", _gcvt(section_tailer.scale, 10, fb));
-					draw_info("Scale X min:", _gcvt(section_tailer.x_min_scale, 10, fb));
-					draw_info("Scale Y min:", _gcvt(section_tailer.y_min_scale, 10, fb));
-					draw_info("Scale Z min:", _gcvt(section_tailer.z_min_scale, 10, fb));
-					draw_info("Scale X max:", _gcvt(section_tailer.x_max_scale, 10, fb));
-					draw_info("Scale Y max:", _gcvt(section_tailer.y_max_scale, 10, fb));
-					draw_info("Scale Z max:", _gcvt(section_tailer.z_max_scale, 10, fb));
-					draw_info("Unknown:", n(section_tailer.unknown));
+					draw_info("X min:", _gcvt(section_tailer.x_min_scale, 10, fb));
+					draw_info("Y min:", _gcvt(section_tailer.y_min_scale, 10, fb));
+					draw_info("Z min:", _gcvt(section_tailer.z_min_scale, 10, fb));
+					draw_info("X max:", _gcvt(section_tailer.x_max_scale, 10, fb));
+					draw_info("Y max:", _gcvt(section_tailer.y_max_scale, 10, fb));
+					draw_info("Z max:", _gcvt(section_tailer.z_max_scale, 10, fb));
+					draw_info("Normal Type:", n(section_tailer.unknown));
 					byte* image = new byte[c_pixels];
 					byte* image_s = new byte[c_pixels];
 					char* image_z = new char[c_pixels];
+					m_y += m_y_inc;
 					for (int yr = 0; yr < 8; yr++)
 					{
 						for (int xr = 0; xr < 8; xr++)
 						{
-							if (CRect().IntersectRect(m_clip_rect, CRect(CPoint(xr * (cl + m_y_inc), m_y), CSize(cl, cl))))
 							{
 								memset(image, 0, c_pixels);
 								memset(image_s, 0, c_pixels);
@@ -1082,7 +1147,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 													s_pixel.x = x - center_x;
 													s_pixel.y = y - center_y;
 													s_pixel.z = z - center_z;
-													t_vector d_pixel = rotate_y(rotate_x(s_pixel, xr * pi / 4), yr * pi / 4);
+													t_vector d_pixel = rotate_y(rotate_x(s_pixel, xr * std::numbers::pi / 4), yr * std::numbers::pi / 4);
 													d_pixel.x += l;
 													d_pixel.y += l;
 													d_pixel.z += center_z;
@@ -1106,23 +1171,23 @@ void CXCCFileView::OnDraw(CDC* pDC)
 								switch (vxl_mode)
 								{
 								case 0:
-									draw_image8(image, cl, cl, pDC, xr * (cl + m_y_inc), m_y);
+									draw_image8(image, cl, cl, pDC, xr * (cl + m_y_inc) + offset);
 									break;
 								case 1:
 									{
-										t_palet gray_palet;
+										t_palette gray_palette;
 										if (section_tailer.unknown == 2)
 										{
 											for (int i = 0; i < 256; i++)
-												gray_palet[i].r = gray_palet[i].g = gray_palet[i].b = i * 255 / 35;
+												gray_palette[i].r = gray_palette[i].g = gray_palette[i].b = i * 255 / 35;
 										}
 										else
 										{
 											for (int i = 0; i < 256; i++)
-												gray_palet[i].r = gray_palet[i].g = gray_palet[i].b = i;
+												gray_palette[i].r = gray_palette[i].g = gray_palette[i].b = i;
 										}
-										load_color_table(gray_palet, false);
-										draw_image8(image_s, cl, cl, pDC, xr * (cl + m_y_inc), m_y);
+										load_color_table(gray_palette, false);
+										draw_image8(image_s, cl, cl, pDC, xr * (cl + m_y_inc) + offset);
 									}
 									break;
 								case 2:
@@ -1148,14 +1213,14 @@ void CXCCFileView::OnDraw(CDC* pDC)
 												image_z[o] -= min_z;
 										}
 										max_z -= min_z;
-										t_palet gray_palet;
+										t_palette gray_palette;
 										for (int p = 0; p < max_z; p++)
-											gray_palet[p].r = gray_palet[p].g = gray_palet[p].b = p * 255 / max_z;
-										gray_palet[0xff].r = 0;
-										gray_palet[0xff].g = 0;
-										gray_palet[0xff].b = 0xff;
-										load_color_table(gray_palet, false);
-										draw_image8(reinterpret_cast<const byte*>(image_z), cl, cl, pDC, xr * (cl + m_y_inc), m_y);
+											gray_palette[p].r = gray_palette[p].g = gray_palette[p].b = p * 255 / max_z;
+										gray_palette[0xff].r = 0;
+										gray_palette[0xff].g = 0;
+										gray_palette[0xff].b = 0xff;
+										load_color_table(gray_palette, false);
+										draw_image8(reinterpret_cast<const byte*>(image_z), cl, cl, pDC, xr * (cl + m_y_inc) + offset);
 										break;
 									}
 								}
@@ -1176,8 +1241,8 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				if (!f.process())
 				{
 					const t_riff_wave_format_chunk& format_chunk = f.get_format_chunk();
-					// draw_info("Audio:", n(format_chunk.samplerate) + " hz, " + n(format_chunk.cbits_sample) + " bit, " + (format_chunk.c_channels == 1 ? "mono" : "stereo"));
-					// draw_info("Count samples:", n(format_chunk.tag == 1 ? f.get_data_header().size * 8 / (format_chunk.cbits_sample * format_chunk.c_channels) : f.get_fact_chunk().c_samples));
+					draw_info("Audio:", n(format_chunk.samplerate) + " hz, " + n(format_chunk.cbits_sample) + " bit, " + (format_chunk.c_channels == 1 ? "mono" : "stereo"));
+					draw_info("Samples:", n(format_chunk.tag == 1 ? f.get_data_header().size * 8 / (format_chunk.cbits_sample * format_chunk.c_channels) : f.get_fact_chunk().c_samples));
 					draw_info("Format:", nh(4, format_chunk.tag));
 				}
 				break;
@@ -1186,15 +1251,15 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Cwsa_dune2_file f;
 				f.load(m_data);
-				draw_info("Count frames:", n(f.cf()));
+				draw_info("Frames:", n(f.cf()));
 				draw_info("Size:", n(f.cx()) + " x " + n(f.cy()));
 				m_y += m_y_inc;
-				load_color_table(get_default_palet(), true);
+				load_color_table(get_default_palette(), true);
 				Cvirtual_image image = f.vimage();
 				const byte* r = image.image();
 				for (int i = 0; i < f.cf(); i++)
 				{
-					draw_image8(r, f.cx(), f.cy(), pDC, 0, m_y);
+					draw_image8(r, f.cx(), f.cy(), pDC, offset);
 					r += f.cb_image();
 					m_y += f.cy() + m_y_inc;
 				}
@@ -1204,34 +1269,19 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Cwsa_file f;
 				f.load(m_data);
-				draw_info("Count frames:", n(f.cf()));
-				draw_info("Palet:", f.palet() ? "yes" : "no");
+				draw_info("Frames:", n(f.cf()));
+				draw_info("Paletted:", f.palette() ? "Yes" : "No");
 				draw_info("Position:", n(f.get_x()) + "," + n(f.get_y()));
 				draw_info("Size:", n(f.cx()) + " x " + n(f.cy()));
 				m_y += m_y_inc;
-				load_color_table(f.palet(), true);
+				load_color_table(f.palette(), true);
 				Cvirtual_image image = f.vimage();
 				const byte* r = image.image();
 				for (int i = 0; i < f.cf(); i++)
 				{
-					draw_image8(r, f.cx(), f.cy(), pDC, 0, m_y);
+					draw_image8(r, f.cx(), f.cy(), pDC, offset);
 					r += f.cb_image();
 					m_y += f.cy() + m_y_inc;
-				}
-				break;
-			}
-		case ft_csf:
-			{
-				Ccsf_file_rd f;
-				f.load(m_data, m_size);
-				const int c_strs = f.header().count1;
-				auto& c_strmaps = f.get_map();
-				draw_info("Count strings:", n(c_strs));
-				m_y += m_y_inc;
-				draw_info("Name", "Value\t\tExtra Value");
-				for (auto i : c_strmaps)
-				{
-					draw_info(i.first, Ccsf_file::convert2string(i.second.value) + "\t\t" + i.second.extra_value);
 				}
 				break;
 			}
@@ -1247,9 +1297,9 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					Cpal_file f;
 					f.load(m_data);
 					m_y += m_y_inc;
-					const t_palet_entry* palet = f.get_palet();
+					const t_palette_entry* palette = f.get_palette();
 					for (int i = 0; i < 256; i++)
-						draw_info((nh(2, i) + " - " + nwzl(2, palet[i].r) + ' '+ nwzl(2, palet[i].g) + ' ' + nwzl(2, palet[i].b)), "");
+						draw_info((nh(2, i) + " - " + nwzl(2, palette[i].r) + ' '+ nwzl(2, palette[i].g) + ' ' + nwzl(2, palette[i].b)), "");
 					break;
 				}
 			case ft_pkt_ts:
@@ -1257,32 +1307,10 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					Cpkt_ts_ini_reader ir;
 					ir.process(m_data);
 					const Cpkt_ts_ini_reader::t_map_list& ml = ir.get_map_list();
-					draw_info("Count maps:", n(ml.size()));
+					draw_info("Maps:", n(ml.size()));
 					m_y += m_y_inc;
 					for (auto& i : ml)
 						draw_info(i.first, i.second.m_description + ", " + i.second.m_gamemode);
-					break;
-				}
-			case ft_sound_ini_ts:
-				{
-					Csound_ts_ini_reader ir;
-					ir.process(m_data);
-					const Csound_ts_ini_reader::t_sound_list& sl = ir.get_sound_list();
-					draw_info("Count sounds:", n(sl.size()));
-					m_y += m_y_inc;
-					/*
-					int column_size[] = {0, 6, 3, 0};
-					for (Csound_ts_ini_reader::t_sound_list::const_iterator i = sl.begin(); i != sl.end(); i++)
-					{
-					const Csound_data& td = i->second;
-					column_size[0] = max(column_size[0], td.name().length());
-					column_size[3] = max(column_size[3], td.side().length());
-					}
-					*/
-					for (auto& i : sl)
-					{
-						draw_info(i.first, "");
-					}
 					break;
 				}
 			case ft_st:
@@ -1290,12 +1318,14 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					Cst_file f;
 					f.load(m_data);
 					const int c_strings = f.get_c_strings();
-					draw_info("Count strings", n(c_strings));
+					draw_info("Strings", n(c_strings));
 					m_y += m_y_inc;
 					for (int i = 0; i < c_strings; i++)
 						draw_info(nwzl(5, i) + ' ' + f.get_string(i), "");
 					break;
 				}
+			case ft_theme_ini_ts:
+			case ft_sound_ini_ts:
 			case ft_ini:
 			case ft_rules_ini_ts:
 			case ft_text:
@@ -1324,6 +1354,30 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					break;
 				}
 			default:
+				Cfname fname = to_lower(m_fname);
+				if (fname.get_fext() == ".mix" && m_ft != ft_mix && m_ft != ft_mix_rg)
+				{
+					m_ft = ft_mix;
+					Cmix_file_rd f;
+					f.load(m_data, m_size);
+					const int c_files = f.get_c_files();
+					const t_game game = f.get_game();
+					draw_info("Files:", n(c_files));
+					draw_info("Checksum:", f.has_checksum() ? "Yes" : "No");
+					draw_info("Encrypted:", f.is_encrypted() ? "Yes" : "No");
+					draw_info("Game:", game_name[game]);
+					if (game > game_td)
+					{
+						draw_info("Raw Flags:", nh(8, f.rawflags()));
+					}
+					for (int i = 0; i < c_files; i++)
+					{
+						int id = f.get_id(i);
+						draw_info(nwzl(4, i) + " - " + nh(8, id) + nwsl(11, f.get_size(id)) + ' ' + mix_database::get_name(game, id), "");
+					}
+					m_y += m_y_inc;
+					break;
+					}
 				if (!show_binary)
 					break;
 				m_y += m_y_inc;
@@ -1350,18 +1404,17 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					draw_info(line, "");
 				}
 			}
-			SetScrollSizes(MM_TEXT, CSize(m_x, m_y));
+			SetScrollSizes(MM_TEXT, CSize(m_x, m_y + 4));
 			m_text_cache_valid = true;
 		}
 		for (auto& i : m_text_cache)
 		{
-			if (CRect().IntersectRect(m_clip_rect, i.text_extent))
 				pDC->TextOut(i.text_extent.TopLeft().x, i.text_extent.TopLeft().y, i.t.c_str());
 		}
 	}
 }
 
-void CXCCFileView::open_f(int id, Cmix_file& mix_f, t_game game, t_palet palet)
+void CXCCFileView::open_f(int id, Cmix_file& mix_f, t_game game, t_palette palette)
 {
 	close_f();
 	Ccc_file f(false);
@@ -1370,7 +1423,7 @@ void CXCCFileView::open_f(int id, Cmix_file& mix_f, t_game game, t_palet palet)
 		m_fname = mix_f.get_name(id);
 		m_game = game;
 		m_id = id;
-		m_palet = palet;
+		m_palette = palette;
 	}
 	post_open(f);
 }
@@ -1384,7 +1437,7 @@ void CXCCFileView::open_f(const string& name)
 		m_fname = Cfname(name).get_fname();
 		m_game = GetMainFrame()->get_game();
 		m_id = Cmix_file::get_id(m_game, Cfname(name).get_ftitle());
-		m_palet = NULL;
+		m_palette = NULL;
 	}
 	post_open(f);
 }
@@ -1398,7 +1451,6 @@ void CXCCFileView::post_open(Ccc_file& f)
 		m_cy = 0;
 		m_ft = f.get_file_type(false);
 		m_size = f.get_size();
-		
 		int cb_max_data = (m_ft == ft_dds || m_ft == ft_jpeg || m_ft == ft_map_td || m_ft == ft_map_ra
 			|| m_ft == ft_map_ts || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
 			|| m_ft == ft_shp_ts || m_ft == ft_tga || m_ft == ft_vxl || m_ft == ft_wsa_dune2
@@ -1424,15 +1476,15 @@ void CXCCFileView::auto_select()
 {
 	if (!m_can_pick)
 	{
-		m_palet_filter.select(m_ft, m_cx, m_cy, m_fname);
+		m_palette_filter.select(m_ft, m_cx, m_cy, m_fname);
 		m_can_pick = true;
 	}
 	t_game game;
 	int i = 4;
 	while (i--)
 	{
-		string palet = m_palet_filter.pick(game);
-		if (!palet.empty() && GetMainFrame()->auto_select(game, palet))
+		string palette = m_palette_filter.pick(game);
+		if (!palette.empty() && GetMainFrame()->auto_select(game, palette))
 			break;
 	}
 }

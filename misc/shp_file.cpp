@@ -38,9 +38,9 @@ public:
 		return 0;
 	}
 
-	const t_palet_entry* palet() const
+	const t_palette_entry* palette() const
 	{
-		return m_palet;
+		return m_palette;
 	}
 
 	int seek(int f)
@@ -49,23 +49,23 @@ public:
 		return 0;
 	}
 
-	Cshp_decoder(const Cshp_file& f, const t_palet_entry* palet)
+	Cshp_decoder(const Cshp_file& f, const t_palette_entry* palette)
 	{
 		m_f.load(f);
 		m_f.decode(m_video.write_start(cb_video()));
 		m_frame_i = 0;
-		memcpy(m_palet, palet, sizeof(t_palet));
+		memcpy(m_palette, palette, sizeof(t_palette));
 	}
 private:
 	Cshp_file m_f;
 	int m_frame_i;
-	t_palet m_palet;
+	t_palette m_palette;
 	Cvirtual_binary m_video;
 };
 
-Cvideo_decoder* Cshp_file::decoder(const t_palet_entry* palet)
+Cvideo_decoder* Cshp_file::decoder(const t_palette_entry* palette)
 {
-	return new Cshp_decoder(*this, palet);
+	return new Cshp_decoder(*this, palette);
 }
 
 bool Cshp_file::is_valid() const
@@ -74,7 +74,7 @@ bool Cshp_file::is_valid() const
 	int size = get_size();
 	if (sizeof(t_shp_header) > size || h.c_images < 1 || h.c_images > 1000 || sizeof(t_shp_header) + 8 * (h.c_images + 2) > size)
 		return false;
-	return !(get_offset(cf()) != size || get_offset(cf() + 1));
+	return !(get_offset(cf()) != size || get_offset(cf() + 1)) || get_offset(cf() + 1) == size;
 }
 
 void Cshp_file::decode(void* d) const
@@ -105,21 +105,92 @@ Cvirtual_binary shp_file_write(const byte* s, int cx, int cy, int c_images)
 	byte* w = d.write_start(sizeof(t_shp_ts_header) + (sizeof(t_shp_ts_image_header) + cx * cy) * c_images);
 	t_shp_header& header = *reinterpret_cast<t_shp_header*>(w);
     header.c_images = c_images;
-    header.unknown1 = 0;
-    header.unknown2 = 0;
+    header.xpos = 0;
+    header.ypos = 0;
     header.cx = cx;
     header.cy = cy;
-    header.unknown3 = 0;
+		header.delta = 0;
+		header.flags = 0;
 	w += sizeof(t_shp_header);
 	int* index = reinterpret_cast<int*>(w);
 	w += 8 * (c_images + 2);
+
+	const byte* last = r;
+	const byte* last40 = nullptr;
+	const byte* last80 = r;
+	byte* last80w = w;
+	int count20 = 0;
+	int deltaframe = 0;
+	int largest = 0;
+
+	//first frame is always format80(LCW)
+	*index++ = 0x80000000 | w - d.data();
+	*index++ = 0;
+	w += LCWCompress(r, w, cx * cy);
+	r += cx * cy;
+	largest = w - last80w;
+
 	for (int i = 0; i < c_images; i++)
 	{
-		*index++ = 0x80000000 | w - d.data();
-		*index++ = 0;
-		w += encode80(r, w, cx * cy);
-		r += cx * cy;
+		int size80;
+		int size40;
+		int size20;
+
+		// do test encodes of the 3 possible frame formats to see which is
+		// smaller.
+		if (last40 != nullptr) {
+			size20 = GenerateXORDelta(last, r, w, cx * cy);
+		}
+		else {
+			size20 = 0x7FFFFFFF;
+		}
+
+		size40 = GenerateXORDelta(last80, r, w, cx * cy);
+		size80 = LCWCompress(r, w, cx * cy);
+
+		// if format80 is smallest or equal, do format80
+		if (size80 <= size40 && size80 <= size20) {
+			*index++ = 0x80000000 | w - d.data();
+			*index++ = 0;
+			last80 = r;
+			last40 = nullptr;
+			last = r;
+			last80w = w;
+			w += LCWCompress(r, w, cx * cy);
+			r += cx * cy;
+
+			if (size80 > largest) {
+				largest = size80;
+			}
+		}
+		else if (size40 <= size20) {
+			*index++ = 0x40000000 | w - d.data();
+			*index++ = 0x80000000 | last80w - d.data();
+			last = r;
+			last40 = r;
+			deltaframe = i;
+			w += GenerateXORDelta(last80, r, w, cx * cy);
+			r += cx * cy;
+
+			if (size40 > largest) {
+				largest = size40;
+			}
+		}
+		else {
+			*index++ = 0x20000000 | w - d.data();
+			*index++ = 0x48000000 | deltaframe;
+			w += GenerateXORDelta(last, r, w, cx * cy);
+			last = r;
+			r += cx * cy;
+
+			if (size20 > largest) {
+				largest = size20;
+			}
+		}
 	}
+
+	header.delta = largest + 37;
+
 	*index++ = w - d.data();
 	*index++ = 0;
 	*index++ = 0;

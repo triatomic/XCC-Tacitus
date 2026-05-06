@@ -13,7 +13,7 @@ bool Cshp_dune2_file::is_valid() const
 		return false;
 	for (int i = 0; i < get_c_images(); i++)
 	{
-		if (get_ofs(i) < 0 || get_ofs(i) + sizeof(t_shp_dune2_image_header) > min(size, 32 << 10))
+		if (get_ofs(i) < 0 || get_ofs(i) + sizeof(t_shp_dune2_image_header) > min(size, 0xFFFF))
 			return false;
 		const t_shp_dune2_image_header& image_header = *get_image_header(i);
 		if (image_header.compression & ~3 ||
@@ -26,10 +26,10 @@ bool Cshp_dune2_file::is_valid() const
 	return true;
 }
 
-int Cshp_dune2_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet _palet) const
+int Cshp_dune2_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette) const
 {
-	t_palet palet;
-	convert_palet_18_to_24(_palet, palet);
+	t_palette palette;
+	convert_palette_18_to_24(_palette, palette);
 	for (int i = 0; i < get_c_images(); i++)
 	{
 		const int cx = get_cx(i);
@@ -38,14 +38,14 @@ int Cshp_dune2_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_
 		if (is_compressed(i))
 		{
 			byte* d = new byte[get_image_header(i)->size_out];
-			decode2(d, image.write_start(cx * cy), decode80(get_image(i), d), get_reference_palet(i));
+			decode2(d, image.write_start(cx * cy), LCWDecompress(get_image(i), d), get_reference_palette(i));
 			delete[] d;
 		}
 		else
-			decode2(get_image(i), image.write_start(cx * cy), get_image_header(i)->size_out, get_reference_palet(i));
+			decode2(get_image(i), image.write_start(cx * cy), get_image_header(i)->size_out, get_reference_palette(i));
 		Cfname t = name;
 		t.set_title(name.get_ftitle() + " " + nwzl(4, i));
-		if (int error = image_file_write(t, ft, image.data(), palet, cx, cy))
+		if (int error = image_file_write(t, ft, image.data(), palette, cx, cy))
 			return error;
 	}
 	return 0;

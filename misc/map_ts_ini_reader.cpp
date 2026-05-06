@@ -4,6 +4,7 @@
 #include "multi_line.h"
 #include "string_conversion.h"
 #include "virtual_image.h"
+#include "xcc/string_view.h"
 
 static const char* section_code[] = {"basic", "map", "preview", "previewpack", "waypoints", "unknown"};
 static const char* basic_code[] = {"name", "player", "multiplayeronly", "unknown"};

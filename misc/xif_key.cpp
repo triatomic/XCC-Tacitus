@@ -4,6 +4,7 @@
 #include <bzlib.h>
 #include <string_conversion.h>
 #include <zlib.h>
+#include <fstream>
 
 template <class T>
 static T read(const byte*& r)
@@ -240,7 +241,6 @@ int Cxif_key::load_key(const byte* data, int size)
 				else
 					error = BZ_OK != BZ2_bzBuffToBuffDecompress(reinterpret_cast<char*>(d.write_start(cb_d)), reinterpret_cast<unsigned int*>(&cb_d), const_cast<char*>(reinterpret_cast<const char*>(data + sizeof(t_xif_header_fast))), header.size_compressed, 0, 0);
 			}
-			// d.export("c:/temp/xif data.bin");
 			if (!error)
 			{
 				read_p = d.data();

@@ -26,7 +26,6 @@ namespace shp_images
 	};
 
 	int load_shp(const Cshp_file& f, t_image_data*& p);
-	int load_shp(const string& name, t_image_data*& p);
 	void destroy_shp(t_image_data*& p);
 	void set_theater(t_theater_id);
 }

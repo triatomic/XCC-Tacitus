@@ -34,7 +34,7 @@ static HBITMAP create_bitmap(Cvirtual_image image)
 {
 	if (image.cx() & 3)
 	{
-		Cvirtual_image d(NULL, image.cx() + 3 & ~3, image.cy(), image.cb_pixel(), image.palet());
+		Cvirtual_image d(NULL, image.cx() + 3 & ~3, image.cy(), image.cb_pixel(), image.palette());
 		const byte* r = image.image();
 		byte* w = d.image_edit();
 		for (int y = 0; y < image.cy(); y++)
@@ -109,16 +109,16 @@ Cvirtual_image Cdlg_shp_viewer::decode_image(int i) const
 	d.load(NULL, m_decoder->cx(), m_decoder->cy(), m_decoder->cb_pixel(), NULL);
 	m_decoder->seek(i);
 	m_decoder->decode(d.image_edit());
-	if (m_decoder->palet())
+	if (m_decoder->palette())
 	{
-		const t_palet_entry* p = m_decoder->palet();
+		const t_palette_entry* p = m_decoder->palette();
 		int i = 0;
 		for (; i < 256; i++)
 		{
 			if ((p[i].r | p[i].g | p[i].b) & 0xc0)
 				break;
 		}
-		d.palet(p, i == 256);
+		d.palette(p, i == 256);
 	}
 	return d;
 }

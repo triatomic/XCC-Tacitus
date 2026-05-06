@@ -1,42 +1,42 @@
 #include "stdafx.h"
 #include "MainFrm.h"
-#include "SelectPaletDlg.h"
+#include "SelectPaletteDlg.h"
 
-CSelectPaletDlg::CSelectPaletDlg(CWnd* pParent /*=NULL*/)
-	: ETSLayoutDialog(CSelectPaletDlg::IDD, pParent, "select_palet_dlg")
+CSelectPaletteDlg::CSelectPaletteDlg(CWnd* pParent /*=NULL*/)
+	: ETSLayoutDialog(CSelectPaletteDlg::IDD, pParent, "select_palette_dlg")
 {
-	//{{AFX_DATA_INIT(CSelectPaletDlg)
+	//{{AFX_DATA_INIT(CSelectPaletteDlg)
 		// NOTE: the ClassWizard will add member initialization here
 	//}}AFX_DATA_INIT
-	m_current_palet = -1;
+	m_current_palette = -1;
 }
 
-void CSelectPaletDlg::DoDataExchange(CDataExchange* pDX)
+void CSelectPaletteDlg::DoDataExchange(CDataExchange* pDX)
 {
 	ETSLayoutDialog::DoDataExchange(pDX);
-	//{{AFX_DATA_MAP(CSelectPaletDlg)
+	//{{AFX_DATA_MAP(CSelectPaletteDlg)
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDC_TREE, m_tree);
 	DDX_Control(pDX, IDC_LIST, m_list);
 	//}}AFX_DATA_MAP
 }
 
-BEGIN_MESSAGE_MAP(CSelectPaletDlg, ETSLayoutDialog)
-	//{{AFX_MSG_MAP(CSelectPaletDlg)
+BEGIN_MESSAGE_MAP(CSelectPaletteDlg, ETSLayoutDialog)
+	//{{AFX_MSG_MAP(CSelectPaletteDlg)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_TREE, OnSelchangedTree)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST, OnItemchangedList)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
-void CSelectPaletDlg::set(CMainFrame* main_frame, t_pal_map_list pal_map_list, t_pal_list pal_list)
+void CSelectPaletteDlg::set(CMainFrame* main_frame, t_pal_map_list pal_map_list, t_pal_list pal_list)
 {
 	m_main_frame = main_frame; 
 	m_pal_map_list  = pal_map_list;
 	m_pal_list = pal_list;
 }
 
-BOOL CSelectPaletDlg::OnInitDialog() 
+BOOL CSelectPaletteDlg::OnInitDialog() 
 {
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, GREEDY)
@@ -55,7 +55,7 @@ BOOL CSelectPaletDlg::OnInitDialog()
 	return true;
 }
 
-void CSelectPaletDlg::insert_tree_entry(int parent_id, HTREEITEM parent_item)
+void CSelectPaletteDlg::insert_tree_entry(int parent_id, HTREEITEM parent_item)
 {
 	CTreeCtrl& tc = m_tree;
 	using t_sort_map = multimap<string, int>;
@@ -71,12 +71,12 @@ void CSelectPaletDlg::insert_tree_entry(int parent_id, HTREEITEM parent_item)
 		HTREEITEM h = tc.InsertItem(i.second.name.c_str(), parent_item);
 		tc.SetItemData(h, i.first);
 		insert_tree_entry(i.first, h);
-		if (m_current_palet != -1 && m_pal_list[m_current_palet].parent == i.first)
+		if (m_current_palette != -1 && m_pal_list[m_current_palette].parent == i.first)
 			tc.SelectItem(h);
 	}
 }
 
-void CSelectPaletDlg::update_list(int parent_id, int current_palet)
+void CSelectPaletteDlg::update_list(int parent_id, int current_palette)
 {
 	CListCtrl& lc = m_list;
 	lc.DeleteAllItems();
@@ -92,39 +92,39 @@ void CSelectPaletDlg::update_list(int parent_id, int current_palet)
 		}
 		int index = lc.InsertItem(lc.GetItemCount(), name.c_str());
 		lc.SetItemData(index, &i - m_pal_list.data());
-		if (current_palet == &i - m_pal_list.data())
+		if (current_palette == &i - m_pal_list.data())
 			lc.SetItemState(index, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
 	}
 	check_selection();
 }
 
-void CSelectPaletDlg::OnSelchangedTree(NMHDR* pNMHDR, LRESULT* pResult) 
+void CSelectPaletteDlg::OnSelchangedTree(NMHDR* pNMHDR, LRESULT* pResult) 
 {
 	NM_TREEVIEW* pNMTreeView = (NM_TREEVIEW*)pNMHDR;
 	if (~pNMTreeView->itemOld.state & TVIS_SELECTED && pNMTreeView->itemNew.state & TVIS_SELECTED)
-		update_list(pNMTreeView->itemNew.lParam, m_current_palet);
+		update_list(pNMTreeView->itemNew.lParam, m_current_palette);
 	*pResult = 0;
 }
 
-void CSelectPaletDlg::OnItemchangedList(NMHDR* pNMHDR, LRESULT* pResult) 
+void CSelectPaletteDlg::OnItemchangedList(NMHDR* pNMHDR, LRESULT* pResult) 
 {
 	CListCtrl& lc = m_list;
 	NM_LISTVIEW* pNMListView = (NM_LISTVIEW*)pNMHDR;
-	m_current_palet = pNMListView->uNewState & LVIS_FOCUSED ? lc.GetItemData(pNMListView->iItem) : -1;
-	if (m_current_palet != -1)
-		m_main_frame->set_palet(m_current_palet);
+	m_current_palette = pNMListView->uNewState & LVIS_FOCUSED ? lc.GetItemData(pNMListView->iItem) : -1;
+	if (m_current_palette != -1)
+		m_main_frame->set_palette(m_current_palette);
 	check_selection();
 	*pResult = 0;
 }
 
-void CSelectPaletDlg::check_selection()
+void CSelectPaletteDlg::check_selection()
 {
-	m_ok.EnableWindow(m_current_palet != -1);
+	m_ok.EnableWindow(m_current_palette != -1);
 }
 
-void CSelectPaletDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult) 
+void CSelectPaletteDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult) 
 {
-	if (m_current_palet != -1)
+	if (m_current_palette != -1)
 		EndDialog(IDOK);	
 	*pResult = 0;
 }

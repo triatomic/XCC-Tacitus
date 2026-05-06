@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "vxl_file.h"
-
+#include <iostream>
 #include "file32.h"
 #include "image_file.h"
 #include "multi_line.h"
@@ -33,11 +33,11 @@ bool Cvxl_file::is_valid() const
 	return true;
 }
 
-int Cvxl_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet _palet) const
+int Cvxl_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette) const
 {
-	t_palet palet;
-	memcpy(palet, _palet, sizeof(t_palet));
-	convert_palet_18_to_24(palet);
+	t_palette palette;
+	memcpy(palette, _palette, sizeof(t_palette));
+	convert_palette_18_to_24(palette);
 	const t_vxl_section_tailer& section_tailer = *get_section_tailer(0);
 	const int cx = section_tailer.cx;
 	const int cy = section_tailer.cy;
@@ -74,7 +74,7 @@ int Cvxl_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet 
 		}
 		Cfname t = name;
 		t.set_title(name.get_ftitle() + " " + nwzl(4, i));
-		int error = image_file_write(t, ft, s.data(), palet, cx, cy);
+		int error = image_file_write(t, ft, s.data(), palette, cx, cy);
 		if (error)
 			return error;
 	}
@@ -122,7 +122,7 @@ enum
 	vi_header,
 	vi_body,
 	vi_tailer,
-	vi_palet,
+	vi_palette,
 	vi_color,
 	vi_surface_normal,
 
@@ -148,14 +148,14 @@ int Cvxl_file::extract_as_xif(const string& name) const
 {
 	Cxif_key k;
 	Cxif_key& header = k.open_key_write(vi_header);
-	Cxif_key& palet = header.open_key_write(vi_palet);
+	Cxif_key& palette = header.open_key_write(vi_palette);
 	int i;
 	for (i = 0; i < 256; i++)
 	{
-		Cxif_key& palet_entry = palet.open_key_write(i);
-		palet_entry.set_value_int(vi_red, get_palet()[i].r);
-		palet_entry.set_value_int(vi_green, get_palet()[i].g);
-		palet_entry.set_value_int(vi_blue, get_palet()[i].b);
+		Cxif_key& palette_entry = palette.open_key_write(i);
+		palette_entry.set_value_int(vi_red, get_palette()[i].r);
+		palette_entry.set_value_int(vi_green, get_palette()[i].g);
+		palette_entry.set_value_int(vi_blue, get_palette()[i].b);
 	}
 	Cxif_key& body = k.open_key_write(vi_body);
 	for (i = 0; i < get_c_section_headers(); i++)
@@ -227,14 +227,14 @@ Cvirtual_binary vxl_file_write(const Cxif_key& s)
 	header.c_section_headers = c_sections;
 	header.c_section_tailers = c_sections;
 	header.unknown = 0x1f10;
-	const Cxif_key& palet_key = header_key.open_key_read(vi_palet);
+	const Cxif_key& palette_key = header_key.open_key_read(vi_palette);
 	int i;
 	for (i = 0; i < 256; i++)
 	{
-		const Cxif_key& palet_entry_key = palet_key.open_key_read(i);
-		header.palet[i].r = palet_entry_key.get_value_int(vi_red);
-		header.palet[i].g = palet_entry_key.get_value_int(vi_green);
-		header.palet[i].b = palet_entry_key.get_value_int(vi_blue);
+		const Cxif_key& palette_entry_key = palette_key.open_key_read(i);
+		header.palette[i].r = palette_entry_key.get_value_int(vi_red);
+		header.palette[i].g = palette_entry_key.get_value_int(vi_green);
+		header.palette[i].b = palette_entry_key.get_value_int(vi_blue);
 	}
 	w += sizeof(t_vxl_header);
 	for (i = 0; i < c_sections; i++)
@@ -343,13 +343,13 @@ Cvirtual_binary vxl_file_write(const byte* s, const byte* s_normals, int cx, int
 {
 	Cxif_key k;
 	Cxif_key& header = k.open_key_write(vi_header);
-	Cxif_key& palet = header.open_key_write(vi_palet);
+	Cxif_key& palette = header.open_key_write(vi_palette);
 	for (int i = 0; i < 256; i++)
 	{
-		Cxif_key& palet_entry = palet.open_key_write(i);
-		palet_entry.set_value_int(vi_red, i);
-		palet_entry.set_value_int(vi_green, i);
-		palet_entry.set_value_int(vi_blue, i);
+		Cxif_key& palette_entry = palette.open_key_write(i);
+		palette_entry.set_value_int(vi_red, i);
+		palette_entry.set_value_int(vi_green, i);
+		palette_entry.set_value_int(vi_blue, i);
 	}
 	Cxif_key& body = k.open_key_write(vi_body);
 	{

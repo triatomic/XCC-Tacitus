@@ -76,6 +76,7 @@ enum t_file_type
 	ft_xcc_unknown,
 	ft_xif,
 	ft_zip,
+	ft_lnkdir,
 	ft_unknown,
 	ft_count
 };

@@ -28,7 +28,8 @@ bool Cmix_file_rd::is_valid()
 	int size = get_size();
 	if (sizeof(t_mix_header) > size)
 		return false;
-	if (header.c_files && sizeof(t_mix_header) + header.c_files * sizeof(t_mix_index_entry) + header.size == size)
+	//even if you don't get the proper header, you can read it anyways
+	if (header.c_files /*&& sizeof(t_mix_header) + header.c_files * sizeof(t_mix_index_entry) + header.size == size*/)
 		return true;
 	m_has_checksum = header.flags & mix_checksum;
 	m_is_encrypted = header.flags & mix_encrypted;
@@ -37,9 +38,9 @@ bool Cmix_file_rd::is_valid()
 		Cblowfish bf;
 		std::array<byte, cb_mix_key> key;
 		get_blowfish_key(data + 4, key);
-		bf.set_key(key);
+		bf.Submit_Key(key);
 		byte e[8];
-		bf.decipher(data + 84, e, 8);
+		bf.Decrypt(data + 84, e, 8);
 		t_mix_header* header = reinterpret_cast<t_mix_header*>(e);
 		if (!header->c_files)// || 84 + (sizeof(t_mix_header) + header->c_files * sizeof(t_mix_index_entry) + 7 & ~7) + header->size + (m_has_checksum ? 20 : 0) != size)
 			return false;
@@ -77,10 +78,10 @@ int Cmix_file_rd::post_open()
 			read(key_source, cb_mix_key_source);
 			std::array<byte, cb_mix_key> key;
 			get_blowfish_key(key_source, key);
-			bf.set_key(key);
+			bf.Submit_Key(key);
 			byte e[8];
 			read(e, 8);
-			bf.decipher(e, e, 8);
+			bf.Decrypt(e, e, 8);
 			memcpy(&header, e, sizeof(t_mix_header));
 			int c_files = header.c_files;
 			const int cb_index = c_files * sizeof(t_mix_index_entry);
@@ -91,7 +92,7 @@ int Cmix_file_rd::post_open()
 			{
 				Cvirtual_binary f;
 				read(f.write_start(cb_f), cb_f);
-				bf.decipher(f.data_edit(), f.data_edit(), cb_f);
+				bf.Decrypt(f.data_edit(), f.data_edit(), cb_f);
 				m_index.resize(c_files);
 				memcpy(&m_index[0], e + 6, 2);
 				memcpy(reinterpret_cast<byte*>(&m_index[0]) + 2, f.data(), cb_index - 2);
@@ -99,7 +100,7 @@ int Cmix_file_rd::post_open()
 				for (int i = 0; i < c_files; i++)
 				{
 					if (m_index[i].offset < 0 || m_index[i].offset > body_size || m_index[i].size < 0 || m_index[i].size > body_size ||
-						 (m_index[i].offset + m_index[i].size) > body_size)
+						(m_index[i].offset + m_index[i].size) > body_size)
 					{
 						entry_discards.push_back(i);
 					}
@@ -132,7 +133,7 @@ int Cmix_file_rd::post_open()
 			for (int i = 0; i < c_files; i++)
 			{
 				if (m_index[i].offset < 0 || m_index[i].offset > body_size || m_index[i].size < 0 || m_index[i].size > body_size ||
-					 (m_index[i].offset + m_index[i].size) > body_size)
+					(m_index[i].offset + m_index[i].size) > body_size)
 				{
 					entry_discards.push_back(i);
 				}
@@ -173,7 +174,7 @@ int Cmix_file_rd::post_open()
 		case game_rg:
 			break;
 		default:
-			int count[game_unknown] = {0};
+			int count[game_unknown] = { 0 };
 			for (int i = 0; i < get_c_files(); i++)
 			{
 				int id = get_id(i);
@@ -225,7 +226,7 @@ int Cmix_file_rd::post_open()
 				{
 					string name = r;
 					r += name.length() + 1;
-					mix_database::add_name(m_game, name, "-");
+					mix_database::add_name(m_game, name, "");
 				}
 			}
 		}
@@ -239,7 +240,7 @@ int Cmix_file_rd::post_open()
 			if (get_type(m_index[i].id) != ft_mix)
 				continue;
 			Cmix_file_rd f;
-			f.open(m_index[i].id, *this);				
+			f.open(m_index[i].id, *this);
 			int c_files = get_c_files();
 			int new_c_files = f.get_c_files();
 			m_index.resize(c_files + new_c_files);
@@ -253,5 +254,5 @@ int Cmix_file_rd::post_open()
 			memcpy(&m_index_ft[c_files], &f.m_index_ft[0], new_c_files * sizeof(t_file_type));
 		}
 	}
-    return 0;
+	return 0;
 }

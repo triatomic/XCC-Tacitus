@@ -4,4 +4,6 @@
 #include <dsound.h>
 #include <virtual_binary.h>
 
-void xap_play(LPDIRECTSOUND, Cvirtual_binary);
+void xap_play(LPDIRECTSOUND, Cvirtual_binary, string);
+
+inline string xapFilePlaying;

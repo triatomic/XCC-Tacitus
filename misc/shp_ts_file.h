@@ -2,16 +2,16 @@
 
 #include "cc_structures.h"
 #include "fname.h"
-#include "palet.h"
+#include "palette.h"
 #include "video_file.h"
 #include "virtual_image.h"
 
 class Cshp_ts_file : public Cvideo_file<t_shp_ts_header>  
 {
 public:
-	Cvideo_decoder* decoder(const t_palet_entry*);
-	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet palet, bool combine_shadows = false) const;
-	Cvirtual_image extract_as_pcx_single(const t_palet _palet, bool combine_shadows = false) const;
+	Cvideo_decoder* decoder(const t_palette_entry*);
+	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette palette, bool combine_shadows = false) const;
+	Cvirtual_image extract_as_pcx_single(const t_palette _palette, bool combine_shadows = false) const;
 	bool is_valid() const;
 
 	int cb_pixel() const
@@ -32,6 +32,11 @@ public:
 	int cy() const
 	{
 		return header().cy;
+	}
+
+	int zero() const
+	{
+		return header().zero;
 	}
 
 	int get_x(int i) const
@@ -61,7 +66,12 @@ public:
 
 	bool is_compressed(int i) const
 	{
-		return get_image_header(i)->compression & 2;
+		return get_image_header(i)->flags & 2;
+	}
+
+	bool flags(int i) const
+	{
+		return get_image_header(i)->flags;
 	}
 
 	const t_shp_ts_image_header* get_image_header(int i) const
@@ -90,5 +100,3 @@ Cvirtual_binary shp_decode4(const byte* s, int cb_d);
 int shp_encode4(const Cshp_ts_file& f, byte* d);
 void shp_split_frames(Cvirtual_image& image, int cblocks_x, int cblocks_y);
 void shp_split_shadows(Cvirtual_image& image);
-void shp_xor_decode_frames(Cvirtual_image& image, int c_frames);
-void shp_xor_encode_frames(Cvirtual_image& image, int c_frames);

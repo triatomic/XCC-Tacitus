@@ -60,7 +60,7 @@ int Cmix_edit::id(const string& name) const
 
 int Cmix_edit::insert(const string& name, Cvirtual_binary d)
 {
-	mix_database::add_name(m_game, name, "-");
+	mix_database::add_name(m_game, name, "");
 	int offset = new_block(d.size());
 	m_f.seek(offset);
 	int error = m_f.write(d);

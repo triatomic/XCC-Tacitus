@@ -32,4 +32,4 @@ public:
 };
 
 Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel);
-Cvirtual_file tga_file_write(const byte* image, int cx, int cy, const t_palet_entry* palet);
+Cvirtual_file tga_file_write(const byte* image, int cx, int cy, const t_palette_entry* palette);

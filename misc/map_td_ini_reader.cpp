@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "map_td_ini_reader.h"
+#include "xcc/string_view.h"
 
 #include "multi_line.h"
 #include "string_conversion.h"

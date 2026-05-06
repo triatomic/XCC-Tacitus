@@ -2,7 +2,7 @@
 
 #include "cc_structures.h"
 #include "image_file.h"
-#include "palet.h"
+#include "palette.h"
 #include "pcx_decode.h"
 #include "virtual_image.h"
 
@@ -38,8 +38,8 @@ public:
 		return data() + sizeof(t_pcx_header);
 	}
 
-	const t_palet* get_palet() const
+	const t_palette* get_palette() const
 	{
-		return reinterpret_cast<const t_palet*>(data() + size() - sizeof(t_palet));
+		return reinterpret_cast<const t_palette*>(data() + size() - sizeof(t_palette));
 	}
 };

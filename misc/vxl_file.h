@@ -9,7 +9,7 @@
 class Cvxl_file : public Ccc_file_sh<t_vxl_header>
 {
 public:
-	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palet _palet) const;
+	int extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette) const;
 	ostream& extract_as_text(ostream& os) const;
 	int extract_as_xif(const string& name) const;
 	bool is_valid() const;
@@ -21,7 +21,7 @@ public:
 
 	int get_c_spans(int i) const
 	{
-		return get_section_tailer(i)->span_end_ofs - get_section_tailer(i)->span_start_ofs >> 2;
+		return (get_section_tailer(i)->span_end_ofs - get_section_tailer(i)->span_start_ofs) >> 2;
 	}
 
 	int get_c_section_tailers() const
@@ -29,9 +29,9 @@ public:
 		return header().c_section_tailers;
 	}
 
-	const t_palet_entry* get_palet() const
+	const t_palette_entry* get_palette() const
 	{
-		return header().palet;
+		return header().palette;
 	}
 
 	const byte* get_section_body() const

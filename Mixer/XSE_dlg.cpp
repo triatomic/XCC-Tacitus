@@ -237,7 +237,7 @@ void CXSE_dlg::OnPlay()
 		w += wav_file_write_header(w, c_samples, e.samplerate, 2, c_channels);
 		m_bag_f.seek(e.offset);
 		if (!m_bag_f.read(w, e.size))
-			xap_play(m_ds, d);
+			xap_play(m_ds, d, ip2a(e.offset));
 	}
 	else 
 	{
@@ -254,7 +254,7 @@ void CXSE_dlg::OnPlay()
 			byte* w = d.write_start(cb_d);
 			w += wav_file_write_header(w, c_samples, e.samplerate, 2, c_channels);
 			memcpy(w, decode.data(), c_channels * c_samples << 1);
-			xap_play(m_ds, d);
+			xap_play(m_ds, d, ip2a(e.offset));
 		}
 	}
 }

@@ -4,20 +4,20 @@
 #include "cc_structures.h"
 #include "xif_key.h"
 
-class Cpalet_filter  
+class Cpalette_filter  
 {
 public:
 	string pick(t_game& game);
 	void select(t_file_type ft, int cx, int cy, string fname);
-	Cpalet_filter();
+	Cpalette_filter();
 private:
 	class Clist_entry
 	{
 	public:
-		Clist_entry(t_game game, string palet, t_file_type ft, string fname = "", int cx = 0, int cy = 0)
+		Clist_entry(t_game game, string palette, t_file_type ft, string fname = "", int cx = 0, int cy = 0)
 		{
 			m_game = game;
-			m_palet = palet;
+			m_palette = palette;
 			m_ft = ft;
 			m_fname = fname;
 			m_cx = cx;
@@ -29,9 +29,9 @@ private:
 			return m_game;
 		}
 
-		string palet() const
+		string palette() const
 		{
-			return m_palet;
+			return m_palette;
 		}
 		
 		int q(t_file_type ft, int cx, int cy, string fname) const;
@@ -41,7 +41,7 @@ private:
 		string m_fname;
 		t_file_type m_ft;
 		t_game m_game;
-		string m_palet;
+		string m_palette;
 	};
 
 	using t_list = list<Clist_entry>;

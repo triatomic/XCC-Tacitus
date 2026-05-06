@@ -13,15 +13,14 @@ private:
 	string ext;
 public:
 	const Cfname& operator=(string_view);
-	const Cfname& operator=(const string&);
 	bool exists() const;
+	const Cfname& operator=(const string&);
 	void make_path();
 	void use_default_ext(string_view);
 	void use_default_path(string_view);
 	void set_ext(string_view);
 	void set_path(string_view);
 	void set_title(string_view);
-	void expand();
 	string get_all() const;
 	string get_path() const;
 	string get_fname() const;

@@ -1,19 +1,15 @@
 #include "stdafx.h"
 #include "XCC Mixer.h"
-
 #include "MainFrm.h"
-
 #include "XCCFileView.h"
 #include "XSE_dlg.h"
 #include "XSTE_dlg.h"
-
-#include <boost/algorithm/string.hpp>
 #include <fstream>
 #include "aud_file.h"
 #include "directoriesdlg.h"
 #include "fname.h"
 #include "searchfiledlg.h"
-#include "selectpaletdlg.h"
+#include "SelectPaletteDlg.h"
 #include "string_conversion.h"
 #include "theme.h"
 #include "theme_ts_ini_reader.h"
@@ -22,34 +18,34 @@
 #include "xcc_log.h"
 #include "xste.h"
 
-using namespace boost;
-
 IMPLEMENT_DYNCREATE(CMainFrame, CFrameWnd)
 
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
-	ON_COMMAND_RANGE(ID_VIEW_PALET_PAL000, ID_VIEW_PALET_PAL999, OnViewPalet)
-	ON_UPDATE_COMMAND_UI_RANGE(ID_VIEW_PALET_PAL000, ID_VIEW_PALET_PAL999, OnUpdateViewPalet)
+	ON_COMMAND_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnViewPalette)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnUpdateViewPalette)
 	ON_WM_CREATE()
 	ON_COMMAND(ID_VIEW_GAME_TD, OnViewGameTD)
 	ON_COMMAND(ID_VIEW_GAME_RA, OnViewGameRA)
 	ON_COMMAND(ID_VIEW_GAME_TS, OnViewGameTS)
+	ON_COMMAND(ID_VIEW_GAME_RA2, OnViewGameRA2)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GAME_TD, OnUpdateViewGameTD)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GAME_RA, OnUpdateViewGameRA)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GAME_TS, OnUpdateViewGameTS)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_GAME_RA2, OnUpdateViewGameRA2)
 	ON_UPDATE_COMMAND_UI(ID_FILE_FOUND_UPDATE, OnUpdateFileFoundUpdate)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_UPDATE, OnUpdateViewPaletUpdate)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_UPDATE, OnUpdateViewPaletteUpdate)
 	ON_COMMAND(ID_VIEW_GAME_AUTO, OnViewGameAuto)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GAME_AUTO, OnUpdateViewGameAuto)
-	ON_COMMAND(ID_VIEW_PALET_AUTO, OnViewPaletAuto)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_AUTO, OnUpdateViewPaletAuto)
-	ON_COMMAND(ID_VIEW_PALET_PREV, OnViewPaletPrev)
-	ON_COMMAND(ID_VIEW_PALET_NEXT, OnViewPaletNext)
-	ON_COMMAND(ID_VIEW_PALET_USE_FOR_CONVERSION, OnViewPaletUseForConversion)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_USE_FOR_CONVERSION, OnUpdateViewPaletUseForConversion)
-	ON_COMMAND(ID_VIEW_PALET_CONVERT_FROM_TD, OnViewPaletConvertFromTD)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_CONVERT_FROM_TD, OnUpdateViewPaletConvertFromTD)
-	ON_COMMAND(ID_VIEW_PALET_CONVERT_FROM_RA, OnViewPaletConvertFromRA)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_CONVERT_FROM_RA, OnUpdateViewPaletConvertFromRA)
+	ON_COMMAND(ID_VIEW_PALETTE_AUTO, OnViewPaletteAuto)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_AUTO, OnUpdateViewPaletteAuto)
+	ON_COMMAND(ID_VIEW_PALETTE_PREV, OnViewPalettePrev)
+	ON_COMMAND(ID_VIEW_PALETTE_NEXT, OnViewPaletteNext)
+	ON_COMMAND(ID_VIEW_PALETTE_USE_FOR_CONVERSION, OnViewPaletteUseForConversion)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_USE_FOR_CONVERSION, OnUpdateViewPaletteUseForConversion)
+	ON_COMMAND(ID_VIEW_PALETTE_CONVERT_FROM_TD, OnViewPaletteConvertFromTD)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_CONVERT_FROM_TD, OnUpdateViewPaletteConvertFromTD)
+	ON_COMMAND(ID_VIEW_PALETTE_CONVERT_FROM_RA, OnViewPaletteConvertFromRA)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_CONVERT_FROM_RA, OnUpdateViewPaletteConvertFromRA)
 	ON_COMMAND(ID_VIEW_VOXEL_NORMAL, OnViewVoxelNormal)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_VOXEL_NORMAL, OnUpdateViewVoxelNormal)
 	ON_COMMAND(ID_VIEW_VOXEL_SURFACE_NORMALS, OnViewVoxelSurfaceNormals)
@@ -77,9 +73,9 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSTE_RA2_YR, OnUpdateLaunchXSTE_RA2_YR)
 	ON_COMMAND(ID_LAUNCH_XTW_RA2_YR, OnLaunchXTW_RA2_YR)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XTW_RA2_YR, OnUpdateLaunchXTW_RA2_YR)
-	ON_COMMAND(ID_VIEW_PALET_SELECT, OnViewPaletSelect)
-	ON_COMMAND(ID_VIEW_PALET_AUTO_SELECT, OnViewPaletAutoSelect)
-	ON_UPDATE_COMMAND_UI(ID_VIEW_PALET_AUTO_SELECT, OnUpdateViewPaletAutoSelect)
+	ON_COMMAND(ID_VIEW_PALETTE_SELECT, OnViewPaletteSelect)
+	ON_COMMAND(ID_VIEW_PALETTE_AUTO_SELECT, OnViewPaletteAutoSelect)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_AUTO_SELECT, OnUpdateViewPaletteAutoSelect)
 	ON_COMMAND(ID_LAUNCH_XSTE_GR, OnLaunchXSTE_GR)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSTE_GR, OnUpdateLaunchXSTE_GR)
 	ON_COMMAND(ID_LAUNCH_XSTE_GR_ZH, OnLaunchXSTE_GR_ZH)
@@ -92,7 +88,6 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSE_RA2, OnUpdateLaunchXSE_RA2)
 	ON_COMMAND(ID_LAUNCH_XSE_RA2_YR, OnLaunchXSE_RA2_YR)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSE_RA2_YR, OnUpdateLaunchXSE_RA2_YR)
-	ON_COMMAND(ID_LAUNCH_MIXEDITOR, OnLaunchMixEditor_Open)
 	ON_COMMAND(ID_THEME_LIGHT, OnThemeLight)
 	ON_COMMAND(ID_THEME_DARK, OnThemeDark)
 	ON_UPDATE_COMMAND_UI(ID_THEME_LIGHT, OnUpdateThemeLight)
@@ -103,6 +98,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
+
 static UINT indicators[] =
 {
 	ID_SEPARATOR,           // status line indicator
@@ -112,13 +108,12 @@ CMainFrame::CMainFrame()
 {
 	m_game = static_cast<t_game>(-1);
 	m_lists_initialized = GetAsyncKeyState(VK_SHIFT) < 0;
-	m_tmp_palet_set = false;
 
 	m_combine_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "combine_shadows", false);
 	m_enable_compression = AfxGetApp()->GetProfileInt(m_reg_key, "enable_compression", true);
-	m_palet_i = AfxGetApp()->GetProfileInt(m_reg_key, "palet_i", -1);
+	m_palette_i = AfxGetApp()->GetProfileInt(m_reg_key, "palette_i", -1);
 	m_split_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "split_shadows", false);
-	m_use_palet_for_conversion = AfxGetApp()->GetProfileInt(m_reg_key, "use_palet_for_conversion", false);
+	m_use_palette_for_conversion = AfxGetApp()->GetProfileInt(m_reg_key, "use_palette_for_conversion", false);
 }
 
 CMainFrame::~CMainFrame()
@@ -208,6 +203,11 @@ void CMainFrame::OnViewGameTS()
 	m_game = game_ts;
 }
 
+void CMainFrame::OnViewGameRA2()
+{
+	m_game = game_ra2;
+}
+
 void CMainFrame::OnUpdateViewGameAuto(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck(m_game == -1);
@@ -226,6 +226,11 @@ void CMainFrame::OnUpdateViewGameRA(CCmdUI* pCmdUI)
 void CMainFrame::OnUpdateViewGameTS(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck(m_game == game_ts);
+}
+
+void CMainFrame::OnUpdateViewGameRA2(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_game == game_ra2);
 }
 
 t_game CMainFrame::get_game()
@@ -304,6 +309,7 @@ void CMainFrame::do_mix(Cmix_file& f, const string& mix_name, int mix_parent, in
         if (!g.open(id, f))
           do_mix(g, mix_name + " - " + name, mix_list_create_map(name, "", id, mix_parent), pal_list_create_map(name, pal_parent));
 			}
+			set_msg("Ready");
 			break;
 		case ft_pal:
 			{
@@ -311,9 +317,10 @@ void CMainFrame::do_mix(Cmix_file& f, const string& mix_name, int mix_parent, in
 				e.name = static_cast<Cfname>(mix_name).get_fname() + " - " + name;
         Cpal_file h;
 				h.open(id, f);
-				memcpy(e.palet, h.get_data(), sizeof(t_palet));
+				memcpy(e.palette, h.get_data(), sizeof(t_palette));
 				e.parent = pal_parent;
 				m_pal_list.push_back(e);
+				set_msg("Ready");
 				break;
 			}
 		}
@@ -336,7 +343,7 @@ void CMainFrame::find_mixs(const string& dir, t_game game, string filter)
 			{
 				if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 					continue;
-				const string fname = to_lower_copy(string(fd.cFileName));
+				const string fname = to_lower(string(fd.cFileName));
 				xcc_log::write_line("finds: " + fname, 1);
 				Cmix_file f;
 				if (!f.open(dir + fname))
@@ -393,9 +400,9 @@ void CMainFrame::OnUpdateFileFoundUpdate(CCmdUI* pCmdUI)
 	xcc_log::write_line("OnUpdateFileFoundUpdate ends");
 }
 
-void CMainFrame::OnUpdateViewPaletUpdate(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletteUpdate(CCmdUI* pCmdUI) 
 {
-	xcc_log::write_line("OnUpdateViewPaletUpdate starts");
+	xcc_log::write_line("OnUpdateViewPaletteUpdate starts");
 	CMenu* menu = pCmdUI->m_pSubMenu;
 	if (menu)
 	{
@@ -410,12 +417,12 @@ void CMainFrame::OnUpdateViewPaletUpdate(CCmdUI* pCmdUI)
 			CMenu sub_menu;
 			sub_menu.CreatePopupMenu();
 			for (; j < m_pal_i[i]; j++)
-				sub_menu.AppendMenu(MF_STRING, ID_VIEW_PALET_PAL000 + j, m_pal_list[j].name.c_str());
+				sub_menu.AppendMenu(MF_STRING, ID_VIEW_PALETTE_PAL000 + j, m_pal_list[j].name.c_str());
 			menu->InsertMenu(k++, MF_BYPOSITION | MF_POPUP, reinterpret_cast<DWORD>(sub_menu.GetSafeHmenu()), game_name[i]);
 			sub_menu.Detach();
 		}
 	}
-	xcc_log::write_line("OnUpdateViewPaletUpdate ends");
+	xcc_log::write_line("OnUpdateViewPaletteUpdate ends");
 }
 
 void CMainFrame::initialize_lists()
@@ -449,7 +456,13 @@ void CMainFrame::initialize_lists()
 	find_mixs(xcc_dirs::get_dir(game_rg) + "data\\", game_rg, "*.pkg");
 	find_mixs(xcc_dirs::get_dir(game_gr), game_gr, "*.big");
 	find_mixs(xcc_dirs::get_dir(game_gr_zh), game_gr_zh, "*.big");
+	find_mixs("", game_ebfd, ""); //i don't think mixer supports the files
+	find_mixs(xcc_dirs::get_dir(game_nox), game_nox, "*.mix");
 	find_mixs(xcc_dirs::get_dir(game_bfme), game_bfme, "*.big");
+	find_mixs(xcc_dirs::get_dir(game_bfme2), game_bfme2, "*.big");
+	find_mixs(xcc_dirs::get_dir(game_tw), game_tw, "*.big");
+	find_mixs("", game_ts_fs, "");	//for some reason the order of these matter and i don't care enough to fix it properly, it's probably the wacky order of how the games are defined
+
 
 	t_pal_list pal_list = m_pal_list;
 	m_pal_list.clear();
@@ -466,13 +479,15 @@ void CMainFrame::initialize_lists()
 	Cmix_file f1, f2;
 	Cpal_file pal_f;
 	if (!f1.open("temperat.mix") && !pal_f.open("temperat.pal", f1))
-    memcpy(m_td_palet, pal_f.get_palet(), sizeof(t_palet));
+    memcpy(m_td_palette, pal_f.get_palette(), sizeof(t_palette));
   if (!f1.open("redalert.mix") && !f2.open("local.mix", f1) && !pal_f.open("temperat.pal", f2))
-    memcpy(m_ra_palet, pal_f.get_palet(), sizeof(t_palet));
+    memcpy(m_ra_palette, pal_f.get_palette(), sizeof(t_palette));
 	if (!f1.open("tibsun.mix") && !f2.open("cache.mix", f1) && !pal_f.open("unittem.pal", f2))
-    memcpy(m_ts_palet, pal_f.get_palet(), sizeof(t_palet));
-	if (m_palet_i >= m_pal_list.size())
-		m_palet_i = -1;
+    memcpy(m_ts_palette, pal_f.get_palette(), sizeof(t_palette));
+	if (!f1.open("ra2.mix") && !f2.open("cache.mix", f1) && !pal_f.open("unittem.pal", f2))
+		memcpy(m_ra2_palette, pal_f.get_palette(), sizeof(t_palette));
+	if (m_palette_i >= m_pal_list.size())
+		m_palette_i = -1;
 	clean_pal_map_list();
 	m_lists_initialized = true;
 	xcc_log::write_line("initialize_lists ends");
@@ -483,35 +498,26 @@ string CMainFrame::get_mix_name(int i) const
 	return m_mix_list[i];
 }
 
-const t_palet_entry* CMainFrame::get_game_palet(t_game game)
+const t_palette_entry* CMainFrame::get_game_palette(t_game game)
 {
 	initialize_lists();
 	switch (game)
 	{
 	case game_td:
-		return m_td_palet;
+		return m_td_palette;
 	case game_ra:
-		return m_ra_palet;
+		return m_ra_palette;
+	case game_ra2:
+		return m_ra2_palette;
 	default:
-		return m_ts_palet;
+		return m_ts_palette;
 	}
 }
 
-const t_palet_entry* CMainFrame::get_pal_data()
+const t_palette_entry* CMainFrame::get_pal_data()
 {
 	initialize_lists();
-	return m_palet_i == -1 ?
-		(m_tmp_palet_set ? m_tmp_palet : NULL) :
-		m_pal_list[m_palet_i].palet;
-}
-
-void CMainFrame::load_tmp_pal(const t_palet pal)
-{
-	set_palet(-1);
-
-	memcpy(m_tmp_palet, pal, sizeof(t_palet));
-	m_tmp_palet_set = true;
-	set_msg("temporary palet selected");
+	return m_palette_i == -1 ? NULL : m_pal_list[m_palette_i].palette;
 }
 
 int CMainFrame::get_vxl_mode() const
@@ -519,88 +525,88 @@ int CMainFrame::get_vxl_mode() const
 	return m_vxl_mode;
 }
 
-void CMainFrame::OnViewPaletAuto() 
+void CMainFrame::OnViewPaletteAuto() 
 {
-	set_palet(-1);
+	set_palette(-1);
 }
 
-void CMainFrame::OnUpdateViewPaletAuto(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletteAuto(CCmdUI* pCmdUI) 
 {
-	pCmdUI->SetCheck(m_palet_i == -1);
+	pCmdUI->SetCheck(m_palette_i == -1);
 }
 
-void CMainFrame::OnViewPalet(UINT ID) 
+void CMainFrame::OnViewPalette(UINT ID) 
 {
-	set_palet(ID - ID_VIEW_PALET_PAL000);
+	set_palette(ID - ID_VIEW_PALETTE_PAL000);
 }
 
-void CMainFrame::OnUpdateViewPalet(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPalette(CCmdUI* pCmdUI) 
 {
-	pCmdUI->SetCheck(m_palet_i == pCmdUI->m_nID - ID_VIEW_PALET_PAL000);
+	pCmdUI->SetCheck(m_palette_i == pCmdUI->m_nID - ID_VIEW_PALETTE_PAL000);
 }
 
-void CMainFrame::OnViewPaletPrev() 
-{
-	if (!m_pal_i[game_ra2])
-		return;
-	if (m_palet_i > -1)
-		m_palet_i--;
-	m_file_info_pane->Invalidate();
-	set_msg((m_palet_i == -1 ? "default" : m_pal_list[m_palet_i].name) + " selected");
-}
-
-void CMainFrame::OnViewPaletNext() 
+void CMainFrame::OnViewPalettePrev() 
 {
 	if (!m_pal_i[game_ra2])
 		return;
-	m_palet_i++;
-	if (m_palet_i == m_pal_i[game_ra2])
-		m_palet_i = 0;
+	if (m_palette_i > -1)
+		m_palette_i--;
 	m_file_info_pane->Invalidate();
-	set_msg(m_pal_list[m_palet_i].name + " selected");
+	set_msg((m_palette_i == -1 ? "default" : m_pal_list[m_palette_i].name) + " selected");
 }
 
-bool CMainFrame::auto_select(t_game game, string palet)
+void CMainFrame::OnViewPaletteNext() 
+{
+	if (!m_pal_i[game_ra2])
+		return;
+	m_palette_i++;
+	if (m_palette_i == m_pal_i[game_ra2])
+		m_palette_i = 0;
+	m_file_info_pane->Invalidate();
+	set_msg(m_pal_list[m_palette_i].name + " selected");
+}
+
+bool CMainFrame::auto_select(t_game game, string palette)
 {
 	for (int i = game < 1 ? 0 : m_pal_i[game - 1]; i < m_pal_i[game]; i++)
 	{
-		if (m_pal_list[i].name.find(palet) == string::npos)
+		if (m_pal_list[i].name.find(palette) == string::npos)
 			continue;	
-		set_palet(i);
-		set_msg(m_pal_list[m_palet_i].name + " selected");
+		set_palette(i);
+		set_msg(m_pal_list[m_palette_i].name + " selected");
 		return true;
 	}
 	return false;
 }
 
-void CMainFrame::OnViewPaletUseForConversion() 
+void CMainFrame::OnViewPaletteUseForConversion() 
 {
-	m_use_palet_for_conversion = !m_use_palet_for_conversion;
+	m_use_palette_for_conversion = !m_use_palette_for_conversion;
 }
 
-void CMainFrame::OnUpdateViewPaletUseForConversion(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletteUseForConversion(CCmdUI* pCmdUI) 
 {
-	pCmdUI->SetCheck(m_use_palet_for_conversion);
+	pCmdUI->SetCheck(m_use_palette_for_conversion);
 }
 
-void CMainFrame::OnViewPaletConvertFromTD() 
+void CMainFrame::OnViewPaletteConvertFromTD() 
 {
 	m_convert_from_td = !m_convert_from_td;	
 	m_convert_from_ra = false;
 }
 
-void CMainFrame::OnUpdateViewPaletConvertFromTD(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletteConvertFromTD(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck(m_convert_from_td);
 }
 
-void CMainFrame::OnViewPaletConvertFromRA() 
+void CMainFrame::OnViewPaletteConvertFromRA() 
 {
 	m_convert_from_td = false;
 	m_convert_from_ra = !m_convert_from_ra;	
 }
 
-void CMainFrame::OnUpdateViewPaletConvertFromRA(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletteConvertFromRA(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck(m_convert_from_ra);
 }
@@ -827,28 +833,19 @@ void CMainFrame::OnLaunchXSE_Open()
 			return;
 		idx_path = string(dlg1.GetPathName());
 	}
-	
 	CXSE_dlg dlg2(game_ra2_yr);
 	dlg2.bag_file(bag_path.get_all());
 	dlg2.idx_file(idx_path.get_all());
 	dlg2.DoModal();
 }
 
-void CMainFrame::OnLaunchMixEditor_Open()
-{
-	STARTUPINFO si = { sizeof(si) };
-	PROCESS_INFORMATION pi;
-	TCHAR szCommandLine[] = TEXT("\"XCC MIX Editor.exe\"");
-	CreateProcess(NULL, szCommandLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-}
-
 void CMainFrame::OnDestroy() 
 {
 	AfxGetApp()->WriteProfileInt(m_reg_key, "combine_shadows", m_combine_shadows);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "enable_compression", m_enable_compression);
-	AfxGetApp()->WriteProfileInt(m_reg_key, "palet_i", m_palet_i);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "palette_i", m_palette_i);	//i don't care about keeping them wrong for older compatibility
 	AfxGetApp()->WriteProfileInt(m_reg_key, "split_shadows", m_split_shadows);
-	AfxGetApp()->WriteProfileInt(m_reg_key, "use_palet_for_conversion", m_use_palet_for_conversion);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "use_palette_for_conversion", m_use_palette_for_conversion);
 	CFrameWnd::OnDestroy();
 }
 
@@ -884,7 +881,7 @@ void CMainFrame::OnLaunchXTW_TS()
 				Ctheme_data e;
 				e.name(Cfname(fd.cFileName).get_ftitle());
 				e.length(static_cast<float>(f.get_c_samples()) / f.get_samplerate() / 60);
-				theme_list[to_upper_copy(Cfname(b).get_ftitle())] = e;
+				theme_list[to_upper(Cfname(b).get_ftitle())] = e;
 			}
 		}
 		while (FindNextFile(findhandle, &fd));
@@ -895,12 +892,12 @@ void CMainFrame::OnLaunchXTW_TS()
 	// "1=INTRO" << endl;
 	int j = 51;
 	for (auto& i : theme_list)
-		g << n(j++) << '=' << to_upper_copy(i.first) << endl;
+		g << n(j++) << '=' << to_upper(i.first) << endl;
 	g << endl;
 	for (auto& i : theme_list)
 	{
 		const Ctheme_data& e = i.second;
-		g << '[' << to_upper_copy(i.first) << ']' << endl
+		g << '[' << to_upper(i.first) << ']' << endl
 			<< "Name=" << e.name() << endl;
 		if (e.normal())
 			g << "Length=" << e.length() << endl;
@@ -958,7 +955,7 @@ void CMainFrame::launch_xtw(t_game game)
 				Ctheme_data e;
 				e.name("THEME:" + Cfname(b).get_ftitle());
 				e.sound(Cfname(b).get_ftitle());
-				theme_list[to_upper_copy(Cfname(b).get_ftitle())] = e;
+				theme_list[to_upper(Cfname(b).get_ftitle())] = e;
 				if (xste_open)
 					xste.csf_f().set_value(e.name(), Ccsf_file::convert2wstring(Cfname(fname).get_ftitle()), "");
 
@@ -973,12 +970,12 @@ void CMainFrame::launch_xtw(t_game game)
 	g << "[Themes]" << endl;
 	int j = 51;
 	for (auto& i : theme_list)
-		g << n(j++) << '=' << to_upper_copy(i.first) << endl;
+		g << n(j++) << '=' << to_upper(i.first) << endl;
 	g << endl;
 	for (auto& i : theme_list)
 	{
 		const Ctheme_data& e = i.second;
-		g << '[' << to_upper_copy(i.first) << ']' << endl;
+		g << '[' << to_upper(i.first) << ']' << endl;
 		if (!e.name().empty())
 			g << "Name=" << e.name() << endl;
 		if (!e.normal())
@@ -1067,37 +1064,34 @@ void CMainFrame::OnUpdateViewReport(CCmdUI* pCmdUI)
 	pCmdUI->Enable(!OnIdle(0));
 }
 
-void CMainFrame::OnViewPaletSelect() 
+void CMainFrame::OnViewPaletteSelect() 
 {
-	int old_palet = m_palet_i;
-	CSelectPaletDlg dlg;
-	if (m_palet_i != -1)
-		dlg.current_palet(m_palet_i);
+	int old_palette = m_palette_i;
+	CSelectPaletteDlg dlg;
+	if (m_palette_i != -1)
+		dlg.current_palette(m_palette_i);
 	dlg.set(this, m_pal_map_list, m_pal_list);
 	if (IDOK == dlg.DoModal())
-		assert(m_palet_i == dlg.current_palet());
+		assert(m_palette_i == dlg.current_palette());
 	else
-		set_palet(old_palet);
+		set_palette(old_palette);
 }
 
 
-void CMainFrame::set_palet(int id)
+void CMainFrame::set_palette(int id)
 {
-	if (id != -1)
-		m_tmp_palet_set = false;
-
-	if (m_palet_i == id)
+	if (m_palette_i == id)
 		return;
-	m_palet_i = id;
+	m_palette_i = id;
 	m_file_info_pane->Invalidate();
 }
 
-void CMainFrame::OnViewPaletAutoSelect() 
+void CMainFrame::OnViewPaletteAutoSelect() 
 {
 	m_file_info_pane->auto_select();
 }
 
-void CMainFrame::OnUpdateViewPaletAutoSelect(CCmdUI* pCmdUI)
+void CMainFrame::OnUpdateViewPaletteAutoSelect(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(m_file_info_pane->can_auto_select());
 }
@@ -1132,9 +1126,6 @@ void CMainFrame::OnUpdateThemeDark(CCmdUI* pCmdUI)
 	pCmdUI->SetRadio(theme::get() == theme::mode_dark);
 }
 
-// Walk a menu bar and convert every item to MFT_OWNERDRAW (or back), so our
-// WM_DRAWITEM/WM_MEASUREITEM handlers paint the top strip in dark colors.
-// Stores the item label in dwItemData so the draw handler has the text.
 static void set_menu_owner_draw(HMENU hm, bool owner_draw)
 {
 	if (!hm)
@@ -1153,7 +1144,6 @@ static void set_menu_owner_draw(HMENU hm, bool owner_draw)
 
 		if (owner_draw)
 		{
-			// Stash a heap copy of the label; it must outlive the menu.
 			char* stored = reinterpret_cast<char*>(mii.dwItemData);
 			if (!stored)
 			{
@@ -1183,7 +1173,6 @@ static void set_menu_owner_draw(HMENU hm, bool owner_draw)
 				delete[] stored;
 		}
 
-		// Recurse into submenus so popup items are themed too.
 		if (mii.hSubMenu)
 			set_menu_owner_draw(mii.hSubMenu, owner_draw);
 	}

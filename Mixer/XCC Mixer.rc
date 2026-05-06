@@ -13,7 +13,7 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// Ӣ��(����) resources
+// English (United States) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
@@ -77,85 +77,83 @@ IDR_MAINFRAME MENU
 BEGIN
     POPUP "&File"
     BEGIN
-        MENUITEM "&New...\tCtrl+N",             ID_FILE_NEW
-        MENUITEM "&Open...\tCtrl+O",            ID_FILE_OPEN
-        MENUITEM "Close\tBackspace",            ID_FILE_CLOSE
-        MENUITEM "Find...\tCtrl+F",             ID_FILE_SEARCH
+        MENUITEM "&New Archive...\tCtrl+N",							ID_FILE_NEW
+        MENUITEM "&Open...\tCtrl+O",										ID_FILE_OPEN
+        MENUITEM "Close\tBackspace",										ID_FILE_CLOSE
+        MENUITEM "Find...\tCtrl+F",											ID_FILE_SEARCH
         POPUP "&Found"
         BEGIN
-            MENUITEM "Update",                      ID_FILE_FOUND_UPDATE
+            MENUITEM "Update",													ID_FILE_FOUND_UPDATE
         END
         MENUITEM SEPARATOR
-        MENUITEM "E&xit",                       ID_APP_EXIT
+        MENUITEM "E&xit",																ID_APP_EXIT
     END
     POPUP "&Conversion"
     BEGIN
-        MENUITEM "Combine shadows",             ID_CONVERSION_COMBINE_SHADOWS
-        MENUITEM "Enable compression",          ID_CONVERSION_ENABLE_COMPRESSION
-        MENUITEM "Fix shadows",                 ID_CONVERSION_FIX_SHADOWS
-        MENUITEM "Split shadows",               ID_CONVERSION_SPLIT_SHADOWS
+        MENUITEM "Combine Shadows",											ID_CONVERSION_COMBINE_SHADOWS
+        MENUITEM "Enable Compression",									ID_CONVERSION_ENABLE_COMPRESSION
+        MENUITEM "Fix Shadows",													ID_CONVERSION_FIX_SHADOWS
+        MENUITEM "Split Shadows",												ID_CONVERSION_SPLIT_SHADOWS
     END
     POPUP "&View"
     BEGIN
         POPUP "&Game"
         BEGIN
-            MENUITEM "Tiberium Dawn",               ID_VIEW_GAME_TD
-            MENUITEM "Red Alert",                   ID_VIEW_GAME_RA
-            MENUITEM "Tiberian Sun",                ID_VIEW_GAME_TS
-            MENUITEM "Auto",                        ID_VIEW_GAME_AUTO
+            MENUITEM "Tiberium Dawn",										ID_VIEW_GAME_TD
+            MENUITEM "Red Alert",												ID_VIEW_GAME_RA
+            MENUITEM "Tiberian Sun",										ID_VIEW_GAME_TS
+            MENUITEM "Auto",														ID_VIEW_GAME_AUTO
         END
-        POPUP "&Palet"
+        POPUP "&Palette"
         BEGIN
-            MENUITEM "Update",                      ID_VIEW_PALET_UPDATE
-            MENUITEM "Auto",                        ID_VIEW_PALET_AUTO
-            MENUITEM "Auto select\tCtrl+Q",         ID_VIEW_PALET_AUTO_SELECT
-            MENUITEM "&Select...\tCtrl+P",          ID_VIEW_PALET_SELECT
-            MENUITEM "Previous\tCtrl+[",            ID_VIEW_PALET_PREV
-            MENUITEM "Next\tCtrl+]",                ID_VIEW_PALET_NEXT
-            MENUITEM "Convert from TD",             ID_VIEW_PALET_CONVERT_FROM_TD
-            MENUITEM "Convert from RA",             ID_VIEW_PALET_CONVERT_FROM_RA
-            MENUITEM "Use for conversion",          ID_VIEW_PALET_USE_FOR_CONVERSION
+            MENUITEM "Update",													ID_VIEW_PALETTE_UPDATE
+            MENUITEM "Auto",														ID_VIEW_PALETTE_AUTO
+            MENUITEM "Auto select\tCtrl+Q",							ID_VIEW_PALETTE_AUTO_SELECT
+            MENUITEM "&Select...\tCtrl+R",							ID_VIEW_PALETTE_SELECT
+            MENUITEM "Previous\tCtrl+[",								ID_VIEW_PALETTE_PREV
+            MENUITEM "Next\tCtrl+]",										ID_VIEW_PALETTE_NEXT
+            MENUITEM "Convert from TD",									ID_VIEW_PALETTE_CONVERT_FROM_TD
+            MENUITEM "Convert from RA",									ID_VIEW_PALETTE_CONVERT_FROM_RA
+            MENUITEM "Use for Conversion",							ID_VIEW_PALETTE_USE_FOR_CONVERSION
         END
         POPUP "&Voxel"
         BEGIN
-            MENUITEM "&Colors",                     ID_VIEW_VOXEL_NORMAL
-            MENUITEM "Surface &normals",            ID_VIEW_VOXEL_SURFACE_NORMALS
-            MENUITEM "&Depth information",          ID_VIEW_VOXEL_DEPTH_INFORMATION
+            MENUITEM "&Colors",													ID_VIEW_VOXEL_NORMAL
+            MENUITEM "Surface &Normals",								ID_VIEW_VOXEL_SURFACE_NORMALS
+            MENUITEM "&Depth information",							ID_VIEW_VOXEL_DEPTH_INFORMATION
         END
-        MENUITEM "Directories...",              ID_VIEW_DIRECTORIES
-        MENUITEM "&Report",                     ID_VIEW_REPORT
+        MENUITEM "Directories...",											ID_VIEW_DIRECTORIES
+        MENUITEM "&Report",															ID_VIEW_REPORT
     END
     POPUP "&Launch"
     BEGIN
         POPUP "XCC &Sound Editor"
         BEGIN
-            MENUITEM "&Red Alert 2",                ID_LAUNCH_XSE_RA2
-            MENUITEM "Red Alert 2 &Yuri's Revenge", ID_LAUNCH_XSE_RA2_YR
+            MENUITEM "&Red Alert 2",										ID_LAUNCH_XSE_RA2
+            MENUITEM "Red Alert 2: &Yuri's Revenge",		ID_LAUNCH_XSE_RA2_YR
             MENUITEM SEPARATOR
-            MENUITEM "&Open...",                    ID_LAUNCH_XSE_OPEN
+            MENUITEM "&Open...",												ID_LAUNCH_XSE_OPEN
         END
         POPUP "XCC &String Table Editor"
         BEGIN
-            MENUITEM "&Red Alert 2",                ID_LAUNCH_XSTE_RA2
-            MENUITEM "Red Alert 2 &Yuri's Revenge", ID_LAUNCH_XSTE_RA2_YR
-            MENUITEM "&Generals",                   ID_LAUNCH_XSTE_GR
-            MENUITEM "Generals &Zero Hour",         ID_LAUNCH_XSTE_GR_ZH
+            MENUITEM "&Red Alert 2",										ID_LAUNCH_XSTE_RA2
+            MENUITEM "Red Alert 2: &Yuri's Revenge",		ID_LAUNCH_XSTE_RA2_YR
+            MENUITEM "&Generals",												ID_LAUNCH_XSTE_GR
+            MENUITEM "Generals: &Zero Hour",						ID_LAUNCH_XSTE_GR_ZH
             MENUITEM SEPARATOR
-            MENUITEM "&Open...",                    ID_LAUNCH_XSTE_OPEN
+            MENUITEM "&Open...",												ID_LAUNCH_XSTE_OPEN
         END
-        POPUP "XCC &Theme Writer", INACTIVE
+        POPUP "XCC &Theme Writer"
         BEGIN
-            MENUITEM "&Tiberian Sun",               ID_LAUNCH_XTW_TS
-            MENUITEM "&Red Alert 2",                ID_LAUNCH_XTW_RA2
-            MENUITEM "&Red Alert 2 YR",             ID_LAUNCH_XTW_RA2_YR
+            MENUITEM "&Tiberian Sun",										ID_LAUNCH_XTW_TS
+            MENUITEM "&Red Alert 2",										ID_LAUNCH_XTW_RA2
+            MENUITEM "&Red Alert 2: &Yuri's Revenge",   ID_LAUNCH_XTW_RA2_YR
         END
-        MENUITEM SEPARATOR
-        MENUITEM "MIX Editor",                  ID_LAUNCH_MIXEDITOR
     END
     POPUP "&Theme"
     BEGIN
-        MENUITEM "&Light mode",                 ID_THEME_LIGHT
-        MENUITEM "&Dark mode",                  ID_THEME_DARK
+        MENUITEM "&Light mode",                         ID_THEME_LIGHT
+        MENUITEM "&Dark mode",                          ID_THEME_DARK
     END
 END
 
@@ -163,55 +161,54 @@ CG_IDR_POPUP_MIX_VIEW MENU
 BEGIN
     POPUP "_POPUP_"
     BEGIN
-        MENUITEM "Open\tEnter",                 ID_POPUP_OPEN
-        MENUITEM "Open with FinalSun",          ID_POPUP_OPEN_WITH_FINALSUN
-        MENUITEM "Open with FinalAlert",        ID_POPUP_OPEN_WITH_FINALALERT
-        MENUITEM "&Explore",                    ID_POPUP_EXPLORE
+        MENUITEM "Open\tEnter",													ID_POPUP_OPEN
+        MENUITEM "&Explore...",													ID_POPUP_EXPLORE
+				MENUITEM "&New Archive...",											ID_FILE_NEW
         MENUITEM SEPARATOR
         POPUP "Clipboard"
         BEGIN
-            MENUITEM "Copy\tCtrl+C",                ID_EDIT_COPY
-            MENUITEM "Paste as JPEG",               ID_POPUP_CLIPBOARD_PASTE_AS_JPEG
-            MENUITEM "Paste as PCX",                ID_POPUP_CLIPBOARD_PASTE_AS_PCX
-            MENUITEM "Paste as PNG",                ID_POPUP_CLIPBOARD_PASTE_AS_PNG
-            MENUITEM "Paste as SHP (TS)",           ID_POPUP_CLIPBOARD_PASTE_AS_SHP_TS
-            MENUITEM "Paste as TGA",                ID_POPUP_CLIPBOARD_PASTE_AS_TGA
+            MENUITEM "Copy\tCtrl+C",										ID_EDIT_COPY
+            MENUITEM "Paste as JPEG",										ID_POPUP_CLIPBOARD_PASTE_AS_JPEG
+            MENUITEM "Paste as PCX",										ID_POPUP_CLIPBOARD_PASTE_AS_PCX
+            MENUITEM "Paste as PNG",										ID_POPUP_CLIPBOARD_PASTE_AS_PNG
+            MENUITEM "Paste as SHP (TS)",								ID_POPUP_CLIPBOARD_PASTE_AS_SHP_TS
+            MENUITEM "Paste as TGA",										ID_POPUP_CLIPBOARD_PASTE_AS_TGA
         END
-        MENUITEM "&Extract...",                 ID_POPUP_EXTRACT
-        MENUITEM "Copy",                        ID_POPUP_COPY
-        MENUITEM "Copy as AUD",                 ID_POPUP_COPY_AS_AUD
-        MENUITEM "Copy as AVI",                 ID_POPUP_COPY_AS_AVI
-        MENUITEM "Copy as CPS",                 ID_POPUP_COPY_AS_CPS
-        MENUITEM "Copy as CSV",                 ID_POPUP_COPY_AS_CSV
-        MENUITEM "Copy as HTML",                ID_POPUP_COPY_AS_HTML
-        MENUITEM "Copy as HVA",                 ID_POPUP_COPY_AS_HVA
-        MENUITEM "Copy as JPEG (single)",       ID_POPUP_COPY_AS_JPEG_SINGLE
-        MENUITEM "Copy as JPEG",                ID_POPUP_COPY_AS_JPEG
-        MENUITEM "Copy as MAP (TS) Preview",    ID_POPUP_COPY_AS_MAP_TS_PREVIEW
-        MENUITEM "Copy as PAL",                 ID_POPUP_COPY_AS_PAL
-        MENUITEM "Copy as PAL (JASC)",          ID_POPUP_COPY_AS_PAL_JASC
-        MENUITEM "Copy as PCX (single)",        ID_POPUP_COPY_AS_PCX_SINGLE
-        MENUITEM "Copy as PCX",                 ID_POPUP_COPY_AS_PCX
-        MENUITEM "Copy as PNG (single)",        ID_POPUP_COPY_AS_PNG_SINGLE
-        MENUITEM "Copy as PNG",                 ID_POPUP_COPY_AS_PNG
-        MENUITEM "Copy as SHP",                 ID_POPUP_COPY_AS_SHP
-        MENUITEM "Copy as SHP (TS)",            ID_POPUP_COPY_AS_SHP_TS
-        MENUITEM "Copy as TGA (single)",        ID_POPUP_COPY_AS_TGA_SINGLE
-        MENUITEM "Copy as TGA",                 ID_POPUP_COPY_AS_TGA
-        MENUITEM "Copy as TXT",                 ID_POPUP_COPY_AS_TEXT
-        MENUITEM "Copy as VXL",                 ID_POPUP_COPY_AS_VXL
-        POPUP "Copy as WAV"
+        MENUITEM "&Extract...",													ID_POPUP_EXTRACT
+        MENUITEM "Copy",																ID_POPUP_COPY
+        POPUP "Copy as..."
         BEGIN
-            MENUITEM "IMA ADPCM",                   ID_POPUP_COPY_AS_WAV_IMA_ADPCM
-            MENUITEM "PCM",                         ID_POPUP_COPY_AS_WAV_PCM
+            MENUITEM "Copy as AUD",											ID_POPUP_COPY_AS_AUD
+            MENUITEM "Copy as AVI",											ID_POPUP_COPY_AS_AVI
+            MENUITEM "Copy as CPS",											ID_POPUP_COPY_AS_CPS
+            MENUITEM "Copy as CSV",											ID_POPUP_COPY_AS_CSV
+            MENUITEM "Copy as HTML",										ID_POPUP_COPY_AS_HTML
+            MENUITEM "Copy as HVA",											ID_POPUP_COPY_AS_HVA
+            MENUITEM "Copy as JPEG (Single)",						ID_POPUP_COPY_AS_JPEG_SINGLE
+            MENUITEM "Copy as JPEG",										ID_POPUP_COPY_AS_JPEG
+            MENUITEM "Copy as MAP (TS) Preview",				ID_POPUP_COPY_AS_MAP_TS_PREVIEW
+            MENUITEM "Copy as PAL",											ID_POPUP_COPY_AS_PAL
+            MENUITEM "Copy as PAL (JASC)",							ID_POPUP_COPY_AS_PAL_JASC
+            MENUITEM "Copy as PCX (Single)",						ID_POPUP_COPY_AS_PCX_SINGLE
+            MENUITEM "Copy as PCX",											ID_POPUP_COPY_AS_PCX
+            MENUITEM "Copy as PNG (Single)",						ID_POPUP_COPY_AS_PNG_SINGLE
+            MENUITEM "Copy as PNG",											ID_POPUP_COPY_AS_PNG
+            MENUITEM "Copy as SHP (TD)",								ID_POPUP_COPY_AS_SHP
+            MENUITEM "Copy as SHP (TS)",								ID_POPUP_COPY_AS_SHP_TS
+            MENUITEM "Copy as TGA (Single)",						ID_POPUP_COPY_AS_TGA_SINGLE
+            MENUITEM "Copy as TGA",											ID_POPUP_COPY_AS_TGA
+            MENUITEM "Copy as TEXT",										ID_POPUP_COPY_AS_TEXT
+            MENUITEM "Copy as VOXEL",										ID_POPUP_COPY_AS_VXL
+            MENUITEM "Copy as WAV (IMA ADPCM)",					ID_POPUP_COPY_AS_WAV_IMA_ADPCM
+            MENUITEM "Copy as WAV (PCM)",								ID_POPUP_COPY_AS_WAV_PCM
+            MENUITEM "Copy as WSA",											ID_POPUP_COPY_AS_WSA
+            MENUITEM "Copy as XIF",											ID_POPUP_COPY_AS_XIF
         END
-        MENUITEM "Copy as WSA",                 ID_POPUP_COPY_AS_WSA
-        MENUITEM "Copy as XIF",                 ID_POPUP_COPY_AS_XIF
         MENUITEM SEPARATOR
-        MENUITEM "Refresh\tF5",                 ID_POPUP_REFRESH
-        MENUITEM "Resize...",                   ID_POPUP_RESIZE
-        MENUITEM "Compact",                     ID_POPUP_COMPACT
-        MENUITEM "Delete\tDel",                 ID_POPUP_DELETE
+        MENUITEM "Refresh\tF5",													ID_POPUP_REFRESH
+        MENUITEM "Resize Image...",											ID_POPUP_RESIZE
+        MENUITEM "Compact",															ID_POPUP_COMPACT
+        MENUITEM "Delete\tDel",													ID_POPUP_DELETE
     END
 END
 
@@ -223,20 +220,20 @@ END
 
 IDR_MAINFRAME ACCELERATORS
 BEGIN
-    27,             ID_VIEW_PALET_PREV,     ASCII,  NOINVERT
-    29,             ID_VIEW_PALET_NEXT,     ASCII,  NOINVERT
-    "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
-    "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
-    "F",            ID_FILE_SEARCH,         VIRTKEY, CONTROL, NOINVERT
-    "N",            ID_FILE_NEW,            VIRTKEY, CONTROL, NOINVERT
-    "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
-    "P",            ID_VIEW_PALET_SELECT,   VIRTKEY, CONTROL, NOINVERT
-    "Q",            ID_VIEW_PALET_AUTO_SELECT, VIRTKEY, CONTROL, NOINVERT
-    VK_BACK,        ID_FILE_CLOSE,          VIRTKEY, NOINVERT
-    VK_DELETE,      ID_POPUP_DELETE,        VIRTKEY, NOINVERT
-    VK_DELETE,      ID_POPUP_DELETE,        VIRTKEY, SHIFT, NOINVERT
-    VK_F5,          ID_POPUP_REFRESH,       VIRTKEY, NOINVERT
-    VK_RETURN,      ID_POPUP_OPEN,          VIRTKEY, NOINVERT
+    27,             ID_VIEW_PALETTE_PREV,     ASCII,  NOINVERT
+    29,             ID_VIEW_PALETTE_NEXT,     ASCII,  NOINVERT
+    "A",            ID_EDIT_SELECT_ALL,						VIRTKEY, CONTROL, NOINVERT
+    "C",            ID_EDIT_COPY,									VIRTKEY, CONTROL, NOINVERT
+    "F",            ID_FILE_SEARCH,								VIRTKEY, CONTROL, NOINVERT
+    "N",            ID_FILE_NEW,									VIRTKEY, CONTROL, NOINVERT
+    "O",            ID_FILE_OPEN,									VIRTKEY, CONTROL, NOINVERT
+    "R",            ID_VIEW_PALETTE_SELECT,				VIRTKEY, CONTROL, NOINVERT
+    "Q",            ID_VIEW_PALETTE_AUTO_SELECT,	VIRTKEY, CONTROL, NOINVERT
+    VK_BACK,        ID_FILE_CLOSE,								VIRTKEY, NOINVERT
+    VK_DELETE,      ID_POPUP_DELETE,							VIRTKEY, NOINVERT
+    VK_DELETE,      ID_POPUP_DELETE,							VIRTKEY, SHIFT, NOINVERT
+    VK_F5,          ID_POPUP_REFRESH,							VIRTKEY, NOINVERT
+    VK_RETURN,      ID_POPUP_OPEN,								VIRTKEY, NOINVERT
 END
 
 
@@ -245,79 +242,85 @@ END
 // Dialog
 //
 
-IDD_DIRECTORIES DIALOGEX 0, 0, 273, 154
-STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+IDD_DIRECTORIES DIALOGEX 0, 0, 273, 202
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Directories"
-FONT 8, "MS Sans Serif", 0, 0, 0x0
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,216,7,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,216,24,50,14
-    LTEXT           "Dune 2:",IDC_DUNE2_STATIC,7,7,26,13
-    LTEXT           "TD primary:",IDC_TD_PRIMARY_STATIC,7,23,37,13
-    LTEXT           "TD secondary:",IDC_TD_SECONDARY_STATIC,7,39,48,13
+    LTEXT           "Dune 2:",IDC_DUNE2_STATIC,7,7,30,13
+    LTEXT           "TD Primary:",IDC_TD_PRIMARY_STATIC,7,23,40,13
+    LTEXT           "TD Secondary:",IDC_TD_SECONDARY_STATIC,7,39,52,13
     LTEXT           "RA:",IDC_RA_STATIC,7,55,13,13
-    LTEXT           "Dune 2000:",IDC_DUNE2000_STATIC,7,71,38,13
+    LTEXT           "Dune 2000:",IDC_DUNE2000_STATIC,7,71,44,13
     LTEXT           "TS:",IDC_TS_STATIC,7,87,12,13
-    LTEXT           "RA 2:",IDC_RA2_STATIC,7,103,19,13
+    LTEXT           "RA2:",IDC_RA2_STATIC,7,103,19,13
+    LTEXT           "Renegade:",IDC_RG_STATIC,7,119,38,13
+    LTEXT           "Generals:",IDC_GR_STATIC,7,135,38,13
+    LTEXT           "Generals ZH:",IDC_GR_ZH_STATIC,7,151,48,13
     LTEXT           "Data:",IDC_DATA_STATIC,7,119,18,13
     LTEXT           "CD:",IDC_CD_STATIC,7,135,13,13
     EDITTEXT        IDC_DUNE2,71,7,138,13,ES_AUTOHSCROLL
     EDITTEXT        IDC_TD_PRIMARY,71,23,138,13,ES_AUTOHSCROLL
     EDITTEXT        IDC_TD_SECONDARY,71,39,138,13,ES_AUTOHSCROLL
     EDITTEXT        IDC_RA,71,55,138,13,ES_AUTOHSCROLL
-    EDITTEXT        IDC_DUNE2000,71,71,138,13,ES_AUTOHSCROLL | ES_READONLY
-    EDITTEXT        IDC_TS,71,87,138,13,ES_AUTOHSCROLL | ES_READONLY
-    EDITTEXT        IDC_RA2,71,103,138,13,ES_AUTOHSCROLL | ES_READONLY
-    EDITTEXT        IDC_DATA,71,119,138,13,ES_AUTOHSCROLL | ES_READONLY
+    EDITTEXT        IDC_DUNE2000,71,71,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_TS,71,87,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_RA2,71,103,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_RG,71,119,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_GR,71,135,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_GR_ZH,71,151,138,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_DATA,71,119,138,13,ES_AUTOHSCROLL
     EDITTEXT        IDC_CD,71,135,138,13,ES_AUTOHSCROLL
     PUSHBUTTON      "Reset",IDC_RESET_DATA,216,119,50,14
     PUSHBUTTON      "Reset",IDC_RESET_CD,216,135,50,14
 END
 
-IDD_RESIZE DIALOG 0, 0, 186, 111
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+IDD_RESIZE DIALOGEX 0, 0, 186, 111
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Resize"
-FONT 8, "MS Sans Serif"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     EDITTEXT        IDC_CX,43,16,46,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        IDC_CY,131,16,42,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        IDC_RELATIVE_CX,43,49,46,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        IDC_RELATIVE_CY,131,49,42,13,ES_AUTOHSCROLL | ES_NUMBER
-    CONTROL         "Maintain aspect ratio",IDC_MAINTAIN_ASPECT_RATIO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,4,70,81,10
-    CONTROL         "Fix shadows",IDC_FIX_SHADOWS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,4,82,55,10
+    CONTROL         "Maintain Aspect Ratio",IDC_MAINTAIN_ASPECT_RATIO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,4,70,81,10
+    CONTROL         "Fix Shadows",IDC_FIX_SHADOWS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,4,82,55,10
     DEFPUSHBUTTON   "OK",IDOK,74,93,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,130,93,50,14
     LTEXT           "Width:",IDC_STATIC,12,49,22,13
     LTEXT           "Height:",IDC_STATIC,98,49,24,13
-    GROUPBOX        "Percentage of original",IDC_STATIC,4,35,176,31
+    GROUPBOX        "Percentage of Original",IDC_STATIC,4,35,176,31
     LTEXT           "Width:",IDC_STATIC,12,16,22,13
     LTEXT           "Height:",IDC_STATIC,98,16,24,13
-    GROUPBOX        "Pixel size",IDC_STATIC,4,2,176,31
+    GROUPBOX        "Pixel Size",IDC_STATIC,4,2,176,31
 END
 
-IDD_SEARCH_FILE DIALOGEX 0, 0, 158, 145
-STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Search file"
-FONT 8, "MS Sans Serif", 0, 0, 0x0
+IDD_SEARCH_FILE DIALOGEX 0, 0, 123, 143
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Search"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
-    EDITTEXT        IDC_FILENAME,45,7,106,14,ES_AUTOHSCROLL
-    CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,7,28,143,89
-    DEFPUSHBUTTON   "Search",IDOK,6,122,50,16
-    PUSHBUTTON      "Close",IDCANCEL,98,122,50,16
-    LTEXT           "Filename:",IDC_FILENAME_STATIC,7,11,31,8
+    EDITTEXT        IDC_FILENAME,45,7,77,14,ES_AUTOHSCROLL
+    CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,11,52,44,25
+    DEFPUSHBUTTON   "Search",IDOK,9,100,50,14
+    PUSHBUTTON      "Close",IDCANCEL,68,122,50,14
+    LTEXT           "Filename:",IDC_FILENAME_STATIC,7,7,31,8
 END
 
-IDD_XCC_OBJECT_EXTRACTOR DIALOG 0, 0, 166, 198
-STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+IDD_XCC_OBJECT_EXTRACTOR DIALOGEX 0, 0, 166, 198
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "XCC Object Extractor"
-FONT 8, "MS Sans Serif"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     PUSHBUTTON      "Close",IDOK,109,142,50,14
     CONTROL         "List1",IDC_LIST,"SysListView32",LVS_LIST | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,152,68
     LTEXT           "Name:",IDC_NAME_STATIC,7,83,22,12
     LTEXT           "Mail:",IDC_MAIL_STATIC,7,102,16,12
     LTEXT           "Link:",IDC_LINK_STATIC,7,140,16,12
-    LTEXT           "Link title:",IDC_LINK_TITLE_STATIC,7,121,29,12
+    LTEXT           "Link Title:",IDC_LINK_TITLE_STATIC,7,121,29,12
     EDITTEXT        IDC_NAME,47,83,49,12,ES_AUTOHSCROLL
     EDITTEXT        IDC_MAIL,47,102,49,12,ES_AUTOHSCROLL
     EDITTEXT        IDC_LINK_TITLE,47,121,49,12,ES_AUTOHSCROLL
@@ -328,10 +331,10 @@ BEGIN
     PUSHBUTTON      "...",IDC_EXTRACT_TO_BUTTON,122,177,11,14
 END
 
-IDD_XSTE DIALOG 0, 0, 294, 137
-STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+IDD_XSTE DIALOGEX 0, 0, 294, 137
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "XCC String Table Editor"
-FONT 8, "MS Sans Serif"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     PUSHBUTTON      "OK",IDOK,166,115,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,237,115,50,14
@@ -343,10 +346,10 @@ BEGIN
     PUSHBUTTON      "&Search...",IDC_SEARCH,81,57,50,14
 END
 
-IDD_XSTE_EDIT DIALOG 0, 0, 126, 156
-STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+IDD_XSTE_EDIT DIALOGEX 0, 0, 126, 156
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "XCC String Table Editor"
-FONT 8, "MS Sans Serif"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,7,135,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,69,135,50,14
@@ -356,10 +359,10 @@ BEGIN
 END
 
 IDD_XSE DIALOGEX 0, 0, 348, 138
-STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES
 CAPTION "XCC Sound Editor"
-FONT 8, "MS Sans Serif", 0, 0, 0x1
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
     CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,334,87
     DEFPUSHBUTTON   "&Play",IDC_PLAY,63,118,50,14
@@ -373,10 +376,10 @@ BEGIN
     PUSHBUTTON      "...",IDC_EXTRACT_TO_BUTTON,309,98,11,14
 END
 
-IDD_SHP_PROPERTIES DIALOG 0, 0, 186, 95
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "SHP properties"
-FONT 8, "MS Sans Serif"
+IDD_SHP_PROPERTIES DIALOGEX 0, 0, 186, 95
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "SHP Properties"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,7,74,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,129,74,50,14
@@ -384,14 +387,14 @@ BEGIN
     LTEXT           "Height:",IDC_STATIC,95,7,24,8
     EDITTEXT        IDC_CX,34,7,57,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        IDC_CY,122,7,57,13,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "Count frames:",IDC_STATIC,7,30,44,8
+    LTEXT           "Frame Count:",IDC_STATIC,7,30,44,8
     EDITTEXT        IDC_C_FRAMES,64,30,57,13,ES_AUTOHSCROLL | ES_NUMBER
 END
 
-IDD_SHP_VIEWER DIALOG 0, 0, 186, 122
-STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Video viewer"
-FONT 8, "MS Sans Serif"
+IDD_SHP_VIEWER DIALOGEX 0, 0, 186, 122
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Video Viewer"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "Play",IDC_PLAY,87,101,50,14
     PUSHBUTTON      "Close",IDOK,129,101,50,14
@@ -400,10 +403,10 @@ BEGIN
     EDITTEXT        IDC_FRAME,7,101,22,14,ES_RIGHT | ES_AUTOHSCROLL | ES_READONLY | ES_NUMBER
 END
 
-IDD_SEARCH_STRING DIALOG 0, 0, 186, 95
-STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Search string"
-FONT 8, "MS Sans Serif"
+IDD_SEARCH_STRING DIALOGEX 0, 0, 186, 95
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Search"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     EDITTEXT        IDC_NAME,7,7,172,14,ES_AUTOHSCROLL
     CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,7,25,172,44
@@ -454,6 +457,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_SHP_PROPERTIES, DIALOG
+    BEGIN
+    END
+
     IDD_SHP_VIEWER, DIALOG
     BEGIN
         LEFTMARGIN, 7
@@ -478,14 +485,54 @@ END
 // AFX_DIALOG_LAYOUT
 //
 
+IDD_DIRECTORIES AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_XSTE_EDIT AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_XSTE AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_XSE AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_XCC_OBJECT_EXTRACTOR AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_SHP_VIEWER AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_SHP_PROPERTIES AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_RESIZE AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
 IDD_SEARCH_FILE AFX_DIALOG_LAYOUT
 BEGIN
-    0,
-    0, 0, 0, 0,
-    0, 0, 100, 100,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0
+    0
+END
+
+IDD_SEARCH_STRING AFX_DIALOG_LAYOUT
+BEGIN
+    0
 END
 
 
@@ -496,7 +543,7 @@ END
 
 STRINGTABLE
 BEGIN
-    IDR_MAINFRAME           "XCC Mixer 1.47"
+    IDR_MAINFRAME           "XCC Mixer: Mayan Pyramid Edition"
 END
 
 STRINGTABLE
@@ -504,12 +551,12 @@ BEGIN
     AFX_IDS_IDLEMESSAGE     "Ready"
 END
 
-#endif    // Ӣ��(����) resources
+#endif    // English (United States) resources
 /////////////////////////////////////////////////////////////////////////////
 
 
 /////////////////////////////////////////////////////////////////////////////
-// ������(����) resources
+// Dutch (Netherlands) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NLD)
 LANGUAGE LANG_DUTCH, SUBLANG_DUTCH
@@ -520,15 +567,15 @@ LANGUAGE LANG_DUTCH, SUBLANG_DUTCH
 // Dialog
 //
 
-IDD_SELECT_PALET DIALOG 0, 0, 119, 58
-STYLE DS_SETFONT | DS_MODALFRAME | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Select palet"
-FONT 8, "MS Sans Serif"
+IDD_SELECT_PALETTE DIALOGEX 0, 0, 119, 58
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Select Palette"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,58,7,44,25
     DEFPUSHBUTTON   "OK",IDOK,7,37,50,14,WS_DISABLED
     PUSHBUTTON      "Cancel",IDCANCEL,62,37,50,14
-    CONTROL         "Tree1",IDC_TREE,"SysTreeView32",TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_SINGLEEXPAND | WS_BORDER | WS_TABSTOP,7,7,45,26
+    CONTROL         "Tree1",IDC_TREE,"SysTreeView32",TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_SINGLEEXPAND | WS_BORDER | WS_HSCROLL | WS_TABSTOP,7,7,45,26
 END
 
 
@@ -540,7 +587,7 @@ END
 #ifdef APSTUDIO_INVOKED
 GUIDELINES DESIGNINFO
 BEGIN
-    IDD_SELECT_PALET, DIALOG
+    IDD_SELECT_PALETTE, DIALOG
     BEGIN
         LEFTMARGIN, 7
         RIGHTMARGIN, 112
@@ -550,7 +597,18 @@ BEGIN
 END
 #endif    // APSTUDIO_INVOKED
 
-#endif    // ������(����) resources
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+IDD_SELECT_PALETTE AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+#endif    // Dutch (Netherlands) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

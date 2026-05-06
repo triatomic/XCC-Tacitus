@@ -14,6 +14,9 @@ CDirectoriesDlg::CDirectoriesDlg(CWnd* pParent /*=NULL*/)
 	m_edit_dune2000 = xcc_dirs::get_dir(game_dune2000).c_str();
 	m_edit_ts = xcc_dirs::get_dir(game_ts).c_str();
 	m_edit_ra2 = xcc_dirs::get_dir(game_ra2).c_str();
+	m_edit_rg = xcc_dirs::get_dir(game_rg).c_str();
+	m_edit_gr = xcc_dirs::get_dir(game_gr).c_str();
+	m_edit_gr_zh = xcc_dirs::get_dir(game_gr_zh).c_str();
 	m_edit_cd = xcc_dirs::get_cd_dir().c_str();
 	m_edit_data = xcc_dirs::get_data_dir().c_str();
 	//}}AFX_DATA_INIT
@@ -30,6 +33,9 @@ void CDirectoriesDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_TD_PRIMARY, m_edit_td_primary);
 	DDX_Text(pDX, IDC_TD_SECONDARY, m_edit_td_secondary);
 	DDX_Text(pDX, IDC_TS, m_edit_ts);
+	DDX_Text(pDX, IDC_RG, m_edit_rg);
+	DDX_Text(pDX, IDC_GR, m_edit_gr);
+	DDX_Text(pDX, IDC_GR_ZH, m_edit_gr_zh);
 	DDX_Text(pDX, IDC_CD, m_edit_cd);
 	DDX_Text(pDX, IDC_DATA, m_edit_data);
 	//}}AFX_DATA_MAP
@@ -49,6 +55,12 @@ void CDirectoriesDlg::OnOK()
 	xcc_dirs::set_dir(game_td, static_cast<string>(m_edit_td_primary));
 	xcc_dirs::set_td_secondary_dir(static_cast<string>(m_edit_td_secondary));
 	xcc_dirs::set_dir(game_ra, static_cast<string>(m_edit_ra));
+	xcc_dirs::set_dir(game_dune2000, static_cast<string>(m_edit_dune2000));
+	xcc_dirs::set_dir(game_ts, static_cast<string>(m_edit_ts));
+	xcc_dirs::set_dir(game_ra2, static_cast<string>(m_edit_ra2));
+	xcc_dirs::set_dir(game_rg, static_cast<string>(m_edit_rg));
+	xcc_dirs::set_dir(game_gr, static_cast<string>(m_edit_gr));
+	xcc_dirs::set_dir(game_gr_zh, static_cast<string>(m_edit_gr_zh));
 	xcc_dirs::set_cd_dir(static_cast<string>(m_edit_cd));
 }
 
@@ -80,6 +92,9 @@ BOOL CDirectoriesDlg::OnInitDialog()
 			<< item(IDC_DUNE2000_STATIC, NORESIZE)
 			<< item(IDC_TS_STATIC, NORESIZE)
 			<< item(IDC_RA2_STATIC, NORESIZE)
+			<< item(IDC_RG_STATIC, NORESIZE)
+			<< item(IDC_GR_STATIC, NORESIZE)
+			<< item(IDC_GR_ZH_STATIC, NORESIZE)
 			<< item(IDC_DATA_STATIC, NORESIZE)
 			<< item(IDC_CD_STATIC, NORESIZE)
 			)
@@ -91,6 +106,9 @@ BOOL CDirectoriesDlg::OnInitDialog()
 			<< item(IDC_DUNE2000, ABSOLUTE_VERT)
 			<< item(IDC_TS, ABSOLUTE_VERT)
 			<< item(IDC_RA2, ABSOLUTE_VERT)
+			<< item(IDC_RG, ABSOLUTE_VERT)
+			<< item(IDC_GR, ABSOLUTE_VERT)
+			<< item(IDC_GR_ZH, ABSOLUTE_VERT)
 			<< item(IDC_DATA, ABSOLUTE_VERT)
 			<< item(IDC_CD, ABSOLUTE_VERT)
 			)

@@ -27,14 +27,14 @@ public:
 	void header(t_header v);
 	int write_map(string fname, const string& ini);
 	static bool wrong_version(const Cxif_key& k);
-	static void write_map(ostream& os, const Cxif_key& k, const Cvirtual_binary palet);
+	static void write_map(ostream& os, const Cxif_key& k, const Cvirtual_binary palette);
 	static bool write_mmx(const Cxif_key& k);
 	static void write_pkt(ostream& os, const Cxif_key& k, string title);
 	int process_section_start(string_view) override;
 	bool process_section() const override;
 	int process_key(string_view, string_view) override;
 	void process_section_end() override;
-	void encode(const Cvirtual_binary palet);
+	void encode(const Cvirtual_binary palette);
 	Cvirtual_image create_heightmap() const;
 	Cvirtual_image create_preview() const;
 	void extract_map(t_iso_map_pack_entry4* d) const;

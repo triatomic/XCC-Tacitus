@@ -3,7 +3,7 @@
 #include <string>
 #include "cc_file_sh.h"
 #include "cc_structures.h"
-#include "palet.h"
+#include "palette.h"
 #include "virtual_image.h"
 
 using namespace std;
@@ -19,5 +19,5 @@ public:
 	}
 };
 
-int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* palet, int cx, int cy, int q = -1, int pixel = 3);
-int jpeg_file_write(const string& name, const byte* image, const t_palet_entry* palet, int cx, int cy, int q = -1, int pixel = 3);
+int jpeg_file_write(Cvirtual_file& f, const byte* image, const t_palette_entry* palette, int cx, int cy, int q = -1, int pixel = 3);
+int jpeg_file_write(const string& name, const byte* image, const t_palette_entry* palette, int cx, int cy, int q = -1, int pixel = 3);

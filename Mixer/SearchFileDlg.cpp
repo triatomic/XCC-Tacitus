@@ -1,8 +1,6 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "SearchFileDlg.h"
-
-#include <boost/algorithm/string.hpp>
 #include "string_conversion.h"
 
 CSearchFileDlg::CSearchFileDlg(CWnd* pParent /*=NULL*/)
@@ -70,8 +68,6 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 		}
 		else if (fname_filter(name, file_name))
 			add(mix_name + " - " + name, mix_id, id, sub_mix_id);
-
-		// deep search in mix
 		if (f.get_type(id) == ft_mix)
 		{
 			Cmix_file fg;
@@ -121,23 +117,9 @@ void CSearchFileDlg::OnFind()
 		CWaitCursor wait;
 		m_list.DeleteAllItems();
 		m_map.clear();
-
-		//for (auto& i : m_main_frame->mix_map_list())
-		//{
-		//	if (i.second.fname.empty())
-		//		continue;
-		//	Cmix_file f;
-		//	if (!f.open(i.second.fname))
-		//	{
-		//		const t_mix_map_list_entry& e = find_ref(m_main_frame->mix_map_list(), i.second.parent);
-		//		find(f, get_filename(), e.name + " - " + i.second.name, i.first);
-		//	}
-		//}
-		
 		find(m_main_frame->left_mix_pane()->t_index_list(), " (1)", m_main_frame->left_mix_pane()->current_dir());
 		m_sepindex = m_map.size();
 		find(m_main_frame->right_mix_pane()->t_index_list(), " (2)", m_main_frame->right_mix_pane()->current_dir());
-
 		m_list.SetItemCount(m_map.size());
 		for (auto& i : m_map)
 			m_list.InsertItemData(i.first);

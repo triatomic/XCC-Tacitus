@@ -1,22 +1,22 @@
 #include "stdafx.h"
 #include <climits>
-#include "palet.h"
+#include "palette.h"
 
-void convert_image_8_to_24(const byte* s, byte* d, int cx, int cy, const t_palet palet)
+void convert_image_8_to_24(const byte* s, byte* d, int cx, int cy, const t_palette palette)
 {
 	const byte* r = s;
 	byte* w = d;
 	int c = cx * cy;
 	while (c--)
 	{
-		const t_palet_entry* v = palet + *r++;
+		const t_palette_entry* v = palette + *r++;
 		*w++ = v->r;
 		*w++ = v->g;
 		*w++ = v->b;
 	}
 }
 
-void create_downsample_table(const t_palet palet, byte* rp)
+void create_downsample_table(const t_palette palette, byte* rp)
 {
 	byte* rp_w = rp;
 	for (int b = 0; b < 0x40; b++)
@@ -24,7 +24,7 @@ void create_downsample_table(const t_palet palet, byte* rp)
 		for (int g = 0; g < 0x40; g++)
 		{
 			for (int r = 0; r < 0x40; r++)
-				*rp_w++ = find_color(r * 255 / 63, g * 255 / 63, b * 255 / 63, palet);
+				*rp_w++ = find_color(r * 255 / 63, g * 255 / 63, b * 255 / 63, palette);
 		}
 	}
 }
@@ -43,7 +43,7 @@ void convert_image_24_to_8(const byte* s, byte* d, int cx, int cy, const byte* r
 	}
 }
 
-void convert_image_24_to_8(const byte* s, byte* d, int cx, int cy, const t_palet palet)
+void convert_image_24_to_8(const byte* s, byte* d, int cx, int cy, const t_palette palette)
 {
 	const byte* r = s;
 	byte* w = d;
@@ -53,49 +53,49 @@ void convert_image_24_to_8(const byte* s, byte* d, int cx, int cy, const t_palet
 		int red = *r++;
 		int green = *r++;
 		int blue = *r++;
-		*w++ = find_color(red, green, blue, palet);
+		*w++ = find_color(red, green, blue, palette);
 	}
 }
 
-void downsample_image(const t_palet32entry* s, byte* d, int cx, int cy, const byte* rp)
+void downsample_image(const t_palette32_entry* s, byte* d, int cx, int cy, const byte* rp)
 {
-	const t_palet32entry* r = s;
+	const t_palette32_entry* r = s;
 	byte* w = d;
 	int c = cx * cy;
 	while (c--)
 	{
-		t_palet32entry e = *r++;
+		t_palette32_entry e = *r++;
 		*w++ = e.a < 0x80 ? 0 : rp[e.r >> 2 | (e.g & 0xfc) << 4 | (e.b & 0xfc) << 10];
 	}
 }
 
-void downsample_image(const t_palet32entry* s, byte* d, int cx, int cy, const t_palet palet)
+void downsample_image(const t_palette32_entry* s, byte* d, int cx, int cy, const t_palette palette)
 {
-	const t_palet32entry* r = s;
+	const t_palette32_entry* r = s;
 	byte* w = d;
 	int c = cx * cy;
 	while (c--)
 	{
-		t_palet32entry e = *r++;
+		t_palette32_entry e = *r++;
 		if (e.a < 0x80)
 			*w++ = 0;
 		else
-			*w++ = find_color(e.r, e.g, e.b, palet);
+			*w++ = find_color(e.r, e.g, e.b, palette);
 	}
 }
 
-void upsample_image(const byte* s, t_palet32entry* d, int cx, int cy, const t_palet palet)
+void upsample_image(const byte* s, t_palette32_entry* d, int cx, int cy, const t_palette palette)
 {
 	const byte* r = s;
-	t_palet32entry* w = d;
+	t_palette32_entry* w = d;
 	int c = cx * cy;
 	while (c--)
 	{
-		t_palet32entry& e = *w++;
+		t_palette32_entry& e = *w++;
 		int z = *r++;
 		if (z)
 		{
-			const t_palet_entry* v = palet + z;
+			const t_palette_entry* v = palette + z;
 			e.r = v->r;
 			e.g = v->g;
 			e.b = v->b;
@@ -111,7 +111,7 @@ void upsample_image(const byte* s, t_palet32entry* d, int cx, int cy, const t_pa
 	}
 }
 
-void convert_palet_18_to_24(const t_palet s, t_palet d)
+void convert_palette_18_to_24(const t_palette s, t_palette d)
 {
 	for (int i = 0; i < 256; i++)
 	{
@@ -121,7 +121,7 @@ void convert_palet_18_to_24(const t_palet s, t_palet d)
 	}
 }
 
-void convert_palet_24_to_18(const t_palet s, t_palet d)
+void convert_palette_24_to_18(const t_palette s, t_palette d)
 {
 	for (int i = 0; i < 256; i++)
 	{
@@ -131,25 +131,25 @@ void convert_palet_24_to_18(const t_palet s, t_palet d)
 	}
 }
 
-void convert_palet_18_to_24(t_palet palet)
+void convert_palette_18_to_24(t_palette palette)
 {
-	convert_palet_18_to_24(palet, palet);
+	convert_palette_18_to_24(palette, palette);
 }
 
-void convert_palet_24_to_18(t_palet palet)
+void convert_palette_24_to_18(t_palette palette)
 {
-	convert_palet_24_to_18(palet, palet);
+	convert_palette_24_to_18(palette, palette);
 }
 
-int find_color(int r, int g, int b, const t_palet p)
+int find_color(int r, int g, int b, const t_palette palette)
 {
 	int best_i;
 	int min_d = INT_MAX;
 	for (int i = 0; i < 256; i++)
 	{
-		int d_r = p[i].r - r;
-		int d_g = p[i].g - g;
-		int d_b = p[i].b - b;
+		int d_r = palette[i].r - r;
+		int d_g = palette[i].g - g;
+		int d_b = palette[i].b - b;
 		int d = d_r * d_r + d_g * d_g + d_b * d_b;
 		if (d < min_d)
 		{
@@ -160,26 +160,7 @@ int find_color(int r, int g, int b, const t_palet p)
 	return best_i;
 }
 
-int find_color_t(int r, int g, int b, const t_palet p)
-{
-	int best_i;
-	int min_d = INT_MAX;
-	for (int i = 1; i < 256; i++)
-	{
-		int d_r = p[i].r - r;
-		int d_g = p[i].g - g;
-		int d_b = p[i].b - b;
-		int d = d_r * d_r + d_g * d_g + d_b * d_b;
-		if (d < min_d)
-		{
-			min_d = d;
-			best_i = i;
-		}
-	}
-	return best_i;
-}
-
-void create_rp(const t_palet s1, const t_palet s2, byte* d)
+void create_rp(const t_palette s1, const t_palette s2, byte* d)
 {
 	d[0] = 0;
 	for (int i = 1; i < 256; i++)

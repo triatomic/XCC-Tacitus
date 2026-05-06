@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk ls *)",
+      "Bash(rtk grep *)",
+      "Bash(awk '{print $3}')",
+      "Bash(awk '/^#define ID_/ {print $3}' \"C:/XCC/SourceCode/Mixer/resource.h\")",
+      "Bash(rtk wc *)",
+      "Bash(where msbuild *)",
+      "Bash(where devenv *)",
+      "Bash(\"/c/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe\" -latest -property installationPath)",
+      "Bash('/c/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe' 'C:/XCC/SourceCode/Mixer/XCC Mixer.vcxproj' -p:Configuration=Debug -p:Platform=Win32 -nologo -v:minimal -m)",
+      "Read(//c/XCC/Vodrix/**)",
+      "Bash(rtk git *)",
+      "Bash(rtk diff *)",
+      "Bash(mkdir -p /tmp/dm)",
+      "Bash(cp \"C:/XCC/SourceCode/Mixer/theme.h\" \"C:/XCC/SourceCode/Mixer/theme.cpp\" /tmp/dm/)",
+      "Bash(git rm *)",
+      "Bash(rm -rf Mixer Library misc)",
+      "Bash(cp -r \"C:/XCC/Vodrix/Mixer\" \"C:/XCC/Vodrix/Library\" \"C:/XCC/Vodrix/misc\" .)",
+      "Bash(rtk read *)",
+      "Bash(awk '/^#define ID_THEME/' \"C:/XCC/SourceCode/Mixer/resource.h\")"
+    ]
+  }
+}

@@ -40,7 +40,7 @@ public:
 		{
 			while (!m_f.is_video_chunk())
 				m_f.skip_chunk();
-			m_vqa_d.decode_vqfr_chunk(m_f.read_chunk().data(), m_frame.write_start(cb_image()), m_palet);
+			m_vqa_d.decode_vqfr_chunk(m_f.read_chunk().data(), m_frame.write_start(cb_image()), m_palette);
 		}
 		else
 		{
@@ -56,9 +56,9 @@ public:
 		return 0;
 	}
 
-	const t_palet_entry* palet() const
+	const t_palette_entry* palette() const
 	{
-		return m_palet;
+		return m_palette;
 	}
 
 	int seek(int f)
@@ -97,7 +97,7 @@ private:
 	Cvqa_file m_f;
 	Cvirtual_binary m_frame;
 	int m_frame_i;
-	t_palet m_palet;
+	t_palette m_palette;
 };
 
 Cvideo_decoder* Cvqa_file::decoder()
@@ -222,7 +222,7 @@ int Cvqa_file::extract_as_avi(const string& name, HWND hwnd)
 							vf->bmiHeader.biSizeImage = 0; 
 							if (get_cbits_pixel() == 8)
 							{
-								t_palet palet;
+								t_palette palette;
 								byte* frame = new byte[cx * cy];
 								byte* frame_flipped = new byte[cx * cy];
 								for (int i = 0; i < get_c_frames(); i++)
@@ -242,13 +242,13 @@ int Cvqa_file::extract_as_avi(const string& name, HWND hwnd)
 									}
 									if (error)
 										break;
-									vqa_d.decode_vqfr_chunk(read_chunk().data(), frame, palet);
+									vqa_d.decode_vqfr_chunk(read_chunk().data(), frame, palette);
 									flip_frame(frame, frame_flipped, cx, cy, 1);
 									for (int j = 0; j < 256; j++)
 									{
-										vf->bmiColors[j].rgbRed = palet[j].r;
-										vf->bmiColors[j].rgbGreen = palet[j].g;
-										vf->bmiColors[j].rgbBlue = palet[j].b;
+										vf->bmiColors[j].rgbRed = palette[j].r;
+										vf->bmiColors[j].rgbGreen = palette[j].g;
+										vf->bmiColors[j].rgbBlue = palette[j].b;
 									}
 									// xcc_log::write_line("Writing frame " + n(i));
 									if (!i && AVIStreamSetFormat(vc, 0, vf, cb_vf))
@@ -338,16 +338,16 @@ int Cvqa_file::extract_as_pcx(const Cfname& name, t_file_type ft)
 	int cy = get_cy();
 	if (get_cbits_pixel() == 8)
 	{
-		t_palet palet;
+		t_palette palette;
 		byte* frame = new byte[cx * cy];
 		for (int i = 0; i < get_c_frames(); i++)
 		{
 			while (!is_video_chunk())
 				skip_chunk();
-			vqa_d.decode_vqfr_chunk(read_chunk().data(), frame, palet);
+			vqa_d.decode_vqfr_chunk(read_chunk().data(), frame, palette);
 			Cfname t = name;
 			t.set_title(name.get_ftitle() + " " + nwzl(4, i));
-			error = image_file_write(t, ft, frame, palet, cx, cy);
+			error = image_file_write(t, ft, frame, palette, cx, cy);
 			if (error)
 				break;
 		}

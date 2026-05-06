@@ -5,7 +5,7 @@ Cvideo_decoder::~Cvideo_decoder()
 {
 }
 
-const t_palet_entry* Cvideo_decoder::palet() const
+const t_palette_entry* Cvideo_decoder::palette() const
 {
 	return NULL;
 }

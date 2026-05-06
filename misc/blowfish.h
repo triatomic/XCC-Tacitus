@@ -1,23 +1,53 @@
 #pragma once
 
 #include <vartypes.h>
+#include <xcc/data_ref.h>
 
 class Cblowfish
 {
 public:
-	using t_bf_p = uint32_t[18];
-	using t_bf_s = uint32_t[4][256];
+	void Submit_Key(data_ref key);
 
-	void set_key(data_ref);
-	void encipher(const void* s, void* d, int size) const;
-	void decipher(const void* s, void* d, int size) const;
+	int Encrypt(void const* plaintext,  void* cyphertext, int length);
+	int Decrypt(void const* cyphertext, void* plaintext, int length);
+
+	/*
+	**	This is the maximum key length supported.
+	*/
+	enum
+	{
+		MAX_KEY_LENGTH = 56
+	};
+
 private:
-	void encipher(uint32_t& xl, uint32_t& xr) const;
-	void decipher(uint32_t& xl, uint32_t& xr) const;
-	uint32_t S(uint32_t x, int i) const;
-	uint32_t bf_f(uint32_t x) const;
-	void ROUND(uint32_t& a, uint32_t b, int n) const;
+	bool IsKeyed;
 
-	t_bf_p m_p;
-	t_bf_s m_s;
+	void Sub_Key_Encrypt(unsigned int& left, unsigned int& right);
+
+	void Process_Block(void const* plaintext, void* cyphertext, unsigned int const* ptable);
+
+	enum
+	{
+		ROUNDS = 16,        // Feistal round count (16 is standard).
+		BYTES_PER_BLOCK = 8 // The number of bytes in each cypher block (don't change).
+	};
+
+	/*
+	**	Initialization data for sub keys. The initial values are constant and
+	**	filled with a number generated from pi. Thus they are not random but
+	**	they don't hold a weak pattern either.
+	*/
+	static unsigned int const P_Init[(int)ROUNDS + 2];
+	static unsigned int const S_Init[4][UCHAR_MAX + 1];
+
+	/*
+	**	Permutation tables for encryption and decryption.
+	*/
+	unsigned int P_Encrypt[(int)ROUNDS + 2];
+	unsigned int P_Decrypt[(int)ROUNDS + 2];
+
+	/*
+	**	S-Box tables (four).
+	*/
+	unsigned int bf_S[4][UCHAR_MAX + 1];
 };

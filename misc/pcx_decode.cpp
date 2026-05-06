@@ -106,7 +106,7 @@ int pcx_encode(const byte* s, byte* d, int _cx, int cy, int c_planes)
 				write_b += 2 * _cx;
 			}
 		}
-		else  // 3 or 4
+		else  // 3 or 4 
 		{
 			auto r = s;
 			for (int y = 0; y < cy; y++)
@@ -125,7 +125,6 @@ int pcx_encode(const byte* s, byte* d, int _cx, int cy, int c_planes)
 		}
 		cy *= 3;
 	}
-
 	_cx--;
 	const byte* r = t;
 	byte* w = d;

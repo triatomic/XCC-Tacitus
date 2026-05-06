@@ -22,5 +22,5 @@ Cvirtual_image Cpcx_file::vimage() const
 {
 	Cvirtual_binary image;
 	pcx_decode(get_image(), image.write_start(cb_image()), header());
-	return Cvirtual_image(image, cx(), cy(), cb_pixel(), cb_pixel() == 1 ? *get_palet() : NULL);
+	return Cvirtual_image(image, cx(), cy(), cb_pixel(), cb_pixel() == 1 ? *get_palette() : NULL);
 }

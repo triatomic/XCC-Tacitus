@@ -2,7 +2,7 @@
 
 #include "cc_structures.h"
 #include "fname.h"
-#include "palet.h"
+#include "palette.h"
 #include "video_file.h"
 #include "virtual_image.h"
 
@@ -54,9 +54,9 @@ public:
         return 4 * (header().c_frames + 2);
     }
 
-	int get_cb_palet() const
+	int get_cb_palette() const
 	{
-		return palet() ? sizeof(t_palet) : 0;
+		return palette() ? sizeof(t_palette) : 0;
 	}
 
 	const byte* get_frame(int i) const
@@ -71,13 +71,13 @@ public:
 
     int get_offset(int i) const
     {
-		return get_index()[i] + get_cb_palet();
+		return get_index()[i] + get_cb_palette();
     }
 
-    const t_palet_entry* palet() const
+    const t_palette_entry* palette() const
     {
         return get_index()[cf() + has_loop()] != get_size() 
-			? reinterpret_cast<const t_palet_entry*>(data() + sizeof(t_wsa_header) + get_cb_index()) 
+			? reinterpret_cast<const t_palette_entry*>(data() + sizeof(t_wsa_header) + get_cb_index()) 
 			: NULL;
     }
 

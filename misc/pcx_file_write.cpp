@@ -33,25 +33,25 @@ int Cpcx_file_write::write_image(const void* data, int size)
 	return write(data, size);
 }
 
-int Cpcx_file_write::write_palet(const t_palet palet)
+int Cpcx_file_write::write_palette(const t_palette palette)
 {
 	const byte v = 12;
 	int error = write(&v, 1);
 	if (error)
 		return error;
-	return write(palet, sizeof(t_palet));
+	return write(palette, sizeof(t_palette));
 }
 
-Cvirtual_binary pcx_file_write(const byte* image, const t_palet_entry* palet, int cx, int cy, int planes)
+Cvirtual_binary pcx_file_write(const byte* image, const t_palette_entry* palette, int cx, int cy, int planes)
 {
 	Cvirtual_file f;
-	pcx_file_write(f, image, palet, cx, cy, planes);
+	pcx_file_write(f, image, palette, cx, cy, planes);
 	return f.read();
 }
 
-void pcx_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* palet, int cx, int cy, int planes)
+void pcx_file_write(Cvirtual_file& f, const byte* image, const t_palette_entry* palette, int cx, int cy, int planes)
 {
-	int c_planes = palet ? 1 : planes;
+	int c_planes = palette ? 1 : planes;
 	t_pcx_header header;
 	header.manufacturer = 10;
 	header.version = 5;
@@ -69,26 +69,26 @@ void pcx_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* pa
 	byte* d = new byte[2 * cx * cy * c_planes];
 	f.write(d, pcx_encode(image, d, cx, cy, c_planes));
 	delete[] d;
-	if (palet)
-		f.write(palet, sizeof(t_palet));
+	if (palette)
+		f.write(palette, sizeof(t_palette));
 }
 
-int pcx_file_write(const string& name, const byte* image, const t_palet_entry* palet, int cx, int cy, int planes)
+int pcx_file_write(const string& name, const byte* image, const t_palette_entry* palette, int cx, int cy, int planes)
 {
 	Cpcx_file_write f;
 	int error = f.open_write(name);
 	if (!error)
 	{
-		int c_planes = palet ? 1 : 3;
+		int c_planes = palette ? 1 : 3;
 		f.set_size(cx, cy, c_planes);
 		error = f.write_header();
 		if (!error)
 		{
 			byte* d = new byte[2 * cx * cy * c_planes];
-			error = f.write_image(d, pcx_encode(image, d, cx, cy, palet ? 1 : planes));
+			error = f.write_image(d, pcx_encode(image, d, cx, cy, palette ? 1 : planes));
 			delete[] d;
-			if (!error && palet)
-				error = f.write_palet(palet);
+			if (!error && palette)
+				error = f.write_palette(palette);
 		}
 		f.close();
 	}

@@ -78,12 +78,13 @@ string swsl(int l, string s)
 string swsr(int l, string s)
 {
 	while (s.size() < l)
-		s += ' ';
+		s = s + ' ';
 	return s;
 }
 
 string nwzl(int l, unsigned int v)
 {
+
 	string s = n(v);
 	while (s.size() < l)
 		s = '0' + s;
@@ -111,12 +112,59 @@ string nh(int l, __int64 v)
 	return s;
 }
 
+bool is_white(char v)
+{
+	switch (v)
+	{
+	case '\t':
+	case ' ':
+		return true;
+	default:
+		return false;
+	}
+}
+
+void ltrim(string& s)
+{
+	while (!s.empty() && is_white(s[0]))
+		s.erase(0, 1);
+}
+
+void rtrim(string& s)
+{
+	while (!s.empty() && is_white(s[s.length() - 1]))
+		s.erase(s.length() - 1, 1);
+}
+
+string to_lower(const string& s)
+{
+	string r;
+	for (int i = 0; i < s.length(); i++)
+		r += tolower(s[i]);
+	return r;
+}
+
+string to_normal(string s)
+{
+	if (!s.empty())
+		s[0] = toupper(s[0]);
+	return s;
+}
+
+string to_upper(const string& s)
+{
+	string r;
+	for (int i = 0; i < s.length(); i++)
+		r += toupper(s[i]);
+	return r;
+}
+
 string nwp(int l, unsigned int v)
 {
 	string r;
 	string s = n(v);
 	while (1)
-	{		
+	{
 		int l = s.size();
 		if (l > 3)
 		{
@@ -206,12 +254,12 @@ string trim_field(const string& v)
 	{
 		if (isspace(v[i]))
 			copy_white = true;
-		else 
+		else
 		{
 			if (copy_white)
 			{
 				if (!r.empty())
-					r += ' ';				
+					r += ' ';
 				copy_white = false;
 			}
 			r += v[i];
@@ -245,4 +293,12 @@ string trim_text(const string& v)
 		i = p + 1;
 	}
 	return r;
+}
+
+bool iequals(const string& l, const string& r)
+{
+	return l.size() == r.size()
+		&& equal(l.cbegin(), l.cend(), r.cbegin(),
+			[](string::value_type l1, string::value_type r1)
+			{ return toupper(l1) == toupper(r1); });
 }

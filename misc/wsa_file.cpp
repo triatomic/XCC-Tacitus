@@ -38,8 +38,8 @@ public:
 		if (m_f.get_offset(m_frame_i))
 		{
 			Cvirtual_binary s;
-			decode80(m_f.get_frame(m_frame_i), s.write_start(64 << 10));
-      decode40(s.data(), m_frame.data_edit());
+			LCWDecompress(m_f.get_frame(m_frame_i), s.write_start(64 << 10));
+      ApplyXORDelta(s.data(), m_frame.data_edit());
 		}
 		if (d)
 			m_frame.read(d);
@@ -47,9 +47,9 @@ public:
 		return 0;
 	}
 
-	const t_palet_entry* palet() const
+	const t_palette_entry* palette() const
 	{
-		return m_f.palet();
+		return m_f.palette();
 	}
 
 	int seek(int f)
@@ -99,8 +99,8 @@ void Cwsa_file::decode(void* d) const
 			memcpy(w, w - cb_image(), cb_image());
 		if (get_offset(i))
 		{
-			decode80(get_frame(i), s.write_start(64 << 10));
-			decode40(s.data(), w);
+			LCWDecompress(get_frame(i), s.write_start(64 << 10));
+			ApplyXORDelta(s.data(), w);
 		}
 		w += cb_image();
 	}
@@ -110,5 +110,5 @@ Cvirtual_image Cwsa_file::vimage() const
 {
 	Cvirtual_binary image;
 	decode(image.write_start(cb_video()));
-	return Cvirtual_image(image, cx(), cf() * cy(), cb_pixel(), palet(), true);
+	return Cvirtual_image(image, cx(), cf() * cy(), cb_pixel(), palette(), true);
 }

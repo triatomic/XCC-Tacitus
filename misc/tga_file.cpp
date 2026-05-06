@@ -22,17 +22,17 @@ int Ctga_file::decode(Cvirtual_image& d) const
 	{
 	case 1:
 		{
-			t_palet palet;
+			t_palette palette;
 			for (int i = 0; i < 0x100; i++)
-				palet[i].r = palet[i].g = palet[i].b = i;
-			d.load(image(), cx(), cy(), cb_pixel(), palet);
+				palette[i].r = palette[i].g = palette[i].b = i;
+			d.load(image(), cx(), cy(), cb_pixel(), palette);
 		}
 		break;
 	case 2:
 		{
 			d.load(NULL, cx(), cy(), 3, NULL);
 			const __int16* r = reinterpret_cast<const __int16*>(image());
-			t_palet_entry* w = reinterpret_cast<t_palet_entry*>(d.image_edit());
+			t_palette_entry* w = reinterpret_cast<t_palette_entry*>(d.image_edit());
 			for (int i = 0; i < cx() * cy(); i++)
 			{
 				int v = *r++;
@@ -83,7 +83,7 @@ Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel)
 		{
 		case 3:
 		{
-			auto* r = reinterpret_cast<const t_palet_entry*>(image);
+			auto* r = reinterpret_cast<const t_palette_entry*>(image);
 			for (int i = 0; i < cx * cy; i++)
 			{
 				*w++ = r->b;
@@ -95,7 +95,7 @@ Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel)
 		}
 		case 4:
 		{
-			auto* r32 = reinterpret_cast<const t_palet32_entry*>(image);
+			auto* r32 = reinterpret_cast<const t_palette32_entry*>(image);
 			for (int i = 0; i < cx * cy; i++)
 			{
 				*w++ = r32->b;
@@ -108,7 +108,7 @@ Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel)
 		}
 		case 6:
 		{
-			auto* r48 = reinterpret_cast<const t_palet48_entry*>(image);
+			auto* r48 = reinterpret_cast<const t_palette48_entry*>(image);
 			for (int i = 0; i < cx * cy; i++)
 			{
 				*w++ = linear2sRGB(r48->b);
@@ -120,7 +120,7 @@ Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel)
 		}
 		case 8:
 		{
-			auto* r64 = reinterpret_cast<const t_palet64_entry*>(image);
+			auto* r64 = reinterpret_cast<const t_palette64_entry*>(image);
 			for (int i = 0; i < cx * cy; i++)
 			{
 				*w++ = linear2sRGB(r64->b);
@@ -138,10 +138,10 @@ Cvirtual_file tga_file_write(const byte* image, int cx, int cy, int cb_pixel)
 	return d;
 }
 
-Cvirtual_file tga_file_write(const byte* image, int cx, int cy, const t_palet_entry* palet)
+Cvirtual_file tga_file_write(const byte* image, int cx, int cy, const t_palette_entry* palette)
 {
 	Cvirtual_image vi;
-	vi.load(image, cx, cy, 1, palet);
+	vi.load(image, cx, cy, 1, palette);
 	vi.increase_color_depth(3);
 	return vi.save(ft_tga);
 }

@@ -20,6 +20,9 @@ public:
 	CString	m_edit_ts;
 	CString	m_edit_cd;
 	CString	m_edit_data;
+	CString	m_edit_rg;
+	CString	m_edit_gr;
+	CString	m_edit_gr_zh;
 	//}}AFX_DATA
 
 

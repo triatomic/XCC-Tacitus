@@ -205,8 +205,8 @@ void Cvqa_decode::decode_vqfl_chunk(const byte* s, int cb_s)
 	if (s[3] == 'Z')
 	{
 		int cb_in = s[8]
-			? decode80(s + 8, m_in_decoded)
-			: decode80r(s + 9, m_in_decoded);
+			? LCWDecompress(s + 8, m_in_decoded)
+			: LCWDecompress(s + 9, m_in_decoded);
 		decode_cbf_chunk(m_in_decoded, cb_in);
 	}
 	else
@@ -218,7 +218,7 @@ void Cvqa_decode::decode_vqfl_chunk(const Cvirtual_binary& s)
 	decode_vqfl_chunk(s.data(), s.size());
 }
 
-void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palet palet)
+void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palette palette)
 {
 	if (!in_raw)
 		return;
@@ -241,9 +241,9 @@ void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palet palet
 		else if (compressed)
 		{
 			if (in_raw[8])
-				cb_in = decode80(in_raw + 8, in_decoded);
+				cb_in = LCWDecompress(in_raw + 8, in_decoded);
 			else
-				cb_in = decode80r(in_raw + 9, in_decoded);
+				cb_in = LCWDecompress(in_raw + 9, in_decoded);
 			in = in_decoded;
 		}
 		else
@@ -255,8 +255,8 @@ void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palet palet
 			decode_cbf_chunk(in, cb_in);
 		else if (id == vqa_cpl_id)
 		{
-			memcpy(palet, in, cb_in);
-			convert_palet_18_to_24(palet);
+			memcpy(palette, in, cb_in);
+			convert_palette_18_to_24(palette);
 		}
 		else if (id == vqa_vpr_id || id == vqa_vpt_id)
 		{
@@ -270,7 +270,7 @@ void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palet palet
 	if (c_cbf_read & ~7)
 	{
 		if (cbf_compressed)
-			decode80(reinterpret_cast<const byte*>(cbf_new), reinterpret_cast<byte*>(cbf));
+			LCWDecompress(reinterpret_cast<const byte*>(cbf_new), reinterpret_cast<byte*>(cbf));
 		else
 			memcpy(cbf, cbf_new, cbf_write - reinterpret_cast<const byte*>(cbf_new));
 		c_cbf_read = 0;

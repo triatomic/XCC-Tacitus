@@ -240,14 +240,14 @@ int Cmap_ts_encoder::overlay_data_decode4(const byte* s, byte* d, const byte* ov
 	return cb_d;
 }
 
-static Cvirtual_binary preview_decode4(Cvirtual_binary s, const Cvirtual_binary palet)
+static Cvirtual_binary preview_decode4(Cvirtual_binary s, const Cvirtual_binary palette)
 {
 	using t_vector = vector<__int64>;
 
 	t_vector default_vector;
 	{
-		const byte* r = palet.data();
-		const byte* r_end = palet.data() + palet.size();
+		const byte* r = palette.data();
+		const byte* r_end = palette.data() + palette.size();
 		while (r < r_end)
 		{
 			__int64 v = 0;
@@ -286,14 +286,14 @@ static void log_iso_map_pack(const void* e, int count, const Cmap_ts_encoder::t_
 {
 	ofstream l("c:/temp/iso_map_pack.txt");
 	Cvirtual_image buffer, z_buffer;
-	t_palet palet;
+	t_palette palette;
 	for (int i = 0; i < 16; i++)
-		palet[i].r = palet[i].g = palet[i].b = i * 255 / 15;
-	palet[255].r = 255;
-	palet[255].g = palet[255].b = 0;
+		palette[i].r = palette[i].g = palette[i].b = i * 255 / 15;
+	palette[255].r = 255;
+	palette[255].g = palette[255].b = 0;
 	const int cx = size.cx + size.cy;
 	const int cy = cx;
-	buffer.load(NULL, cx, cy, 1, palet);
+	buffer.load(NULL, cx, cy, 1, palette);
 	memset(buffer.image_edit(), -1, cx * cy);
 	int z_min = INT_MAX;
 	int z_max = INT_MIN;
@@ -308,8 +308,8 @@ static void log_iso_map_pack(const void* e, int count, const Cmap_ts_encoder::t_
 	}
 	buffer.save_as_png("d:/temp/buffer_map.png");
 	for (i = z_min; i <= z_max; i++)
-		palet[i].r = palet[i].g = palet[i].b = (i - z_min) * 255 / (z_max - z_min);
-	z_buffer.load(NULL, size.cx - 1, size.cy - 1, 1, palet);
+		palette[i].r = palette[i].g = palette[i].b = (i - z_min) * 255 / (z_max - z_min);
+	z_buffer.load(NULL, size.cx - 1, size.cy - 1, 1, palette);
 	for (int y = 1; y < size.cy; y++)
 	{
 		for (int x = 1; x < size.cx; x++)
@@ -322,12 +322,12 @@ static void log_iso_map_pack(const void* e, int count, const Cmap_ts_encoder::t_
 
 static void log_overlay_pack(const byte* s, const Cmap_ts_encoder::t_header& size)
 {
-	t_palet palet;
+	t_palette palette;
 	for (int i = 0; i < 256; i++)
-		palet[i].r = palet[i].g = palet[i].b = i;
+		palette[i].r = palette[i].g = palette[i].b = i;
 	Cvirtual_image buffer, overlay_buffer;
-	buffer.load(s, 512, 512, 1, palet);
-	overlay_buffer.load(NULL, size.cx - 1, size.cy - 1, 1, palet);
+	buffer.load(s, 512, 512, 1, palette);
+	overlay_buffer.load(NULL, size.cx - 1, size.cy - 1, 1, palette);
 	for (int y = 1; y < size.cy; y++)
 	{
 		for (int x = 1; x < size.cx; x++)
@@ -348,7 +348,7 @@ static void write_pack(ostream& os, const byte* s, int cb_s)
 	while (r < r_end)
 	{
 		char line[80];
-		int cb_line = min(r_end - r, 70);
+		int cb_line = min(int(r_end - r), 70);
 		memcpy(line, r, cb_line);
 		line[cb_line] = 0;
 		r += cb_line;
@@ -432,7 +432,7 @@ static void analyse_preview(Cvirtual_binary& s)
 {
 	using t_map = map<__int64, int>;
 
-	const t_palet_entry* r = reinterpret_cast<const t_palet_entry*>(s.data());
+	const t_palette_entry* r = reinterpret_cast<const t_palette_entry*>(s.data());
 	int count = s.size() / 6;
 	t_map map;
 	while (count--)
@@ -449,15 +449,15 @@ static void analyse_preview(Cvirtual_binary& s)
 	cmax_colors = max(cmax_colors, c_colors);
 }
 
-static Cvirtual_binary preview_encode4(Cvirtual_binary s, const Cvirtual_binary palet)
+static Cvirtual_binary preview_encode4(Cvirtual_binary s, const Cvirtual_binary palette)
 {
 	using t_map = map<__int64, int>;
 
 	t_map default_map;
 	int j = 0;
 	{
-		const byte* r = palet.data();
-		const byte* r_end = palet.data() + palet.size();
+		const byte* r = palette.data();
+		const byte* r_end = palette.data() + palette.size();
 		while (r < r_end)
 		{
 			__int64 v = 0;
@@ -469,7 +469,7 @@ static Cvirtual_binary preview_encode4(Cvirtual_binary s, const Cvirtual_binary 
 	Cvirtual_binary d;
 	t_map map;
 	int count = s.size() / 6;
-	const t_palet_entry* r = reinterpret_cast<const t_palet_entry*>(s.data());
+	const t_palette_entry* r = reinterpret_cast<const t_palette_entry*>(s.data());
 	__int16* w = reinterpret_cast<__int16*>(d.write_start(256 << 10));
 	while (count--)
 	{
@@ -489,7 +489,7 @@ static Cvirtual_binary preview_encode4(Cvirtual_binary s, const Cvirtual_binary 
 		i.second = j++;
 	}
 	count = s.size() / 6;
-	r = reinterpret_cast<const t_palet_entry*>(s.data());
+	r = reinterpret_cast<const t_palette_entry*>(s.data());
 	while (count--)
 	{
 		__int64 v0 = r->r << 16 | r->g << 8 | r->b;
@@ -504,7 +504,7 @@ static Cvirtual_binary preview_encode4(Cvirtual_binary s, const Cvirtual_binary 
 	return d;
 }
 
-void Cmap_ts_encoder::encode(const Cvirtual_binary palet)
+void Cmap_ts_encoder::encode(const Cvirtual_binary palette)
 {
 	Cvirtual_binary t;
 
@@ -517,7 +517,7 @@ void Cmap_ts_encoder::encode(const Cvirtual_binary palet)
 	// create_heightmap().save_as_png("d:/temp/hm.png");
 	// create_preview().save_as_png("d:/temp/pv.png");
 	// analyse_preview(preview_pack());
-	m_preview_pack = preview_encode4(preview_pack(), palet);
+	m_preview_pack = preview_encode4(preview_pack(), palette);
 }
 
 enum
@@ -566,7 +566,7 @@ void Cmap_ts_encoder::write_pkt(ostream& os, const Cxif_key& k, string title)
 		<< "GameMode=" << k.get_value_string(vi_gamemode) << endl;
 }
 
-void Cmap_ts_encoder::write_map(ostream& os, const Cxif_key& k, const Cvirtual_binary palet)
+void Cmap_ts_encoder::write_map(ostream& os, const Cxif_key& k, const Cvirtual_binary palette)
 {
 	t_header header;
 	header.cx = k.get_value_int(vi_cx);
@@ -598,7 +598,7 @@ void Cmap_ts_encoder::write_map(ostream& os, const Cxif_key& k, const Cvirtual_b
 	if (k.exists_value(vi_preview_pack))
 	{
 		os << "[PreviewPack]" << endl;
-		Cvirtual_binary t = preview_decode4(Cvirtual_binary(k.get_value(vi_preview_pack).get_data(), k.get_value(vi_preview_pack).get_size()), palet);
+		Cvirtual_binary t = preview_decode4(Cvirtual_binary(k.get_value(vi_preview_pack).get_data(), k.get_value(vi_preview_pack).get_size()), palette);
 		write_pack(os, d, encode5(t.data(), d, t.size(), 5));
 		// write_pack(os, d, encode5(k.get_value(vi_preview_pack).get_data(), d, k.get_value(vi_preview_pack).get_size(), 5));
 	}
@@ -639,10 +639,10 @@ static int get_x(int a, int b, int cx)
 Cvirtual_image Cmap_ts_encoder::create_heightmap() const
 {
 	Cvirtual_image image;
-	t_palet palet;
+	t_palette palette;
 	for (int i = 0; i < 16; i++)
-		palet[i].r = palet[i].g = palet[i].b = i * 255 / 15;
-	image.load(NULL, m_header.cx << 1, m_header.cy, 1, palet);
+		palette[i].r = palette[i].g = palette[i].b = i * 255 / 15;
+	image.load(NULL, m_header.cx << 1, m_header.cy, 1, palette);
 	const t_iso_map_pack_entry4* r = reinterpret_cast<const t_iso_map_pack_entry4*>(m_iso_map_pack.data());
 	int x_line = m_header.cx;
 	int r_line = m_header.cx + 1;
@@ -695,7 +695,7 @@ void Cmap_ts_encoder::extract_map(t_iso_map_pack_entry4* d) const
 	}
 }
 
-static const t_palet_entry* get_radar_colors(Cvirtual_binary& s, int tile, int sub_tile)
+static const t_palette_entry* get_radar_colors(Cvirtual_binary& s, int tile, int sub_tile)
 {
 	const byte* r = s.data();
 	if (tile != -1)
@@ -708,7 +708,7 @@ static const t_palet_entry* get_radar_colors(Cvirtual_binary& s, int tile, int s
 	}
 	int count = *r++;
 	r += 6 * sub_tile;
-	return reinterpret_cast<const t_palet_entry*>(r);
+	return reinterpret_cast<const t_palette_entry*>(r);
 }
 
 Cvirtual_image Cmap_ts_encoder::create_preview() const
@@ -727,7 +727,7 @@ Cvirtual_image Cmap_ts_encoder::create_preview() const
 		{
 			if (x + y & 1)
 			{
-				const t_palet_entry* c = get_radar_colors(s, r->tile, r->sub_tile);
+				const t_palette_entry* c = get_radar_colors(s, r->tile, r->sub_tile);
 				int a = get_x(x, y, m_header.cx) << 1;
 				int b = get_y(x, y, m_header.cx);	
 				image.pixel24(a, b, c[0]);

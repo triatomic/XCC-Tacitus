@@ -14,14 +14,13 @@ public:
 
 	using t_map = std::map<string, t_map_entry>;
 
-  virtual int post_open();
+	virtual int post_open();
 	void erase_value(const string& name);
 	string get_converted_value(const string& name) const;
 	void set_value(const string& name, const wstring& value, const string& extra_value);
 	static string convert2string(const wstring& s);
 	static wstring convert2wstring(const string& s);
 	Cvirtual_binary write() const;
-	void read_chunk(const byte*& stm, const string* lblname = nullptr);
 
 	bool is_valid() const
 	{
@@ -43,13 +42,11 @@ public:
 	wstring get_value(const string& name) const
 	{
 		return m_map.at(name).value;
-		//return find_ref(m_map, name).value;
 	}
 
 	string get_extra_value(const string& name) const
 	{
 		return m_map.at(name).extra_value;
-		//return find_ref(m_map, name).extra_value;
 	}
 
 	bool has_name(const string& name) const

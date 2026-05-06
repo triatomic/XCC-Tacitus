@@ -7,12 +7,13 @@
 #include "xap.h"
 #include "xm_types.h"
 
+
 struct t_index_entry
 {
 	string description;
 	t_file_type ft;
 	string name;
-	long long size;
+	string size;
 };
 
 class CXCCMixerView : public CListView
@@ -56,7 +57,7 @@ public:
 	int get_current_index() const;
 	int get_paste_fname(string& fname, t_file_type ft, const char* extension, const char* filter);
 	void paste_as_image(t_file_type ft, const char* extension, const char* filter);
-	const t_palet_entry* get_default_palet() const;
+	const t_palette_entry* get_default_palette() const;
 	string get_dir() const;
 	void set_reg_key(const string& v);
 	int get_id(int i) const;
@@ -133,8 +134,6 @@ protected:
 	afx_msg void OnUpdatePopupDelete(CCmdUI* pCmdUI);
 	afx_msg void OnPopupOpen();
 	afx_msg void OnUpdatePopupOpen(CCmdUI* pCmdUI);
-	afx_msg void OnPopupOpenWithFinalsun();
-	afx_msg void OnUpdatePopupOpenWithFinalsun(CCmdUI* pCmdUI);
 	afx_msg void OnPopupCopyAsVXL();
 	afx_msg void OnUpdatePopupCopyAsVXL(CCmdUI* pCmdUI);
 	afx_msg void OnPopupCopyAsXIF();
@@ -178,8 +177,6 @@ protected:
 	afx_msg void OnPopupClipboardPasteAsShpTs();
 	afx_msg void OnUpdatePopupClipboardPasteAsVideo(CCmdUI* pCmdUI);
 	afx_msg void OnPopupClipboardPasteAsPng();
-	afx_msg void OnPopupOpenWithFinalalert();
-	afx_msg void OnUpdatePopupOpenWithFinalalert(CCmdUI* pCmdUI);
 	afx_msg void OnPopupCopyAsJpeg();
 	afx_msg void OnUpdatePopupCopyAsJpeg(CCmdUI* pCmdUI);
 	afx_msg void OnPopupClipboardPasteAsJpeg();
@@ -210,9 +207,9 @@ private:
 	CXCCFileView* m_file_view_pane;
 	CXCCMixerView* m_other_pane;
 	t_game m_game;
-	t_palet m_palet;
+	t_palette m_palette;
 	CString m_reg_key;
-	bool m_palet_loaded;
+	bool m_palette_loaded;
 	string m_buffer[4];
 	int m_buffer_w;
 	int m_sort_column;

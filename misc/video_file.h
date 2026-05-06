@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cc_file_sh.h"
-#include "palet.h"
+#include "palette.h"
 #include "video_decoder.h"
 
 template <class T>
@@ -23,7 +23,7 @@ public:
 		return cf() * cb_image();
 	}
 
-	virtual const t_palet_entry* palet() const
+	virtual const t_palette_entry* palette() const
 	{
 		return NULL;
 	}

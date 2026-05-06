@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "fname.h"
+#include "string_conversion.h"
 
 Cfname::Cfname(const string& s)
 {
@@ -191,7 +192,6 @@ bool fname_filter(const string& fname, const string& filter)
 					int j = fname.length() - filter.length() + 1;
 					return j < 0 ? false : fname_filter(fname.substr(i + j), filter.substr(i + 1));
 				}
-				// for (int j = 0; j < min(fname.length(), filter.length()) - i; j++)
 				for (size_t j = 0; j < fname.size(); j++)
 				{
 					if (fname_filter(fname.substr(i + j), filter.substr(i + 1)))
@@ -205,8 +205,8 @@ bool fname_filter(const string& fname, const string& filter)
 	}
 	else
 	{
-		auto tmp1 = to_lower_copy(fname);
-		auto tmp2 = to_lower_copy(filter);
+		auto tmp1 = to_lower(fname);
+		auto tmp2 = to_lower(filter);
 		return tmp1.find(tmp2) != string::npos;
 	}
 	return fname.length() == i;

@@ -9,7 +9,7 @@ bool Ccps_file::is_valid() const
 	int size = get_size();
 	if (sizeof(t_cps_header) > size ||
 		h.image_size != 320 * 200 ||
-		h.palet_size && h.palet_size != 0x300 ||
+		h.palette_size && h.palette_size != 0x300 ||
 		h.zero)
 		return false;
 	switch (h.unknown)
@@ -27,17 +27,17 @@ bool Ccps_file::is_valid() const
 
 void Ccps_file::decode(void* d) const
 {
-	decode80(get_image(), reinterpret_cast<byte*>(d));
+	LCWDecompress(get_image(), reinterpret_cast<byte*>(d));
 }
 
 Cvirtual_image Ccps_file::vimage() const
 {
 	Cvirtual_binary image;
 	decode(image.write_start(cx() * cy()));
-	return Cvirtual_image(image, cx(), cy(), cb_pixel(), palet(), true);
+	return Cvirtual_image(image, cx(), cy(), cb_pixel(), palette(), true);
 }
 
-Cvirtual_binary cps_file_write(const byte* s, const t_palet_entry* palet)
+Cvirtual_binary cps_file_write(const byte* s, const t_palette_entry* palette)
 {
 	Cvirtual_binary d;
 	byte* w = d.write_start(128 << 10);
@@ -45,14 +45,14 @@ Cvirtual_binary cps_file_write(const byte* s, const t_palet_entry* palet)
 	header.unknown = 4;
 	header.image_size = 320 * 200;
 	header.zero = 0;
-	header.palet_size = palet ? sizeof(t_palet) : 0;
+	header.palette_size = palette ? sizeof(t_palette) : 0;
 	w += sizeof(t_cps_header);
-	if (palet)
+	if (palette)
 	{
-		memcpy(w, palet, sizeof(t_palet));
-		w += sizeof(t_palet);
+		memcpy(w, palette, sizeof(t_palette));
+		w += sizeof(t_palette);
 	}
-	w += encode80(s, w, 320 * 200);
+	w += LCWCompress(s, w, 320 * 200);
 	header.size = w - d.data() - 2;
 	d.set_size(w - d.data());
 	return d;

@@ -4,7 +4,7 @@
 #include <cc_structures.h>
 #include "fname.h"
 #include "image_file.h"
-#include "palet.h"
+#include "palette.h"
 
 class Ctmp_ts_file : public Cimage_file<t_tmp_ts_header>
 {
@@ -16,8 +16,8 @@ public:
 	bool is_valid() const
 	{
 		const t_tmp_ts_header& h = header();
-		int size = get_size();
-		if (sizeof(t_tmp_ts_header) > size || 
+		auto const size = get_size();
+		if (sizeof(t_tmp_ts_header) > size ||
 			!h.cblocks_x || !h.cblocks_y ||
 			h.cx != 48 && h.cx != 60 ||
 			2 * h.cy != h.cx ||
@@ -165,8 +165,8 @@ public:
 
 	const byte* get_z_image(int i) const
 	{
-		int a = get_index()[i] + get_image_header(i)->z_ofs;
-		int b = get_image(i) + get_cb_diamond() - data();
+		auto const a = get_index()[i] + get_image_header(i)->z_ofs;
+		auto const b = get_image(i) + get_cb_diamond() - data();
 		assert(a == b);
 		return data() + get_index()[i] + get_image_header(i)->z_ofs;
 	}

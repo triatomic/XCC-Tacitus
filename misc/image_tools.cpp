@@ -131,12 +131,12 @@ void resize_image_up(const byte* s, byte* d, int cx, int cy, int c_planes, int c
 	}
 }
 
-static t_palet32entry get_pixel(const t_palet32entry* s, int x, int y, int cx)
+static t_palette32_entry get_pixel(const t_palette32_entry* s, int x, int y, int cx)
 {
 	return s[x + cx * y];
 }
 
-static t_palet32entry get_color_bicubic_x(const t_palet32entry* s, float x_l, float x_r, int y, int cx, int cy)
+static t_palette32_entry get_color_bicubic_x(const t_palette32_entry* s, float x_l, float x_r, int y, int cx, int cy)
 {
 	double d;
 	double fx_l = modf(x_l, &d);
@@ -161,7 +161,7 @@ static t_palet32entry get_color_bicubic_x(const t_palet32entry* s, float x_l, fl
 	bs += fx_r * get_pixel(s, ix_r, y, cx).b;
 	as += fx_r * get_pixel(s, ix_r, y, cx).a;
 	rc += fx_r;
-	t_palet32entry e;
+	t_palette32_entry e;
 	e.r = rs / rc;
 	e.g = gs / rc;
 	e.b = bs / rc;
@@ -169,7 +169,7 @@ static t_palet32entry get_color_bicubic_x(const t_palet32entry* s, float x_l, fl
 	return e;
 }
 
-static t_palet32entry get_color_bicubic(const t_palet32entry* s, float x_l, float x_r, float y_t, float y_b, int cx, int cy)
+static t_palette32_entry get_color_bicubic(const t_palette32_entry* s, float x_l, float x_r, float y_t, float y_b, int cx, int cy)
 {
 	double d;
 	double fy_t = modf(y_t, &d);
@@ -197,7 +197,7 @@ static t_palet32entry get_color_bicubic(const t_palet32entry* s, float x_l, floa
 		as += fy_b * get_color_bicubic_x(s, x_l, x_r, iy_b, cx, cy).a;
 		rc += fy_b;
 	}
-	t_palet32entry e;
+	t_palette32_entry e;
 	e.r = rs / rc;
 	e.g = gs / rc;
 	e.b = bs / rc;
@@ -205,9 +205,9 @@ static t_palet32entry get_color_bicubic(const t_palet32entry* s, float x_l, floa
 	return e;
 }
 
-void resize_image_down(const t_palet32entry* s, t_palet32entry* d, int cx, int cy, int cx_d, int cy_d)
+void resize_image_down(const t_palette32_entry* s, t_palette32_entry* d, int cx, int cy, int cx_d, int cy_d)
 {
-	t_palet32entry* w = d;
+	t_palette32_entry* w = d;
 	float x_scale = static_cast<float>(cx_d) / cx;
 	float y_scale = static_cast<float>(cy_d) / cy;
 	for (int y = 0; y < cy_d; y++)
@@ -223,17 +223,17 @@ void resize_image_down(const t_palet32entry* s, t_palet32entry* d, int cx, int c
 	}
 }
 
-static t_palet32entry get_color_bilinear_x(const t_palet32entry* s, float x, float y, int cx, int cy)
+static t_palette32_entry get_color_bilinear_x(const t_palette32_entry* s, float x, float y, int cx, int cy)
 {
 	double d;
 	double fx = modf(x, &d);
 	int ix = d;
 	double fy = modf(y, &d);
 	int iy = d;
-	const t_palet32entry* r = s + ix + cx * iy;
-	t_palet32entry tl = r[0];
-	t_palet32entry tr = r[1];
-	t_palet32entry e;
+	const t_palette32_entry* r = s + ix + cx * iy;
+	t_palette32_entry tl = r[0];
+	t_palette32_entry tr = r[1];
+	t_palette32_entry e;
 	e.r = (1 - fy) * ((1 - fx) * tl.r + fx * tr.r);
 	e.g = (1 - fy) * ((1 - fx) * tl.g + fx * tr.g);
 	e.b = (1 - fy) * ((1 - fx) * tl.b + fx * tr.b);
@@ -241,20 +241,20 @@ static t_palet32entry get_color_bilinear_x(const t_palet32entry* s, float x, flo
 	return e;
 }
 
-static t_palet32entry get_color_bilinear(const t_palet32entry* s, float x, float y, int cx, int cy)
+static t_palette32_entry get_color_bilinear(const t_palette32_entry* s, float x, float y, int cx, int cy)
 {
 	double d;
 	double fx = modf(x, &d);
 	int ix = d;
 	double fy = modf(y, &d);
 	int iy = d;
-	const t_palet32entry* r = s + ix + cx * iy;
-	t_palet32entry tl = r[0];
-	t_palet32entry tr = r[1];
+	const t_palette32_entry* r = s + ix + cx * iy;
+	t_palette32_entry tl = r[0];
+	t_palette32_entry tr = r[1];
 	r += cx;
-	t_palet32entry bl = r[0];
-	t_palet32entry br = r[1];
-	t_palet32entry e;
+	t_palette32_entry bl = r[0];
+	t_palette32_entry br = r[1];
+	t_palette32_entry e;
 	e.r = (1 - fy) * ((1 - fx) * tl.r + fx * tr.r) +  fy * ((1 - fx) * bl.r + fx * br.r);
 	e.g = (1 - fy) * ((1 - fx) * tl.g + fx * tr.g) +  fy * ((1 - fx) * bl.g + fx * br.g);
 	e.b = (1 - fy) * ((1 - fx) * tl.b + fx * tr.b) +  fy * ((1 - fx) * bl.b + fx * br.b);
@@ -262,9 +262,9 @@ static t_palet32entry get_color_bilinear(const t_palet32entry* s, float x, float
 	return e;
 }
 
-void resize_image_up(const t_palet32entry* s, t_palet32entry* d, int cx, int cy, int cx_d, int cy_d)
+void resize_image_up(const t_palette32_entry* s, t_palette32_entry* d, int cx, int cy, int cx_d, int cy_d)
 {
-	t_palet32entry* w = d;
+	t_palette32_entry* w = d;
 	for (int y = 0; y < cy_d - 1; y++)
 	{
 		for (int x = 0; x < cx_d; x++)

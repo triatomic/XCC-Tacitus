@@ -7,9 +7,13 @@
 #include "ogg_file.h"
 #include "voc_file.h"
 #include "wav_file.h"
+#include "string_conversion.h"
 
-static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s)
+LPDIRECTSOUNDBUFFER dsb;
+
+static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 {
+	xapFilePlaying = currentFile;
 	Ccc_file f(true);
 	f.load(s);
 	t_file_type ft = f.get_file_type();
@@ -98,7 +102,6 @@ static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s)
 	dsbdesc.dwBufferBytes = cb_audio;
 	dsbdesc.lpwfxFormat = (LPWAVEFORMATEX)&wfdesc;
 
-	LPDIRECTSOUNDBUFFER dsb;
 	if (ds->CreateSoundBuffer(&dsbdesc, &dsb, NULL))
 		return 0x101;
 	void* p1;
@@ -164,17 +167,36 @@ static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s)
 		{
 			DWORD status;
 			while (dsr = dsb->GetStatus(&status), DS_OK == dsr && status & DSBSTATUS_PLAYING)
+			{
 				Sleep(100);
+			}
 		}
 	}
-	dsb->Release();
+	//dsb->Release();
+	xapFilePlaying = "";
 	return error;
 }
 
-void xap_play(LPDIRECTSOUND ds, Cvirtual_binary s)
+void xap_play(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 {
-	thread([ds, s]()
+	if (xapFilePlaying == currentFile)	//if the name of the file is the same as the one playing
 	{
-		xap_play2(ds, s);
-	}).detach();
+		xapFilePlaying = "";
+		dsb->Stop();	//then stop, and don't replay
+		return;
+	}
+	else
+	{
+		if (dsb)	//if file is playing
+		{
+			xapFilePlaying = "";
+			dsb->Stop();
+			dsb->Release();		//hopefully good enough for no memory leaks
+		}
+
+		thread([ds, s, currentFile]()
+			{
+				xap_play2(ds, s, currentFile);
+			}).detach();
+	}
 }

@@ -55,12 +55,12 @@ static void move_key_to_big(bignum n, const char* key, uint32_t klen, uint32_t b
 	uint32_t sign = key[0] & 0x80 ? 0xff : 0;
 	int i = blen * 4;
 	for (; i > klen; i--)
-		((char *)n)[i - 1] = sign;
+		((char*)n)[i - 1] = sign;
 	for (; i > 0; i--) 
-		((char *)n)[i - 1] = key[klen - i];
+		((char*)n)[i - 1] = key[klen - i];
 }
 
-static void key_to_bignum(bignum n, char *key, uint32_t len)
+static void key_to_bignum(bignum n, char* key, uint32_t len)
 {
 	uint32_t keylen;
 	int i;
@@ -258,8 +258,8 @@ static void init_two_dw(bignum n, uint32_t len)
 		shr_bignum(glob1_hi_inv, 1, 2);
 		glob1_hi_bitlen--;
 	}
-	glob1_hi_inv_lo = *(word *)glob1_hi_inv;
-	glob1_hi_inv_hi = *(((word *)glob1_hi_inv) + 1);
+	glob1_hi_inv_lo = *(word*)glob1_hi_inv;
+	glob1_hi_inv_hi = *(((word*)glob1_hi_inv) + 1);
 }
 
 static void mul_bignum_word(bignum n1, bignum n2, uint32_t mul, uint32_t len)
@@ -267,10 +267,10 @@ static void mul_bignum_word(bignum n1, bignum n2, uint32_t mul, uint32_t len)
 	uint32_t tmp = 0;
 	for (uint32_t i = 0; i < len; i++)
 	{
-		tmp = mul * (*(word *)n2) + *(word *)n1 + tmp;
-		*(word *)n1 = tmp;
-		n1 = (uint32_t *)(((word *)n1) + 1);
-		n2 = (uint32_t *)(((word *)n2) + 1);
+		tmp = mul * (*(word*)n2) + *(word*)n1 + tmp;
+		*(word*)n1 = tmp;
+		n1 = (uint32_t*)(((word*)n1) + 1);
+		n2 = (uint32_t*)(((word*)n2) + 1);
 		tmp >>= 16;
 	}
 	*(word *)n1 += tmp;
@@ -281,9 +281,9 @@ static void mul_bignum(bignum dest, bignum src1, bignum src2, uint32_t len)
 	init_bignum(dest, 0, len * 2);
 	for (uint32_t i = 0; i < len * 2; i++)
 	{
-		mul_bignum_word(dest, src1, *(word *)src2, len * 2);
-		src2 = (uint32_t *)(((word *)src2) + 1);
-		dest = (uint32_t *)(((word *)dest) + 1);
+		mul_bignum_word(dest, src1, *(word*)src2, len * 2);
+		src2 = (uint32_t *)(((word*)src2) + 1);
+		dest = (uint32_t *)(((word*)dest) + 1);
 	}
 }
 
@@ -301,7 +301,7 @@ static void neg_bignum(bignum n, uint32_t len)
 
 static uint32_t get_mulword(bignum n)
 {
-	word* wn = (word *)n;
+	word* wn = (word*)n;
 	uint32_t i = (((((((((*(wn - 1) ^ 0xffff) & 0xffff) * glob1_hi_inv_lo + 0x10000) >> 1)
       + (((*(wn-2) ^ 0xffff) * glob1_hi_inv_hi + glob1_hi_inv_hi) >> 1) + 1)
       >> 16) + ((((*(wn-1) ^ 0xffff) & 0xffff) * glob1_hi_inv_hi) >> 1) +
@@ -389,7 +389,7 @@ static void calc_a_key(bignum n1, bignum n2, bignum n3, bignum n4, uint32_t len)
 	glob1_hi_inv_hi = 0;
 }
 
-static void process_predata(const byte* pre, uint32_t pre_len, byte *buf)
+static void process_predata(const byte* pre, uint32_t pre_len, byte* buf)
 {
 	bignum n2, n3;
 	const uint32_t a = (pubkey.len - 1) / 8;

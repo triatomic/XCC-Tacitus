@@ -2,7 +2,7 @@
 
 #include "cc_structures.h"
 #include "fname.h"
-#include "palet.h"
+#include "palette.h"
 #include "video_file.h"
 #include "virtual_image.h"
 
@@ -12,7 +12,7 @@ class Cshp_file : public Cvideo_file<t_shp_header>
 {
 public:
 	void decode(void* d) const;
-	Cvideo_decoder* decoder(const t_palet_entry*);
+	Cvideo_decoder* decoder(const t_palette_entry*);
 	bool is_valid() const;
 	Cvirtual_image vimage() const;
 

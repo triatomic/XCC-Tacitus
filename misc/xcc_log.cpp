@@ -1,9 +1,8 @@
 #include "stdafx.h"
 #include "xcc_log.h"
 
-#include <ctime>
+#include <chrono>
 #include <fstream>
-#include <iomanip>
 #include "xcc_dirs.h"
 
 static CRITICAL_SECTION g_lock;
@@ -47,7 +46,7 @@ void xcc_log::write_line(const string& s, int x)
 		log_x += x;
 	if (log_f.is_open())
 	{
-		log_f << setw(4) << time(NULL) - log_t << ' ' << string(log_x << 2, ' ') << s << endl;
+		log_f << setw(4) << std::chrono::system_clock::now() << ' ' << string(log_x << 2, ' ') << s << endl;
 		log_f.flush();
 	}
 	if (x > 0)

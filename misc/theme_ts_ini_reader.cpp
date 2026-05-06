@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "theme_ts_ini_reader.h"
+#include <xcc/string_view.h>
 
 #include "string_conversion.h"
 
@@ -63,7 +64,7 @@ int Ctheme_ts_ini_reader::process_key(string_view name, string_view value)
 	{
 	case sei_themes:
 		if (!value.empty())
-			m_theme_list[to_lower_copy(string(value))];
+			m_theme_list[to_lower(string(value))];
 		break;
 	case sei_unknown:
 		switch (find_id(name, theme_code, thi_unknown))
@@ -75,7 +76,7 @@ int Ctheme_ts_ini_reader::process_key(string_view name, string_view value)
 			m_theme_list[m_current_theme].length(to_float(value));
 			break;
 		case thi_normal:
-			m_theme_list[m_current_theme].normal(atob(to_lower_copy(string(value))));
+			m_theme_list[m_current_theme].normal(atob(to_lower(string(value))));
 			break;
 		case thi_scenario:
 			m_theme_list[m_current_theme].scenario(to_int(value));
@@ -87,7 +88,7 @@ int Ctheme_ts_ini_reader::process_key(string_view name, string_view value)
 			m_theme_list[m_current_theme].sound(value);
 			break;
 		case thi_repeat:
-			m_theme_list[m_current_theme].repeat(atob(to_lower_copy(string(value))));
+			m_theme_list[m_current_theme].repeat(atob(to_lower(string(value))));
 			break;
 		default:
 			return 1;

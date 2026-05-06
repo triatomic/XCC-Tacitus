@@ -38,6 +38,6 @@ private:
 	Cvideo_decoder* m_decoder;
 	int m_frame;
 	int m_last_access;
-	t_palet m_palet;
+	t_palette m_palette;
 	int m_timer_id;
 };

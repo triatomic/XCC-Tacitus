@@ -53,7 +53,7 @@ static void write_v40(byte v, int count, byte*& d)
 				*d++ = v;
 				break;
 			}
-			int c_write = min(count, 0x3fff);
+			int c_write = min<size_t>(count, 0x3fff);
 			*d++ = 0x80;
 			write_w(0xc000 | c_write, d);
 			count -= c_write;
@@ -137,7 +137,7 @@ static void write40_copy(byte*& w, int count, const byte* r)
 			int c_write = count < 0x4000 ? count : 0x3fff;
 			write40_c3(w, c_write, r);
 			r += c_write;
-			count  -= c_write;
+			count -= c_write;
 		}
 	}
 }
@@ -155,7 +155,7 @@ static void write40_fill(byte*& w, int count, int v)
 		{
 			int c_write = count < 0x4000 ? count : 0x3fff;
 			write40_c4(w, c_write, v);
-			count  -= c_write;
+			count -= c_write;
 		}
 	}
 }
@@ -173,7 +173,7 @@ static void write40_skip(byte*& w, int count)
 		{
 			int c_write = count < 0x8000 ? count : 0x7fff;
 			write40_c2(w, c_write);
-			count  -= c_write;
+			count -= c_write;
 		}
 	}
 }
@@ -187,160 +187,199 @@ static void flush_copy(byte*& w, const byte* r, const byte*& copy_from)
 	}
 }
 
-int encode40(const byte* last_s, const byte* x, byte* d, int cb_s)
+#define XOR_SMALL		127
+#define XOR_MED			255
+#define XOR_LARGE		16383
+#define XOR_MAX			32767
+
+int GenerateXORDelta(const byte* last_s, const byte* x, byte* d, int cb_s) //Generate XOR Delta
 {
-	// full compression
-	byte* s = new byte[cb_s];
-	{
-		byte* a = s;
-		int size = cb_s;
-		while (size--)
-			*a++ = *last_s++ ^ *x++;
-	}
-	const byte* s_end = s + cb_s;
-	const byte* r = s;
-	byte* w = d;
-	const byte* copy_from = NULL;
-	while (r < s_end)
-	{
-		int v = *r;
-		int t = get_run_length(r, s_end);
-		if (!v)
-		{
-			flush_copy(w, r, copy_from);			
-			write40_skip(w, t);
-		}
-		else if (t > 2)
-		{
-			flush_copy(w, r, copy_from);			
-			write40_fill(w, t, v);
-		}
-		else
-		{
-			if (!copy_from)
-				copy_from = r;
-		}
-		r += t;
-	}
-	flush_copy(w, r, copy_from);
-	write40_c2(w, 0);
-	delete[] s;
-	return w - d;
-}
+	byte* putp = static_cast<byte*>(d);	//our delta
+	byte const* getsp = static_cast<byte const*>(x);	//This is the image we go to
+	byte const* getbp = static_cast<byte const*>(last_s);	//This is image we come from
+	byte const* getsendp = getsp + cb_s;
 
-int encode40_y(const byte* last_r, const byte* r, byte* d, int cb_s)
-{
-	// run length encoding
-	byte* w = d;
-	int count = 0;
-	byte last = ~(*last_r ^ *r);
+	//only check getsp. Both source and base should be same size and both pointers
+	//should be incremented at the same time.
+	while (getsp < getsendp) {
+		unsigned int fillcount = 0;
+		unsigned int xorcount = 0;
+		unsigned int skipcount = 0;
+		byte lastxor = *getsp ^ *getbp;
+		byte const* testsp = getsp;
+		byte const* testbp = getbp;
 
-	while (cb_s--)
-	{
-		byte v = *last_r++ ^ *r++;
-		if (last == v)
-			count++;
-		else
-		{
-			write_v40(last, count, w);
-			count = 1;
-			last = v;
-		}
-	}
-	write_v40(last, count, w);
-	*w++ = 0x80;
-	write_w(0, w);
-	return w - d;
-}
-
-int encode40_z(const byte* last_s, const byte* s, byte* d, int cb_s)
-{
-	// no compression
-	const byte* last_r = last_s;
-	const byte* r = s;
-	byte* w = d;
-	while (cb_s)
-	{
-		int c_write = cb_s > 0x3fff ? 0x3fff : cb_s;
-		cb_s -= c_write;
-		*w++ = 0x80;
-		*w++ = c_write & 0xff;
-		*w++ = 0x80 | c_write >> 8;
-		while (c_write--)
-			*w++ = *last_r++ ^ *r++;
-	}
-	*w++ = 0x80;
-	*w++ = 0x00;	
-	*w++ = 0x00;
-	return w - d;
-}
-
-int decode40(const byte* s, byte* d)
-{
-	/*
-	0 fill 00000000 c v
-	1 copy 0ccccccc
-	2 skip 10000000 c 0ccccccc
-	3 copy 10000000 c 10cccccc
-	4 fill 10000000 c 11cccccc v
-	5 skip 1ccccccc	
-	*/
-
-	const byte* r = s;
-	byte* w = d;
-	int count;
-	while (1)
-	{
-		int code = *r++;
-		if (code & 0x80)
-		{
-			if (count = code & 0x7f)
-			{
-				w += count;
+		//Only evaluate other options if we don't have a matched pair
+		while (*testsp != *testbp && testsp < getsendp) {
+			if ((*testsp ^ *testbp) == lastxor) {
+				++fillcount;
+				++xorcount;
 			}
-			else
-			{
-				count = *(uint16_t*)r;
-				r += 2;
-				code = count >> 8;
-				if (code & 0x80)
-				{
-					count &= 0x3fff;
-					if (code & 0x40)
-					{
-						code = *r++;
-						while (count--)
-							*w++ ^= code;
-					}
-					else
-					{
-						while (count--)
-							*w++ ^= *r++;
-					}
+			else {
+				if (fillcount > 3) {
+					break;
 				}
-				else
-				{
-					if (!count)
-						break;
-					w += count;
-				}					
+				else {
+					lastxor = *testsp ^ *testbp;
+					fillcount = 1;
+					++xorcount;
+				}
+			}
+			++testsp;
+			++testbp;
+		}
+
+		fillcount = fillcount > 3 ? fillcount : 0;
+
+		//Okay, lets see if we have any xor bytes we need to handle
+		xorcount -= fillcount;
+		while (xorcount) {
+			uint16_t count = 0;
+			//cmd 0???????
+			if (xorcount < XOR_MED) {
+				count = xorcount <= XOR_SMALL ? xorcount : XOR_SMALL;
+				*putp++ = count;
+				//cmd 10000000 10?????? ??????
+			}
+			else {
+				count = xorcount <= XOR_LARGE ? xorcount : XOR_LARGE;
+				*putp++ = 0x80;
+				*putp++ = count;
+				*putp++ = (count >> 8) | 0x80;
+			}
+
+			while (count) {
+				*putp++ = *getsp++ ^ *getbp++;
+				--count;
+				--xorcount;
 			}
 		}
-		else if (code)
-		{
-			count = code;
-			while (count--)
-				*w++ ^= *r++;
+
+		//lets handle the bytes that are best done as xorfill
+		while (fillcount) {
+			uint16_t count = 0;
+			//cmd 00000000 ????????
+			if (fillcount <= XOR_MED) {
+				count = fillcount;
+				*putp++ = 0;
+				*putp++ = count;
+				//cmd 10000000 11?????? ??????
+			}
+			else {
+				count = fillcount <= XOR_LARGE ? fillcount : XOR_LARGE;
+				*putp++ = 0x80;
+				*putp++ = count;
+				*putp++ = (count >> 8) | 0xC0;
+			}
+
+			*putp++ = *getsp ^ *getbp;
+			fillcount -= count;
+			getsp += count;
+			getbp += count;
 		}
-		else
-		{
-			count = *r++;
-			code = *r++;
-			while (count--)
-				*w++ ^= code;
+
+		//Handle regions that match exactly
+		while (*testsp == *testbp && testsp < getsendp) {
+			++skipcount;
+			++testsp;
+			++testbp;
 		}
+
+		while (skipcount) {
+			uint16_t count = 0;
+			if (skipcount < XOR_MED) {
+				count = skipcount <= XOR_SMALL ? skipcount : XOR_SMALL;
+				*putp++ = count | 0x80;
+				//cmd 10000000 0??????? ????????
+			}
+			else {
+				count = skipcount <= XOR_MAX ? skipcount : XOR_MAX;
+				*putp++ = 0x80;
+				*putp++ = count;
+				*putp++ = count >> 8;
+			}
+
+			skipcount -= count;
+			getsp += count;
+			getbp += count;
+		}
+
 	}
-	return w - d;
+
+	//final skip command of 0;
+	*putp++ = 0x80;
+	*putp++ = 0;
+	*putp++ = 0;
+
+	return putp - static_cast<byte*>(d);
+}
+
+
+int ApplyXORDelta(const byte* s, byte* d)	//Apply XOR Delta
+{
+	 unsigned char* putp = (unsigned char*)(d);
+    const unsigned char* getp = (const unsigned char*)(s);
+    unsigned short count = 0;
+    unsigned char value = 0;
+    unsigned char cmd = 0;
+
+    while (true) {
+        bool xorval = false;
+        cmd = *getp++;
+        count = cmd;
+
+        if (!(cmd & 0x80)) {
+            // 0b00000000
+            if (cmd == 0) {
+                count = *getp++ & 0xFF;
+                value = *getp++;
+                xorval = true;
+                // 0b0???????
+            }
+        } else {
+            // 0b1??????? remove most significant bit
+            count &= 0x7F;
+            if (count != 0) {
+                putp += count;
+                continue;
+            }
+
+            count = (*getp & 0xFF) + (*(getp + 1) << 8);
+            getp += 2;
+
+            // 0b10000000 0 0
+            if (count == 0) {
+                break;
+            }
+
+            // 0b100000000 0?
+            if ((count & 0x8000) == 0) {
+                putp += count;
+                continue;
+            } else {
+                // 0b10000000 11
+                if (count & 0x4000) {
+                    count &= 0x3FFF;
+                    value = *getp++;
+                    xorval = true;
+                    // 0b10000000 10
+                } else {
+                    count &= 0x3FFF;
+                }
+            }
+        }
+
+        if (xorval) {
+            for (; count > 0; --count) {
+                *putp++ ^= value;
+            }
+        } else {
+            for (; count > 0; --count) {
+                *putp++ ^= *getp++;
+            }
+        }
+    }
+		return putp - d;
 }
 
 static void write_v80(byte v, int count, byte*& d)
@@ -358,46 +397,47 @@ static void write_v80(byte v, int count, byte*& d)
 			*d++ = v;
 	}
 }
+#include <cstdint>
 
 void get_same(const byte* s, const byte* r, const byte* s_end, byte*& p, int& cb_p)
 {
-	_asm
-	{
-		push	esi
-		push	edi
-		mov		eax, s_end
-		mov		ebx, s
-		xor		ecx, ecx
-		mov		edi, p
-		mov		[edi], ecx
-		dec		ebx
+	const byte* s_end_ptr = s_end;
+	const byte* s_ptr = s;
+	int ecx_value = 0;
+	byte* edi_ptr = p;
+	*edi_ptr = static_cast<byte>(ecx_value);
+	s_ptr--;
+
 next_s:
-		inc		ebx
-		xor		edx, edx
-		mov		esi, r
-		mov		edi, ebx
-		cmp		edi, esi
-		jnb		end0
+	s_ptr++;
+	int edx_value = 0;
+	const byte* esi_ptr = r;
+	const byte* edi_val = s_ptr;
+	if (edi_val >= esi_ptr)
+		goto end0;
+
 next0:
-		inc		edx
-		cmp		esi, eax
-		jnb		end_line
-		cmpsb
-		je		next0
+	edx_value++;
+	if (esi_ptr >= s_end_ptr)
+		goto end_line;
+
+	if (*esi_ptr == *s_ptr)
+		goto next0;
+
 end_line:
-		dec		edx
-		cmp		edx, ecx
-		jl		next_s
-		mov		ecx, edx
-		mov		edi, p
-		mov		[edi], ebx
-		jmp		next_s
+	edx_value--;
+	if (edx_value < ecx_value)
+		goto next_s;
+
+	ecx_value = edx_value;
+	edi_ptr = p;
+	*edi_ptr = static_cast<byte>(*s_ptr);
+	goto next_s;
+
 end0:
-		mov		edi, cb_p
-		mov		[edi], ecx
-		pop		edi
-		pop		esi
-	}
+	edi_ptr = reinterpret_cast<byte*>(&cb_p);
+	*edi_ptr = ecx_value;
+	// Restore registers
 }
 
 static void write80_c0(byte*& w, int count, int p)
@@ -449,315 +489,258 @@ static void flush_c1(byte*& w, const byte* r, const byte*& copy_from)
 	}
 }
 
-int encode80(const byte* s, byte* d, int cb_s)
+int LCWCompress(const byte* s, byte* d, int cb_s)	//LCW Compress
 {
-	// full compression
-	const byte* s_end = s + cb_s;
-	const byte* r = s;
-	byte* w = d;
-	const byte* copy_from = NULL;
-	while (r < s_end)
-	{
-		byte* p;
-		int cb_p;
-		int t = get_run_length(r, s_end);
-		get_same(s, r, s_end, p, cb_p);
-		if (t < cb_p && cb_p > 2)
-		{
-			flush_c1(w, r, copy_from);
-			if (cb_p - 3 < 8 && r - p < 0x1000)
-				write80_c0(w, cb_p, r - p);
-			else if (cb_p - 3 < 0x3e)
-				write80_c2(w, cb_p, p - s);
-			else 
-				write80_c4(w, cb_p, p - s);				
-			r += cb_p;
-		}
-		else
-		{
-			if (t < 3)
-			{
-				if (!copy_from)
-					copy_from = r;
-			}
-			else
-			{
-				flush_c1(w, r, copy_from);
-				write80_c3(w, t, *r);
-			}
-			r += t;
-		}
+	if (!cb_s) {
+		return 0;
 	}
-	flush_c1(w, r, copy_from);
-	write80_c1(w, 0, NULL);
-	return w - d;
-}
 
-int encode80_y(const byte* s, byte* d, int cb_s)
-{
-	// run length encoding
-	const byte* r = s;
-	byte* w = d;
-	int count = 0;
-	byte last = ~*r;
+	bool relative = false;
 
-	while (cb_s--)
-	{
-		byte v = *r++;
-		if (last == v)
-			count++;
-		else
-		{
-			write_v80(last, count, w);
-			count = 1;
-			last = v;
+	const byte* getp = static_cast<const byte*>(s);
+	byte* putp = static_cast<byte*>(d);
+	const byte* getstart = getp;
+	const byte* getend = getp + cb_s;
+	byte* putstart = putp;
+
+	//Write a starting cmd1 and set bool to have cmd1 in progress
+	byte* cmd_onep = putp;
+	*putp++ = 0x81;
+	*putp++ = *getp++;
+	bool cmd_one = true;
+
+	//Compress data
+	while (getp < getend) {
+		//Is RLE encode (4bytes) worth evaluating?
+		if (getend - getp > 64 && *getp == *(getp + 64)) {
+			//RLE run length is encoded as a short so max is UINT16_MAX
+			const byte* rlemax = (getend - getp) < UINT16_MAX ? getend : getp + UINT16_MAX;
+			const byte* rlep;
+
+			for (rlep = getp + 1; *rlep == *getp && rlep < rlemax; ++rlep);
+
+			uint16_t run_length = rlep - getp;
+
+			//If run length is long enough, write the command and start loop again
+			if (run_length >= 0x41) {
+				//write 4byte command 0b11111110
+				cmd_one = false;
+				*putp++ = 0xFE;
+				*putp++ = run_length;
+				*putp++ = run_length >> 8;
+				*putp++ = *getp;
+				getp = rlep;
+				continue;
+			}
 		}
-		
-	}
-	write_v80(last, count, w);
-	*w++ = 0x80;
-	return w - d;
-}
 
-int decode80c(const byte image_in[], byte image_out[], int cb_in)
-{
-	/*
-	0 copy 0cccpppp p
-	1 copy 10cccccc
-	2 copy 11cccccc p p
-	3 fill 11111110 c c v
-	4 copy 11111111 c c p p
-	*/
-	
-	const byte* copyp;
-	const byte* r = image_in;
-	byte* w = image_out;
-	int code;
-	int count;
-	while (1)
-	{
-		code = *r++;
-		if (~code & 0x80)
-		{
-			//bit 7 = 0
-			//command 0 (0cccpppp p): copy
-			count = (code >> 4) + 3;
-			copyp = w - (((code & 0xf) << 8) + *r++);
-			while (count--)
-				*w++ = *copyp++;
+		//current block size for an offset copy
+		int block_size = 0;
+		const byte* offstart;
+
+		//Set where we start looking for matching runs.
+		if (relative) {
+			offstart = (getp - getstart) < UINT16_MAX ? getstart : getp - UINT16_MAX;
 		}
-		else
-		{
-			//bit 7 = 1
-			count = code & 0x3f;
-			if (~code & 0x40)
-			{
-				//bit 6 = 0
-				if (!count)
-					//end of image
+		else {
+			offstart = getstart;
+		}
+
+		//Look for matching runs
+		const byte* offchk = offstart;
+		const byte* offsetp = getp;
+		while (offchk < getp) {
+			//Move offchk to next matching position
+			while (offchk < getp && *offchk != *getp) {
+				++offchk;
+			}
+
+			//If the checking pointer has reached current pos, break
+			if (offchk >= getp) {
+				break;
+			}
+
+			//find out how long the run of matches goes for
+			int i;
+			for (i = 1; &getp[i] < getend; ++i) {
+				if (offchk[i] != getp[i]) {
 					break;
-				//command 1 (10cccccc): copy
-				while (count--)
-					*w++ = *r++;
-			}
-			else
-			{
-				//bit 6 = 1
-				if (count < 0x3e)
-				{
-					//command 2 (11cccccc p p): copy
-					count += 3;
-					copyp = &image_out[*(unsigned __int16*)r];
-					r += 2;
-					while (count--)
-						*w++ = *copyp++;
 				}
-				else
-					if (count == 0x3e)
-					{
-						//command 3 (11111110 c c v): fill
-						count = *(unsigned __int16*)r;
-						r += 2;
-						code = *r++;
+			}
+
+			if (i >= block_size) {
+				block_size = i;
+				offsetp = offchk;
+			}
+
+			++offchk;
+		}
+
+		//decide what encoding to use for current run
+		if (block_size <= 2) {
+			//short copy 0b10??????
+			//check we have an existing 1 byte command and if its value is still
+			//small enough to handle additional bytes
+			//start a new command if current one doesn't have space or we don't
+			//have one to continue
+			if (cmd_one && *cmd_onep < 0xBF) {
+				//increment command value
+				++*cmd_onep;
+				*putp++ = *getp++;
+			}
+			else {
+				cmd_onep = putp;
+				*putp++ = 0x81;
+				*putp++ = *getp++;
+				cmd_one = true;
+			}
+		}
+		else {
+			uint16_t offset;
+			uint16_t rel_offset = getp - offsetp;
+			if (block_size > 0xA || (rel_offset > 0xFFF)) {
+				//write 5 byte command 0b11111111
+				if (block_size > 0x40) {
+					*putp++ = 0xFF;
+					*putp++ = block_size;
+					*putp++ = block_size >> 8;
+					//write 3 byte command 0b11??????
+				}
+				else {
+					*putp++ = (block_size - 3) | 0xC0;
+				}
+
+				offset = relative ? rel_offset : offsetp - getstart;
+				//write 2 byte command? 0b0???????
+			}
+			else {
+				offset = rel_offset << 8 | (16 * (block_size - 3) + (rel_offset >> 8));
+			}
+			*putp++ = offset;
+			*putp++ = offset >> 8;
+			getp += block_size;
+			cmd_one = false;
+		}
+	}
+
+	//write final 0x80, this is why its also known as format80 compression
+	*putp++ = 0x80;
+	return putp - putstart;
+}
+
+
+int LCWDecompress(void const* source, void* dest)	//LCW Decompress
+{
+	unsigned char* source_ptr, * dest_ptr, * copy_ptr, op_code;
+	unsigned count;
+
+	/* Copy the source and destination ptrs. */
+	source_ptr = (unsigned char*)source;
+	dest_ptr = (unsigned char*)dest;
+	//dest_end = dest_ptr + sizeof(dest);
+
+	while (true) {
+
+		/* Read in the operation code. */
+		op_code = *source_ptr++;
+
+		if (!(op_code & 0x80)) {
+
+			/* Do a short copy from destination. */
+			count = (op_code >> 4) + 3;
+			copy_ptr = dest_ptr - ((unsigned)*source_ptr++ + (((unsigned)op_code & 0x0f) << 8));
+
+			/* Check we aren't going to write past the end of the destination buffer */
+			//if (count > (unsigned)(dest_end - dest_ptr)) {
+			//	count = dest_end - dest_ptr;
+			//}
+
+			while (count--)
+				*dest_ptr++ = *copy_ptr++;
+
+		}
+		else {
+
+			if (!(op_code & 0x40)) {
+
+				if (op_code == 0x80) {
+
+					/* Return # of destination bytes written. */
+					return (int)(dest_ptr - (unsigned char*)dest);
+
+				}
+				else {
+
+					/* Do a medium copy from source. */
+					count = op_code & 0x3f;
+
+					/* Check we aren't going to write past the end of the destination buffer */
+					//if (count > (unsigned)(dest_end - dest_ptr)) {
+					//	count = dest_end - dest_ptr;
+					//}
+
+					while (count--)
+						*dest_ptr++ = *source_ptr++;
+				}
+
+			}
+			else {
+
+				if (op_code == 0xfe) {
+
+					/* Do a long run. */
+					count = *source_ptr++;
+					count += (*source_ptr++) << 8;
+
+					//if (count > (unsigned)(dest_end - dest_ptr)) {
+					//	count = dest_end - dest_ptr;
+					//}
+
+					memset(dest_ptr, (*source_ptr++), count);
+					dest_ptr += count;
+
+				}
+				else {
+
+					if (op_code == 0xff) {
+
+						/* Do a long copy from destination. */
+						count = *source_ptr++;
+						count += (*source_ptr++) << 8;
+						copy_ptr = (unsigned char*)dest + *source_ptr++;
+						copy_ptr += (*source_ptr++) << 8;
+
+						//if (count > (unsigned)(dest_end - dest_ptr)) {
+						//	count = dest_end - dest_ptr;
+						//}
+
 						while (count--)
-							*w++ = byte(code);
+							*dest_ptr++ = *copy_ptr++;
+
 					}
-					else
-					{
-						//command 4 (copy 11111111 c c p p): copy
-						count = *(unsigned __int16*)r;
-						r += 2;
-						copyp = &image_out[*(unsigned __int16*)r];
-						r += 2;
+					else {
+
+						/* Do a medium copy from destination. */
+						count = (op_code & 0x3f) + 3;
+						copy_ptr = (unsigned char*)dest + *source_ptr + ((unsigned)*(source_ptr + 1) << 8);
+						source_ptr += 2;
+
+						//if (count > (unsigned)(dest_end - dest_ptr)) {
+						//	count = dest_end - dest_ptr;
+						//}
+
 						while (count--)
-							*w++ = *copyp++;
+							*dest_ptr++ = *copy_ptr++;
 					}
+				}
 			}
 		}
 	}
-	assert(cb_in == r - image_in);
-	return (w - image_out);
+
+	return (int)(dest_ptr - (unsigned char*)dest);
 }
 
-int decode80(const byte image_in[], byte image_out[])
-{
-	int cb_out;
-	/*
-	0 copy 0cccpppp p
-	1 copy 10cccccc
-	2 copy 11cccccc p p
-	3 fill 11111110 c c v
-	4 copy 11111111 c c p p
-	*/
-	
-	_asm
-	{
-		push	esi
-		push	edi
-		mov		ax, ds
-		mov		es, ax
-		mov		esi, image_in
-		mov		edi, image_out
-next0:
-		xor		eax, eax
-		lodsb
-		mov		ecx, eax
-		test	eax, 0x80
-		jnz		c1c
-		shr		ecx, 4
-		add		ecx, 3
-		and		eax, 0xf
-		shl		eax, 8
-		lodsb
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		jmp		copy_from_destination
-c1c:
-		and		ecx, 0x3f
-		test	eax, 0x40
-		jnz		c2c
-		or		ecx, ecx
-		jz		end0
-		jmp		copy_from_source
-c2c:
-		xor		eax, eax
-		lodsw
-		cmp		ecx, 0x3e
-		je		c3
-		ja		c4
-		mov		edx, esi
-		mov		esi, image_out
-		add		esi, eax
-		add		ecx, 3
-		jmp		copy_from_destination
-c3:
-		mov		ecx, eax
-		lodsb
-		rep		stosb
-		jmp		next0
-c4:
-		mov		ecx, eax
-		lodsw
-		mov		edx, esi
-		mov		esi, image_out
-		add		esi, eax
-copy_from_destination:
-		rep		movsb
-		mov		esi, edx
-		jmp		next0
-copy_from_source:
-		rep		movsb
-		jmp		next0
-end0:
-		sub		edi, image_out
-		mov		cb_out, edi
-		pop		edi
-		pop		esi
-	}
-	return cb_out;
-}
-
-int decode80r(const byte image_in[], byte image_out[])
-{
-	int cb_out;
-	/*
-	0 copy 0cccpppp p
-	1 copy 10cccccc
-	2 copy 11cccccc p p
-	3 fill 11111110 c c v
-	4 copy 11111111 c c p p
-	*/
-	
-	_asm
-	{
-		push	esi
-		push	edi
-		mov		ax, ds
-		mov		es, ax
-		mov		esi, image_in
-		mov		edi, image_out
-next0:
-		xor		eax, eax
-		lodsb
-		mov		ecx, eax
-		test	eax, 0x80
-		jnz		c1c
-		shr		ecx, 4
-		add		ecx, 3
-		and		eax, 0xf
-		shl		eax, 8
-		lodsb
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		jmp		copy_from_destination
-c1c:
-		and		ecx, 0x3f
-		test	eax, 0x40
-		jnz		c2c
-		or		ecx, ecx
-		jz		end0
-		jmp		copy_from_source
-c2c:
-		xor		eax, eax
-		lodsw
-		cmp		ecx, 0x3e
-		je		c3
-		ja		c4
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		add		ecx, 3
-		jmp		copy_from_destination
-c3:
-		mov		ecx, eax
-		lodsb
-		rep		stosb
-		jmp		next0
-c4:
-		mov		ecx, eax
-		lodsw
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-copy_from_destination:
-		rep		movsb
-		mov		esi, edx
-		jmp		next0
-copy_from_source:
-		rep		movsb
-		jmp		next0
-end0:
-		sub		edi, image_out
-		mov		cb_out, edi
-		pop		edi
-		pop		esi
-	}
-	return cb_out;
-}
-
-int decode2(const byte* s, byte* d, int cb_s, const byte* reference_palet)
+int decode2(const byte* s, byte* d, int cb_s, const byte* reference_palette)
 {
 	const byte* r = s;
 	const byte* r_end = s + cb_s;
@@ -774,12 +757,12 @@ int decode2(const byte* s, byte* d, int cb_s, const byte* reference_palet)
 			w += v;
 		}
 	}
-	if (reference_palet)
-		apply_rp(d, w - d, reference_palet);
+	if (reference_palette)
+		apply_rp(d, w - d, reference_palette);
 	return w - d;
 }
 
-int decode3(const byte* s, byte* d, int cx, int cy)
+int RLEZeroTSDecompress(const byte* s, byte* d, int cx, int cy)	//RLE Zero TS Decompress
 {
 	const byte* r = s;
 	byte* w = d;
@@ -811,7 +794,7 @@ int decode3(const byte* s, byte* d, int cx, int cy)
 	return w - d;
 }
 
-int encode3(const byte* s, byte* d, int cx, int cy)
+int RLEZeroTSCompress(const byte* s, byte* d, int cx, int cy)	//RLE Zero TS Compress
 {
 	const byte* r = s;
 	byte* w = d;
@@ -923,7 +906,7 @@ static void write5_c0(byte*& w, int count, const byte* r, byte* small_copy)
 		count = count;
 	if ((count < 4 || count > 7) && small_copy)
 	{
-		int small_count = min(count, 3);
+		int small_count = min<size_t>(count, 3);
 		*small_copy |= small_count;
 		memcpy(w, r, small_count);
 		r += small_count;
@@ -1149,10 +1132,10 @@ int encode5(const byte* s, byte* d, int cb_s, int format)
 	byte* w = d;
 	while (r < r_end)
 	{
-		int cb_section = min(r_end - r, 8192);
+		int cb_section = min<size_t>(r_end - r, 8192);
 		t_pack_section_header& header = *reinterpret_cast<t_pack_section_header*>(w);
 		w += sizeof(t_pack_section_header);
-		w += header.size_in = format == 80 ? encode80(r, w, cb_section) : encode5s(r, w, cb_section);
+		w += header.size_in = format == 80 ? LCWCompress(r, w, cb_section) : encode5s(r, w, cb_section);
 		r += header.size_out = cb_section;
 	}
 	return w - d;
@@ -1168,7 +1151,7 @@ int decode5(const byte* s, byte* d, int cb_s, int format)
 		const t_pack_section_header& header = *reinterpret_cast<const t_pack_section_header*>(r);
 		r += sizeof(t_pack_section_header);
 		if (format == 80)
-			decode80(r, w);
+			LCWDecompress(r, w);
 		else
 			decode5s(r, w, header.size_in);
 		r += header.size_in;

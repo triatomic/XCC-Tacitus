@@ -32,15 +32,15 @@ int Cvirtual_image::get_clipboard()
 				error = 0x103;
 			else
 			{
-				t_palet_entry* palet = cb_pixel == 1 ? new t_palet : NULL;
+				t_palette_entry* palette = cb_pixel == 1 ? new t_palette : NULL;
 				const RGBQUAD* r = reinterpret_cast<RGBQUAD*>(mem + header->biSize);
-				if (palet)
+				if (palette)
 				{
 					for (int i = 0; i < (header->biClrUsed ? header->biClrUsed : 256); i++)
 					{
-						palet[i].r = r->rgbRed;
-						palet[i].g = r->rgbGreen;
-						palet[i].b = r->rgbBlue;
+						palette[i].r = r->rgbRed;
+						palette[i].g = r->rgbGreen;
+						palette[i].b = r->rgbBlue;
 						r++;
 					}
 				}
@@ -57,15 +57,15 @@ int Cvirtual_image::get_clipboard()
 						r += cb_line + 3 >> 2;
 						w += cb_line;
 					}
-					load(d, cx, cy, cb_pixel, palet);
+					load(d, cx, cy, cb_pixel, palette);
 					delete[] d;
 				}
 				else
-					load(r, cx, cy, cb_pixel, palet);
+					load(r, cx, cy, cb_pixel, palette);
 				flip();
 				if (cb_pixel == 3)
 					swap_rb();
-				delete palet;
+				delete palette;
 			}
 			GlobalUnlock(h_mem);
 		}
@@ -96,20 +96,20 @@ int Cvirtual_image::set_clipboard() const
 			header->biPlanes = 1;
 			header->biBitCount = cb_pixel() << 3;
 			header->biCompression = BI_RGB;
-			RGBQUAD* palet = reinterpret_cast<RGBQUAD*>(mem + sizeof(BITMAPINFOHEADER));
+			RGBQUAD* palette = reinterpret_cast<RGBQUAD*>(mem + sizeof(BITMAPINFOHEADER));
 			if (cb_pixel() == 1)
 			{
 				for (int i = 0; i < 256; i++)
 				{
-					palet->rgbBlue = this->palet()[i].b;
-					palet->rgbGreen = this->palet()[i].g;
-					palet->rgbRed = this->palet()[i].r;
-					palet->rgbReserved = 0;
-					palet++;
+					palette->rgbBlue = this->palette()[i].b;
+					palette->rgbGreen = this->palette()[i].g;
+					palette->rgbRed = this->palette()[i].r;
+					palette->rgbReserved = 0;
+					palette++;
 				}
 			}
 			const byte* r = image() + cb_image();
-			byte* w = reinterpret_cast<byte*>(palet);
+			byte* w = reinterpret_cast<byte*>(palette);
 			for (int y = 0; y < cy(); y++)
 			{
 				r -= cb_line;
@@ -117,7 +117,7 @@ int Cvirtual_image::set_clipboard() const
 				{
 					for (int x = 0; x < cx(); x++)
 					{
-						const t_palet_entry* v = reinterpret_cast<const t_palet_entry*>(r) + x;
+						const t_palette_entry* v = reinterpret_cast<const t_palette_entry*>(r) + x;
 						*w++ = v->b;
 						*w++ = v->g;
 						*w++ = v->r;

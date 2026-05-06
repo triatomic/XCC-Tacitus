@@ -11,7 +11,7 @@ int Cini_reader::find_id(string_view s, span<const char*> t, int count)
 		i++;
 	return i;
 }
-
+/*
 static int split_key_now(const string& key, string& name, string& value)
 {
 	int i = key.find('=');
@@ -21,7 +21,7 @@ static int split_key_now(const string& key, string& name, string& value)
 	value = trim_copy(key.substr(i + 1));
 	return 0;
 }
-
+*/
 int Cini_reader::process(const Cvirtual_binary s)
 {
 	Cvirtual_tfile tf;
@@ -64,7 +64,7 @@ int Cini_reader::process_line(string_view line)
 				process_section_end();
 			m_section_open = true;
 			line = line.substr(first_non_ws, last_non_ws - first_non_ws);
-			return process_section_start(m_lower_case ? to_lower_copy(string(line)) : line);
+			return process_section_start(m_lower_case ? to_lower(string(line)) : line);
 		default:
 			if (!process_section())
 				return 0;
@@ -82,7 +82,7 @@ int Cini_reader::process_line(string_view line)
 					{
 						string name = string(line.substr(first_non_ws, last_non_ws - first_non_ws + 1));
 						if (m_lower_case)
-							boost::to_lower(name);
+							name = to_lower(name);
 						i++;
 						while (i < line.length())
 						{
@@ -114,7 +114,6 @@ int Cini_reader::process_line(string_view line)
 								return process_key(name, line.substr(first_non_ws, last_non_ws - first_non_ws + 1));
 							}
 							i++;
-
 						}
 						return process_key(name, "");
 					}

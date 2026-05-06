@@ -1,6 +1,6 @@
 #pragma once
 
-#include "palet.h"
+#include "palette.h"
 
 class Cvideo_decoder  
 {
@@ -10,7 +10,7 @@ public:
 	virtual int cx() const = 0;
 	virtual int cy() const = 0;
 	virtual int decode(void* d) = 0;
-	virtual const t_palet_entry* palet() const;
+	virtual const t_palette_entry* palette() const;
 	virtual int seek(int f) = 0;
 	virtual ~Cvideo_decoder();
 

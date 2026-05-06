@@ -15,9 +15,8 @@ public:
 	}
 };
 
-int png_file_write(Cvirtual_file& f, const byte* image, const t_palet_entry* palet, int cx, int cy, int pixel);
-int png_file_write(const string& name, const byte* image, const t_palet_entry* palet, int cx, int cy, int pixel);
-
+int png_file_write(Cvirtual_file& f, const byte* image, const t_palette_entry* palette, int cx, int cy, int pixel);
+int png_file_write(const string& name, const byte* image, const t_palette_entry* palette, int cx, int cy, int pixel);
 
 inline byte linear2sRGB(const unsigned short l)
 {

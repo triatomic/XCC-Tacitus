@@ -7,7 +7,6 @@
 
 #include <gdiplus.h>
 #include <id_log.h>
-#include "fs_ini_file.h"
 #include "mix_cache.h"
 #include "theme.h"
 #include "xcc_dirs.h"
@@ -39,8 +38,6 @@ BOOL CXCCMixerApp::InitInstance()
 		mix_database::load();
 	}
 	mix_cache::load();
-	find_fs_exe();
-	find_fa_exe();
 
 	CSingleDocTemplate* pDocTemplate;
 	pDocTemplate = new CSingleDocTemplate(
@@ -69,48 +66,6 @@ int CXCCMixerApp::ExitInstance()
 	mix_cache::save();
 	xcc_dirs::save_to_registry();
 	return CWinApp::ExitInstance();
-}
-
-void CXCCMixerApp::find_fs_exe()
-{
-	CIniFile f;
-	char win_dir[256];
-	if (!GetWindowsDirectory(win_dir, 256))
-		return;
-	if (f.LoadFile((static_cast<string>(win_dir) + "\\finalsun.ini").c_str()))
-		return;
-	m_fs_exe = f.sections["FinalSun"].values["Path"] + "finalsun.exe";
-}
-
-void CXCCMixerApp::find_fa_exe()
-{
-	CIniFile f;
-	char win_dir[256];
-	if (!GetWindowsDirectory(win_dir, 256))
-		return;
-	if (f.LoadFile((static_cast<string>(win_dir) + "\\finalalert.ini").c_str()))
-		return;
-	m_fa_exe = f.sections["FinalAlert"].values["Path"] + "finalalert.exe";
-}
-
-string CXCCMixerApp::get_fs_exe() const
-{
-	return m_fs_exe;
-}
-
-string CXCCMixerApp::get_fa_exe() const
-{
-	return m_fa_exe;
-}
-
-bool CXCCMixerApp::is_fs_available() const
-{
-	return Cfname(m_fs_exe).exists();
-}
-
-bool CXCCMixerApp::is_fa_available() const
-{
-	return Cfname(m_fa_exe).exists();
 }
 
 BOOL CXCCMixerApp::OnIdle(LONG lCount) 

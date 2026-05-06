@@ -30,7 +30,6 @@
 #include "shp_dune2_file.h"
 #include "shp_file.h"
 #include "shp_ts_file.h"
-#include "sound_ts_ini_reader.h"
 #include "st_file.h"
 #include "string_conversion.h"
 #include "text_file.h"
@@ -99,7 +98,7 @@ const char* ft_name[] =
 	"rules ini (ts)",
 	"rules ini (ra2)",
 	"shp (dune2)",
-	"shp",
+	"shp (td)",
 	"shp (ts)",
 	"sound ini (ts)",
 	"sound ini (ra2)",
@@ -109,9 +108,9 @@ const char* ft_name[] =
 	"tga (single)",
 	"theme ini (ts)",
 	"theme ini (ra2)",
-	"tmp",
-	"tmp (ra)",
-	"tmp (ts)",
+	"icon (td)",
+	"icon (ra)",
+	"isotile",
 	"voc",
 	"vpl",
 	"vqa",
@@ -127,6 +126,7 @@ const char* ft_name[] =
 	"xcc unknown",
 	"xif",
 	"zip",
+	"shortcut",
 	"unknown"
 };
 
@@ -173,11 +173,11 @@ Ccc_file::Ccc_file(bool read_on_open) :
 	{
 		close();
 		assert(!is_open());
-#ifdef NO_MIX_SUPPORT
+//#ifdef NO_MIX_SUPPORT
 		test_fail(m_f.open_read(name));
-#else
-		test_fail(m_f.open_read(xcc_dirs::find_file(name)));
-#endif
+//#else
+//		test_fail(m_f.open_read(xcc_dirs::find_file(name)));		//???
+//#endif
 		m_offset = 0;
 		m_size = m_f.size();
 		m_p = 0;
@@ -186,14 +186,14 @@ Ccc_file::Ccc_file(bool read_on_open) :
 		if (m_read_on_open)
 			m_f.close();
 #ifndef NO_FT_SUPPORT
-		Cfname fname = to_lower_copy(name);
+		Cfname fname = to_lower(name);
 		m_fext = fname.get_fext();
 		if (m_fext == ".mmx")
 		{
 			fname.set_ext(".map");
-			mix_database::add_name(game_ra2, fname.get_fname(), "-");
+			mix_database::add_name(game_ra2, fname.get_fname(), "");
 			fname.set_ext(".pkt");
-			mix_database::add_name(game_ra2, fname.get_fname(), "-");
+			mix_database::add_name(game_ra2, fname.get_fname(), "");
 		}
 #endif
 		test_fail(post_open())
@@ -293,7 +293,6 @@ Ccc_file::Ccc_file(bool read_on_open) :
 		m_is_open = false;
 	}
 
-	
 	t_file_type Ccc_file::get_file_type_ext(bool fast)
 	{
 		Cvirtual_binary data;
@@ -323,6 +322,10 @@ Ccc_file::Ccc_file(bool read_on_open) :
 	{
 		Cvirtual_binary data;
 		size_t size;
+		if (m_fext == ".lnk")
+		{
+			return ft_lnkdir;
+		}
 		if (m_data.data())
 		{
 			data = m_data;
@@ -457,18 +460,19 @@ Ccc_file::Ccc_file(bool read_on_open) :
 		}
 		if (xif_f.load(data, m_size), xif_f.is_valid())
 			return ft_xif;
+		if (pak_f.load(data, m_size), pak_f.is_valid())	//moved up so it doesn't think they're mix files
+			return ft_pak;
 		if (mix_f.load(data, m_size), mix_f.is_valid())
 			return ft_mix;
 		if (mix_rg_f.load(data, m_size), mix_rg_f.is_valid())
 			return ft_mix_rg;
-		if (pak_f.load(data, m_size), pak_f.is_valid())
-			return ft_pak;
 		if (w3d_f.load(data, m_size), w3d_f.is_valid())
 			return ft_w3d;
+
 		if (text_f.load(data, m_size), text_f.is_valid())
 		{
-			if (fast)
-				return ft_text;
+			//if (fast)
+			//	return ft_text;
 			Cvirtual_tfile tf;
 			tf.load_data(data);
 			Cnull_ini_reader ir;
@@ -510,24 +514,28 @@ Ccc_file::Ccc_file(bool read_on_open) :
 					if (!ir.process(data) && ir.is_valid())
 						return ft_pkt_ts;
 				}
-				{
-					Csound_ts_ini_reader ir;
-					ir.fast(true);
-					if (!ir.process(data) && ir.is_valid())
-						return ft_sound_ini_ts;
-				}
-				{
-					Ctheme_ts_ini_reader ir;
-					if (!ir.process(data) && ir.is_valid())
-						return ft_theme_ini_ts;
-				}
+				//{
+				//	Csound_ts_ini_reader ir;
+				//	ir.fast(true);
+				//	if (!ir.process(data) && ir.is_valid())
+				//		return ft_sound_ini_ts;
+				//}
+				//{
+				//	Ctheme_ts_ini_reader ir;
+				//	if (!ir.process(data) && ir.is_valid())
+				//		return ft_theme_ini_ts;
+				//}
+				return ft_ini;
+			}
+			if (m_fext == ".ini")
+			{
 				return ft_ini;
 			}
 			return ft_text;
-		}
-		if (m_fext == ".mix")
-		{
-			return get_file_type_ext(fast);
+			if (m_fext == ".mix")
+			{
+				return get_file_type_ext(fast);
+			}
 		}
 		return ft_unknown;
 	}

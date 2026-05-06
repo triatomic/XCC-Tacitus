@@ -11,6 +11,7 @@
 #include "pak_file.h"
 #include "string_conversion.h"
 #include "xcc_lmd_file.h"
+#include <fstream>
 
 bool Cmix_file::m_ft_support = false;
 
@@ -28,22 +29,24 @@ bool Cmix_file::is_valid()
 	int size = get_size();
 	if (sizeof(t_mix_header) > size)
 		return false;
-	if (header.c_files && sizeof(t_mix_header) + header.c_files * sizeof(t_mix_index_entry) + header.size == size)
+	//even if you don't get the proper header, you can read it anyways
+	if (header.c_files /*&& sizeof(t_mix_header) + header.c_files * sizeof(t_mix_index_entry) + header.size == size*/)
 		return true;
 	if (header.flags & ~(mix_encrypted | mix_checksum))
 		return false;
 	m_has_checksum = header.flags & mix_checksum;
 	m_is_encrypted = header.flags & mix_encrypted;
+	m_rawflagvalue = header.flags;
 	if (m_is_encrypted)
 	{
 		Cblowfish bf;
 		std::array<byte, cb_mix_key> key;
 		get_blowfish_key(data + 4, key);
-		bf.set_key(key);
+		bf.Submit_Key(key);
 		byte e[8];
-		bf.decipher(data + 84, e, 8);
+		bf.Decrypt(data + 84, e, 8);
 		t_mix_header* header = reinterpret_cast<t_mix_header*>(e);
-		if (!header->c_files || 84 + (sizeof(t_mix_header) + header->c_files * sizeof(t_mix_index_entry) + 7 & ~7) + header->size + (m_has_checksum ? 20 : 0) != size)
+		if (!header->c_files /*|| 4 + sizeof(t_mix_header) + header->c_files * sizeof(t_mix_index_entry) + header->size + (m_has_checksum ? 20 : 0) != size*/)
 			return false;
 	}
 	else
@@ -77,7 +80,7 @@ int Cmix_file::post_open()
 			for (int i = 0; i < c_files; i++)
 			{
 				string name = f.get_name(i);
-				mix_database::add_name(m_game, name, "-");
+				mix_database::add_name(m_game, name, "");
 				m_index[i] = t_mix_index_entry(get_id(get_game(), name), f.get_offset(name), f.get_size(name));
 			}
 			index_read = true;
@@ -98,7 +101,7 @@ int Cmix_file::post_open()
 				for (int i = 0; i < c_files; i++)
 				{
 					string name = f.get_name(i);
-					mix_database::add_name(m_game, name, "-");
+					mix_database::add_name(m_game, name, "");
 					m_index[i] = t_mix_index_entry(get_id(get_game(), name), f.get_offset(name), f.get_size(name));
 				}
 				index_read = true;
@@ -157,6 +160,7 @@ int Cmix_file::post_open()
 		{
 			m_has_checksum = header.flags & mix_checksum;
 			m_is_encrypted = header.flags & mix_encrypted;
+			m_rawflagvalue = header.flags;
 			bool aligned = true;
 			Cblowfish bf;
 			seek(4);
@@ -166,10 +170,10 @@ int Cmix_file::post_open()
 				read(key_source, cb_mix_key_source);
 				std::array<byte, cb_mix_key> key;
 				get_blowfish_key(key_source, key);
-				bf.set_key(key);
+				bf.Submit_Key(key);
 				byte e[8];
 				read(e, 8);
-				bf.decipher(e, e, 8);
+				bf.Decrypt(e, e, 8);
 				memcpy(&header, e, sizeof(t_mix_header));
 				int c_files = header.c_files;
 				const int cb_index = c_files * sizeof(t_mix_index_entry);
@@ -180,7 +184,7 @@ int Cmix_file::post_open()
 				{
 					Cvirtual_binary f;
 					read(f.write_start(cb_f), cb_f);
-					bf.decipher(f.data_edit(), f.data_edit(), cb_f);
+					bf.Decrypt(f.data_edit(), f.data_edit(), cb_f);
 					m_index.resize(c_files);
 					memcpy(&m_index[0], e + 6, 2);
 					memcpy(reinterpret_cast<byte*>(&m_index[0]) + 2, f.data(), cb_index - 2);
@@ -197,12 +201,10 @@ int Cmix_file::post_open()
 				read(&header, sizeof(header));
 				int c_files = header.c_files;
 				const int cb_index = c_files * sizeof(t_mix_index_entry);
-				auto mix_size = get_size();
-				if (mix_size != 4 + sizeof(t_mix_header) + cb_index + header.size + (m_has_checksum ? 20 : 0))
+				if (get_size() != 4 + sizeof(t_mix_header) + cb_index + header.size + (m_has_checksum ? 20 : 0))
 					test_fail(1);				
 				m_index.resize(c_files);
 				read(&m_index[0], cb_index);
-
 				for (int i = 0; i < c_files; i++)
 				{
 					if (m_index[i].offset & 0xf)
@@ -269,7 +271,11 @@ int Cmix_file::post_open()
 				{
 					Ccc_file f(false);
 					f.open(get_id(i.second), *this);
-					m_index_ft[i.second] = f.get_file_type();
+					auto test = mix_database::get_name(m_game, get_id(i.second));
+					if (test.ends_with(".ini"))				//if it calls itself an ini, it probably is an ini file and not a text file
+						m_index_ft[i.second] = ft_ini;
+					else
+						m_index_ft[i.second] = f.get_file_type();
 				}
 				mix_cache::set_data(crc, Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type)));
 			}
@@ -286,7 +292,7 @@ int Cmix_file::post_open()
 				{
 					string name = r;
 					r += name.length() + 1;
-					mix_database::add_name(m_game, name, "-");
+					mix_database::add_name(m_game, name, "");
 				}
 			}
 		}
@@ -336,7 +342,7 @@ string Cmix_file::get_name(int id)
 
 int Cmix_file::get_id(t_game game, string name)
 {
-	boost::to_upper(name);
+	name = to_upper(name);
 	std::replace(name.begin(), name.end(), '/', '\\');
 	switch (game)
 	{
@@ -399,4 +405,20 @@ Cvirtual_binary Cmix_file::get_vdata(int id)
 Cvirtual_binary Cmix_file::get_vdata(const string& name)
 {
 	return get_vdata(get_id(m_game, name));
+}
+
+ostream& Cmix_file::extract_as_text(ostream& os) const
+{
+	const int c_files = get_c_files();
+	const t_game game = get_game();
+	os << "Checksum: " << (has_checksum() ? "Yes" : "No") << endl;
+	os << "Encrypted: " << (is_encrypted() ? "Yes" : "No") << endl;
+	os << "Game: " << game_name[game] << endl;
+	os << endl;
+	for (int i = 0; i < c_files; i++)
+	{
+		int id = get_id(i);
+		os << nwzl(4, i) << " - " << nh(8, id) << nwsl(11, get_size(id)) << " " << mix_database::get_name(game, id) << endl;
+	}
+	return os;
 }
