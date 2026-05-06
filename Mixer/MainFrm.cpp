@@ -15,6 +15,7 @@
 #include "searchfiledlg.h"
 #include "selectpaletdlg.h"
 #include "string_conversion.h"
+#include "theme.h"
 #include "theme_ts_ini_reader.h"
 #include "wav_file.h"
 #include "xcc_dirs.h"
@@ -92,6 +93,14 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_LAUNCH_XSE_RA2_YR, OnLaunchXSE_RA2_YR)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSE_RA2_YR, OnUpdateLaunchXSE_RA2_YR)
 	ON_COMMAND(ID_LAUNCH_MIXEDITOR, OnLaunchMixEditor_Open)
+	ON_COMMAND(ID_THEME_LIGHT, OnThemeLight)
+	ON_COMMAND(ID_THEME_DARK, OnThemeDark)
+	ON_UPDATE_COMMAND_UI(ID_THEME_LIGHT, OnUpdateThemeLight)
+	ON_UPDATE_COMMAND_UI(ID_THEME_DARK, OnUpdateThemeDark)
+	ON_WM_MEASUREITEM()
+	ON_WM_DRAWITEM()
+	ON_WM_CTLCOLOR()
+	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -120,12 +129,14 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CFrameWnd::OnCreate(lpCreateStruct) == -1)
 		return -1;
-	if (!m_wndStatusBar.Create(this) 
+	if (!m_wndStatusBar.Create(this)
 		|| !m_wndStatusBar.SetIndicators(indicators, sizeof(indicators) / sizeof(UINT)))
 	{
 		TRACE0("Failed to create status bar\n");
 		return -1;
 	}
+	theme::apply_titlebar(GetSafeHwnd());
+	rebuild_menu_owner_draw();
 	return 0;
 }
 
@@ -173,6 +184,7 @@ BOOL CMainFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext)
 
 	SetActiveView(reinterpret_cast<CView*>(m_left_mix_pane));
 
+	apply_theme_to_children();
 	return true;
 }
 
@@ -1085,7 +1097,155 @@ void CMainFrame::OnViewPaletAutoSelect()
 	m_file_info_pane->auto_select();
 }
 
-void CMainFrame::OnUpdateViewPaletAutoSelect(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateViewPaletAutoSelect(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(m_file_info_pane->can_auto_select());
+}
+
+// ---------- Theme menu ----------
+
+void CMainFrame::OnThemeLight()
+{
+	theme::set(theme::mode_light);
+	theme::apply_titlebar(GetSafeHwnd());
+	rebuild_menu_owner_draw();
+	apply_theme_to_children();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+}
+
+void CMainFrame::OnThemeDark()
+{
+	theme::set(theme::mode_dark);
+	theme::apply_titlebar(GetSafeHwnd());
+	rebuild_menu_owner_draw();
+	apply_theme_to_children();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+}
+
+void CMainFrame::OnUpdateThemeLight(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetRadio(theme::get() == theme::mode_light);
+}
+
+void CMainFrame::OnUpdateThemeDark(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetRadio(theme::get() == theme::mode_dark);
+}
+
+// Walk a menu bar and convert every item to MFT_OWNERDRAW (or back), so our
+// WM_DRAWITEM/WM_MEASUREITEM handlers paint the top strip in dark colors.
+// Stores the item label in dwItemData so the draw handler has the text.
+static void set_menu_owner_draw(HMENU hm, bool owner_draw)
+{
+	if (!hm)
+		return;
+	int n = ::GetMenuItemCount(hm);
+	for (int i = 0; i < n; i++)
+	{
+		MENUITEMINFOA mii = {};
+		mii.cbSize = sizeof(mii);
+		mii.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_DATA | MIIM_SUBMENU;
+		char buf[256] = {};
+		mii.dwTypeData = buf;
+		mii.cch = sizeof(buf) - 1;
+		if (!::GetMenuItemInfoA(hm, i, TRUE, &mii))
+			continue;
+
+		if (owner_draw)
+		{
+			// Stash a heap copy of the label; it must outlive the menu.
+			char* stored = reinterpret_cast<char*>(mii.dwItemData);
+			if (!stored)
+			{
+				size_t len = strlen(buf) + 1;
+				stored = new char[len];
+				memcpy(stored, buf, len);
+			}
+			MENUITEMINFOA upd = {};
+			upd.cbSize = sizeof(upd);
+			upd.fMask = MIIM_FTYPE | MIIM_DATA;
+			upd.fType = (mii.fType & ~MFT_STRING) | MFT_OWNERDRAW;
+			upd.dwItemData = reinterpret_cast<ULONG_PTR>(stored);
+			::SetMenuItemInfoA(hm, i, TRUE, &upd);
+		}
+		else
+		{
+			char* stored = reinterpret_cast<char*>(mii.dwItemData);
+			MENUITEMINFOA upd = {};
+			upd.cbSize = sizeof(upd);
+			upd.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_DATA;
+			upd.fType = (mii.fType & ~MFT_OWNERDRAW) | MFT_STRING;
+			upd.dwTypeData = stored ? stored : buf;
+			upd.cch = static_cast<UINT>(strlen(upd.dwTypeData));
+			upd.dwItemData = 0;
+			::SetMenuItemInfoA(hm, i, TRUE, &upd);
+			if (stored)
+				delete[] stored;
+		}
+
+		// Recurse into submenus so popup items are themed too.
+		if (mii.hSubMenu)
+			set_menu_owner_draw(mii.hSubMenu, owner_draw);
+	}
+}
+
+void CMainFrame::rebuild_menu_owner_draw()
+{
+	HMENU hm = ::GetMenu(GetSafeHwnd());
+	if (!hm)
+		return;
+	set_menu_owner_draw(hm, theme::is_dark());
+	::DrawMenuBar(GetSafeHwnd());
+}
+
+void CMainFrame::apply_theme_to_children()
+{
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		theme::apply_listview(m_left_mix_pane->GetSafeHwnd());
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		theme::apply_listview(m_right_mix_pane->GetSafeHwnd());
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		theme::apply_window(m_file_info_pane->GetSafeHwnd());
+	if (m_wndStatusBar.GetSafeHwnd())
+		theme::apply_window(m_wndStatusBar.GetSafeHwnd());
+	if (m_wndSplitter.GetSafeHwnd())
+		theme::apply_window(m_wndSplitter.GetSafeHwnd());
+}
+
+void CMainFrame::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS)
+{
+	if (theme::on_measure_menu_item(lpMIS))
+		return;
+	CFrameWnd::OnMeasureItem(nIDCtl, lpMIS);
+}
+
+void CMainFrame::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS)
+{
+	if (theme::on_draw_menu_item(lpDIS))
+		return;
+	CFrameWnd::OnDrawItem(nIDCtl, lpDIS);
+}
+
+HBRUSH CMainFrame::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (theme::is_dark())
+	{
+		pDC->SetTextColor(theme::text());
+		pDC->SetBkColor(theme::bg());
+		pDC->SetBkMode(TRANSPARENT);
+		return theme::bg_brush();
+	}
+	return CFrameWnd::OnCtlColor(pDC, pWnd, nCtlColor);
+}
+
+BOOL CMainFrame::OnEraseBkgnd(CDC* pDC)
+{
+	if (theme::is_dark())
+	{
+		CRect r;
+		GetClientRect(&r);
+		pDC->FillSolidRect(&r, theme::bg());
+		return TRUE;
+	}
+	return CFrameWnd::OnEraseBkgnd(pDC);
 }

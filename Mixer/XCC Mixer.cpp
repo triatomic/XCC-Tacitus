@@ -9,6 +9,7 @@
 #include <id_log.h>
 #include "fs_ini_file.h"
 #include "mix_cache.h"
+#include "theme.h"
 #include "xcc_dirs.h"
 #include "xcc_log.h"
 
@@ -27,6 +28,8 @@ BOOL CXCCMixerApp::InitInstance()
 	AfxEnableControlContainer();
 	SetRegistryKey("XCC");
 	LoadStdProfileSettings(0);
+	theme::load();
+	theme::apply_app_mode();
 	Cmix_file::enable_ft_support();
 	xcc_dirs::load_from_registry();
 	xcc_log::attach_file("XCC Mixer log.txt");

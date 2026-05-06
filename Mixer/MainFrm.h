@@ -230,5 +230,15 @@ protected:
 	afx_msg void OnConversionRemapTeamColors();
 	afx_msg void OnUpdateConversionRemapTeamColors(CCmdUI* pCmdUI);
 	afx_msg void OnLaunchMixEditor_Open();
+	afx_msg void OnThemeLight();
+	afx_msg void OnThemeDark();
+	afx_msg void OnUpdateThemeLight(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeDark(CCmdUI* pCmdUI);
+	afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS);
+	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	void apply_theme_to_children();
+	void rebuild_menu_owner_draw();
 	DECLARE_MESSAGE_MAP()
 };

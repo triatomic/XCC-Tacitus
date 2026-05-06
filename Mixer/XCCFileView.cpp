@@ -44,6 +44,7 @@
 #include <wsa_file.h>
 #include <csf_file.h>
 #include <png_file.h>
+#include "theme.h"
 
 IMPLEMENT_DYNCREATE(CXCCFileView, CScrollView)
 
@@ -60,8 +61,21 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_UPDATE_COMMAND_UI(ID_FILE_NEW, OnDisable)
 	ON_UPDATE_COMMAND_UI(ID_FILE_OPEN, OnDisable)
 	ON_UPDATE_COMMAND_UI(ID_FILE_CLOSE, OnDisable)
+	ON_WM_ERASEBKGND()
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
+
+BOOL CXCCFileView::OnEraseBkgnd(CDC* pDC)
+{
+	if (theme::is_dark())
+	{
+		CRect r;
+		GetClientRect(&r);
+		pDC->FillSolidRect(&r, theme::bg());
+		return TRUE;
+	}
+	return CScrollView::OnEraseBkgnd(pDC);
+}
 
 void CXCCFileView::OnInitialUpdate()
 {
@@ -418,6 +432,12 @@ void CXCCFileView::OnDraw(CDC* pDC)
 {
 	const char* b2a[] = {"no", "yes"};
 	pDC->SelectObject(&m_font);
+	if (theme::is_dark())
+	{
+		pDC->SetTextColor(theme::text());
+		pDC->SetBkColor(theme::bg());
+		pDC->SetBkMode(TRANSPARENT);
+	}
 	if (m_is_open)
 	{
 		pDC->GetClipBox(&m_clip_rect);

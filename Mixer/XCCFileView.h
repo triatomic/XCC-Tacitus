@@ -46,6 +46,7 @@ protected:
 	virtual ~CXCCFileView();
 	//{{AFX_MSG(CXCCFileView)
 	afx_msg void OnDisable(CCmdUI* pCmdUI);
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 private:

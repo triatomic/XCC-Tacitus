@@ -13,7 +13,7 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// Ó¢Óï(ÃÀ¹ú) resources
+// Ó¢ï¿½ï¿½(ï¿½ï¿½ï¿½ï¿½) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
@@ -151,6 +151,11 @@ BEGIN
         END
         MENUITEM SEPARATOR
         MENUITEM "MIX Editor",                  ID_LAUNCH_MIXEDITOR
+    END
+    POPUP "&Theme"
+    BEGIN
+        MENUITEM "&Light mode",                 ID_THEME_LIGHT
+        MENUITEM "&Dark mode",                  ID_THEME_DARK
     END
 END
 
@@ -499,12 +504,12 @@ BEGIN
     AFX_IDS_IDLEMESSAGE     "Ready"
 END
 
-#endif    // Ó¢Óï(ÃÀ¹ú) resources
+#endif    // Ó¢ï¿½ï¿½(ï¿½ï¿½ï¿½ï¿½) resources
 /////////////////////////////////////////////////////////////////////////////
 
 
 /////////////////////////////////////////////////////////////////////////////
-// ºÉÀ¼Óï(ºÉÀ¼) resources
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½ï¿½ï¿½) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NLD)
 LANGUAGE LANG_DUTCH, SUBLANG_DUTCH
@@ -545,7 +550,7 @@ BEGIN
 END
 #endif    // APSTUDIO_INVOKED
 
-#endif    // ºÉÀ¼Óï(ºÉÀ¼) resources
+#endif    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½ï¿½ï¿½) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

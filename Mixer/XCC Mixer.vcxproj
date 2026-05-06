@@ -115,6 +115,8 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="theme.cpp">
+    </ClCompile>
     <ClCompile Include="..\misc\virtual_image_mfc.cpp" />
     <ClCompile Include="..\misc\xap.cpp">
     </ClCompile>
@@ -153,6 +155,7 @@
     <ClInclude Include="SelectPaletDlg.h" />
     <ClInclude Include="shp_properties_dlg.h" />
     <ClInclude Include="StdAfx.h" />
+    <ClInclude Include="theme.h" />
     <ClInclude Include="XCC Mixer.h" />
     <ClInclude Include="XCC MixerDoc.h" />
     <ClInclude Include="XCC MixerView.h" />

@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ Éú³ÉµÄ°üº¬ÎÄ¼þ¡£
-// ¹© XCC Mixer.rc Ê¹ÓÃ
+// Microsoft Visual C++ ï¿½ï¿½ï¿½ÉµÄ°ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½
+// ï¿½ï¿½ XCC Mixer.rc Ê¹ï¿½ï¿½
 //
 #define IDC_RESET_DATA                  3
 #define IDC_RESET_CD                    4
@@ -1361,6 +1361,8 @@
 #define ID_VIEW_PALET_PAL997            40997
 #define ID_VIEW_PALET_PAL998            40998
 #define ID_VIEW_PALET_PAL999            40999
+#define ID_THEME_LIGHT                  41000
+#define ID_THEME_DARK                   41001
 
 // Next default values for new objects
 // 
