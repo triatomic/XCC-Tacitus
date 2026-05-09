@@ -2,3 +2,20 @@
 Debug/
 Release/
 vcpkg_installed/
+
+# Per-user / local
+*.user
+*.suo
+*.aps
+.claude/settings.local.json
+
+# Backup files
+*.bak
+*.icobak
+*.orig
+
+# Local-only directories and scripts
+before Performance improvements/
+XCCD2D/
+cmp_misc.sh
+XCCCabal.md
