@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "SearchStringDlg.h"
+#include "theme.h"
 
 #include "fname.h"
 
@@ -26,7 +27,15 @@ BEGIN_MESSAGE_MAP(CSearchStringDlg, ETSLayoutDialog)
 	ON_BN_CLICKED(IDOK, OnSearch)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CSearchStringDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 BOOL CSearchStringDlg::OnInitDialog() 
 {
@@ -42,6 +51,7 @@ BOOL CSearchStringDlg::OnInitDialog()
 	m_list.InsertColumn(0, "Name");
 	m_list.InsertColumn(1, "Value");
 	m_list.auto_size();
+	theme::apply_dialog(GetSafeHwnd());
 	return true;
 }
 

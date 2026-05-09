@@ -28,6 +28,7 @@ protected:
 	afx_msg void OnSearch();
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	//}}AFX_MSG
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 private:
 	const Ccsf_file* m_csf;
