@@ -40,6 +40,8 @@ protected:
 	afx_msg void OnUpdateRelativeCx();
 	afx_msg void OnUpdateRelativeCy();
 	//}}AFX_MSG
+	virtual BOOL OnInitDialog();
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 private:
 	float m_aspect_ratio;

@@ -38,5 +38,7 @@ protected:
 	//{{AFX_MSG(Cshp_properties_dlg)
 		// NOTE: the ClassWizard will add member functions here
 	//}}AFX_MSG
+	virtual BOOL OnInitDialog();
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 };

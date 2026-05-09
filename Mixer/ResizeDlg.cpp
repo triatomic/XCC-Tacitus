@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ResizeDlg.h"
+#include "theme.h"
 
 CResizeDlg::CResizeDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CResizeDlg::IDD, pParent)
@@ -36,7 +37,22 @@ BEGIN_MESSAGE_MAP(CResizeDlg, CDialog)
 	ON_EN_UPDATE(IDC_RELATIVE_CX, OnUpdateRelativeCx)
 	ON_EN_UPDATE(IDC_RELATIVE_CY, OnUpdateRelativeCy)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+BOOL CResizeDlg::OnInitDialog()
+{
+	BOOL r = CDialog::OnInitDialog();
+	theme::apply_dialog(GetSafeHwnd());
+	return r;
+}
+
+HBRUSH CResizeDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return CDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void CResizeDlg::set_size(int cx, int cy)
 {

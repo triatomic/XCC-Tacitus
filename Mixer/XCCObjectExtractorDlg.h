@@ -31,6 +31,7 @@ protected:
 	afx_msg void OnExtract();
 	afx_msg void OnExtractToButton();
 	//}}AFX_MSG
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 private:
 	t_game m_game;

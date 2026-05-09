@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "DirectoriesDlg.h"
+#include "theme.h"
 
 #include "xcc_dirs.h"
 
@@ -46,7 +47,15 @@ BEGIN_MESSAGE_MAP(CDirectoriesDlg, ETSLayoutDialog)
 	ON_BN_CLICKED(IDC_RESET_CD, OnResetCd)
 	ON_BN_CLICKED(IDC_RESET_DATA, OnResetData)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CDirectoriesDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void CDirectoriesDlg::OnOK() 
 {
@@ -120,5 +129,6 @@ BOOL CDirectoriesDlg::OnInitDialog()
 			<< item(IDC_RESET_CD, NORESIZE)
 			);
 	UpdateLayout();
+	theme::apply_dialog(GetSafeHwnd());
 	return true;
 }

@@ -26,5 +26,6 @@ protected:
 	//{{AFX_MSG(CXSTE_edit_dlg)
 	virtual BOOL OnInitDialog();
 	//}}AFX_MSG
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 };

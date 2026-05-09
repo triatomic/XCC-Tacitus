@@ -8,12 +8,15 @@
 #include "xm_types.h"
 
 
+class CXCCFileView;
+
 struct t_index_entry
 {
 	string description;
 	t_file_type ft;
 	string name;
 	string size;
+	long long size_bytes = 0;
 };
 
 class CXCCMixerView : public CListView
@@ -64,6 +67,12 @@ public:
 	int compare(int a, int b) const;
 	int open_f_id(Ccc_file& f, int id) const;
 	int open_f_index(Ccc_file& f, int i) const;
+	// Same as open_f_index but always materializes the entry into an owned
+	// Cvirtual_binary first (via get_vdata_id). Use for in-MIX-prone copy_as_*
+	// paths so decoders see an entry-bounded buffer instead of streaming from
+	// the live mmap'd MIX region.
+	int vload_f_index(Ccc_file& f, int i) const;
+	int dispatch_copy_as(t_file_type ft, int i, const Cfname& fname);
 	void open_location_dir(const string& name);
 	void open_location_mix(const string& name);
 	void open_location_mix(int id);
@@ -101,6 +110,11 @@ public:
 
 protected:
 	void extract_open_audio_pak(const string& bag, const string& idx) const;
+	void play_audio_id(int id);
+
+public:
+	BOOL PreTranslateMessage(MSG* pMsg) override;
+protected:
 
 // Generated message map functions
 protected:
@@ -195,9 +209,33 @@ protected:
 	afx_msg void OnUpdatePopupCopyAsJpegSingle(CCmdUI* pCmdUI);
 	afx_msg void OnPopupCopyAsTgaSingle();
 	afx_msg void OnUpdatePopupCopyAsTgaSingle(CCmdUI* pCmdUI);
+	afx_msg void OnPopupCopyName();
+	afx_msg void OnUpdatePopupCopyName(CCmdUI* pCmdUI);
+	afx_msg void OnPopupBatchExtract();
+	afx_msg void OnUpdatePopupBatchExtract(CCmdUI* pCmdUI);
+	afx_msg void OnPopupBatchExtractPreserve();
+	afx_msg void OnUpdatePopupBatchExtractPreserve(CCmdUI* pCmdUI);
+	void batch_extract(bool preserve);
 	//}}AFX_MSG
+	afx_msg void OnXButtonUp(UINT nFlags, UINT nButton, CPoint point);
+	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
 	DECLARE_MESSAGE_MAP()
+public:
+	bool nav_go_up();
+	bool nav_go_forward();
 private:
+	struct t_nav_entry
+	{
+		enum { kind_dir, kind_disk_mix, kind_nested_mix_id } kind;
+		string s;
+		int id;
+	};
+	void nav_record_up(const t_nav_entry& e);
+	void nav_clear_forward();
+	stack<t_nav_entry> m_nav_forward;
+	stack<int> m_entered_ids;
+	bool m_nav_replaying = false;
+
 	string m_dir;
 	map<int, t_index_entry> m_index;
 	vector<int> m_index_selected;

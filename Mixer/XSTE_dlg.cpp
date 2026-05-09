@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "XSTE_dlg.h"
 #include "XSTE_edit_dlg.h"
+#include "theme.h"
 
 #include "SearchStringDlg.h"
 #include "mix_file.h"
@@ -41,7 +42,15 @@ BEGIN_MESSAGE_MAP(CXSTE_dlg, ETSLayoutDialog)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	ON_BN_CLICKED(IDC_SEARCH, OnSearch)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CXSTE_dlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 BOOL CXSTE_dlg::OnInitDialog() 
 {
@@ -109,6 +118,7 @@ BOOL CXSTE_dlg::OnInitDialog()
 	check_selection();
 	sort_list(0, false);
 	SetRedraw(true);
+	theme::apply_dialog(GetSafeHwnd());
 	Invalidate();
 	return true;
 }

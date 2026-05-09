@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "XCCObjectExtractorDlg.h"
+#include "theme.h"
 
 #include "string_conversion.h"
 #include "xcc_dirs.h"
@@ -35,7 +36,15 @@ BEGIN_MESSAGE_MAP(CXCCObjectExtractorDlg, ETSLayoutDialog)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CXCCObjectExtractorDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 BOOL CXCCObjectExtractorDlg::OnInitDialog()
 {
@@ -84,6 +93,7 @@ BOOL CXCCObjectExtractorDlg::OnInitDialog()
 		add(j++, i->first);
 	for (i = m_extract_object.get_rir().get_vehicle_type_list().begin(); i != m_extract_object.get_rir().get_vehicle_type_list().end(); i++)
 		add(j++, i->first);
+	theme::apply_dialog(GetSafeHwnd());
 	return true;
 }
 

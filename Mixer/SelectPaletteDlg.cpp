@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "SelectPaletteDlg.h"
+#include "theme.h"
 
 CSelectPaletteDlg::CSelectPaletteDlg(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(CSelectPaletteDlg::IDD, pParent, "select_palette_dlg")
@@ -26,8 +27,18 @@ BEGIN_MESSAGE_MAP(CSelectPaletteDlg, ETSLayoutDialog)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_TREE, OnSelchangedTree)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST, OnItemchangedList)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
+	ON_BN_CLICKED(IDC_LOAD_FOLDER, OnLoadFolder)
+	ON_BN_CLICKED(IDC_LOAD_MIX, OnLoadMix)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CSelectPaletteDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void CSelectPaletteDlg::set(CMainFrame* main_frame, t_pal_map_list pal_map_list, t_pal_list pal_list)
 {
@@ -36,7 +47,7 @@ void CSelectPaletteDlg::set(CMainFrame* main_frame, t_pal_map_list pal_map_list,
 	m_pal_list = pal_list;
 }
 
-BOOL CSelectPaletteDlg::OnInitDialog() 
+BOOL CSelectPaletteDlg::OnInitDialog()
 {
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, GREEDY)
@@ -44,6 +55,8 @@ BOOL CSelectPaletteDlg::OnInitDialog()
 			<< item(IDC_LIST, GREEDY)
 			)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
+			<< item(IDC_LOAD_FOLDER, NORESIZE)
+			<< item(IDC_LOAD_MIX, NORESIZE)
 			<< itemGrowing(HORIZONTAL)
 			<< item(IDOK, NORESIZE)
 			<< item(IDCANCEL, NORESIZE)
@@ -52,7 +65,74 @@ BOOL CSelectPaletteDlg::OnInitDialog()
 	m_list.InsertColumn(0, "Name");
 	m_list.auto_size();
 	insert_tree_entry(-1, TVI_ROOT);
+	theme::apply_dialog(GetSafeHwnd());
 	return true;
+}
+
+void CSelectPaletteDlg::rebuild_tree()
+{
+	m_tree.DeleteAllItems();
+	m_pal_map_list = m_main_frame->pal_map_list_mut();
+	m_pal_list = m_main_frame->pal_list_mut();
+	insert_tree_entry(-1, TVI_ROOT);
+}
+
+void CSelectPaletteDlg::OnLoadFolder()
+{
+	CFolderPickerDialog dlg(NULL, 0, this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	string folder = static_cast<string>(dlg.GetPathName());
+	if (folder.empty())
+		return;
+	int parent_id = m_main_frame->load_pal_folder(folder);
+	if (parent_id < 0)
+	{
+		AfxMessageBox("No .pal files found in that folder.", MB_OK | MB_ICONINFORMATION);
+		return;
+	}
+	rebuild_tree();
+}
+
+void CSelectPaletteDlg::OnLoadMix()
+{
+	// Pick one or more archive files. Each selected archive is opened via
+	// load_pal_mix, which recurses into nested MIXes and adds a top-level
+	// tree node per archive. Multi-select via Ctrl+click / Shift+click /
+	// Ctrl+A in the file dialog. Empty archives (no palettes) are skipped.
+	//
+	// We size m_filter_buf large enough to hold the picker's null-separated
+	// list of leaf filenames after the chosen directory; CFileDialog parses
+	// this buffer in-place via OFN_ALLOWMULTISELECT.
+	const char* filter =
+		"Archive files (*.mix;*.dat;*.pak;*.big;*.pkg;*.wsx)|*.mix;*.dat;*.pak;*.big;*.pkg;*.wsx|"
+		"All files (*.*)|*.*||";
+	CFileDialog dlg(TRUE, NULL, NULL,
+		OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER,
+		filter, this);
+	// Roomy buffer for the multi-select reply: <dir>\0<file1>\0<file2>\0...\0\0.
+	const size_t buf_size = 64 * 1024;
+	std::vector<char> buf(buf_size, 0);
+	dlg.m_ofn.lpstrFile = buf.data();
+	dlg.m_ofn.nMaxFile = static_cast<DWORD>(buf_size);
+	if (dlg.DoModal() != IDOK)
+		return;
+	int total = 0;
+	POSITION pos = dlg.GetStartPosition();
+	while (pos)
+	{
+		CString path = dlg.GetNextPathName(pos);
+		if (path.IsEmpty())
+			continue;
+		if (m_main_frame->load_pal_mix(static_cast<std::string>(path)) >= 0)
+			total++;
+	}
+	if (!total)
+	{
+		AfxMessageBox("No palettes found in the selected archive(s).", MB_OK | MB_ICONINFORMATION);
+		return;
+	}
+	rebuild_tree();
 }
 
 void CSelectPaletteDlg::insert_tree_entry(int parent_id, HTREEITEM parent_item)

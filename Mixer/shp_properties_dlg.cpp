@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "shp_properties_dlg.h"
+#include "theme.h"
 
 Cshp_properties_dlg::Cshp_properties_dlg(CWnd* pParent /*=NULL*/)
 	: CDialog(Cshp_properties_dlg::IDD, pParent)
@@ -28,7 +29,22 @@ BEGIN_MESSAGE_MAP(Cshp_properties_dlg, CDialog)
 	//{{AFX_MSG_MAP(Cshp_properties_dlg)
 		// NOTE: the ClassWizard will add message map macros here
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+BOOL Cshp_properties_dlg::OnInitDialog()
+{
+	BOOL r = CDialog::OnInitDialog();
+	theme::apply_dialog(GetSafeHwnd());
+	return r;
+}
+
+HBRUSH Cshp_properties_dlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return CDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void Cshp_properties_dlg::set_size(int cx, int cy, int c_frames)
 {

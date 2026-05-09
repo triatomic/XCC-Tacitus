@@ -9,6 +9,7 @@
 #include "directoriesdlg.h"
 #include "fname.h"
 #include "searchfiledlg.h"
+#include "SearchInPaneDlg.h"
 #include "SelectPaletteDlg.h"
 #include "string_conversion.h"
 #include "theme.h"
@@ -56,6 +57,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_SPLIT_SHADOWS, OnUpdateConversionSplitShadows)
 	ON_COMMAND(ID_VIEW_DIRECTORIES, OnViewDirectories)
 	ON_COMMAND(ID_FILE_SEARCH, OnFileSearch)
+	ON_COMMAND(ID_FILE_SEARCH_IN_MIX, OnFileSearchInMix)
 	ON_COMMAND(ID_CONVERSION_ENABLE_COMPRESSION, OnConversionEnableCompression)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_ENABLE_COMPRESSION, OnUpdateConversionEnableCompression)
 	ON_WM_DESTROY()
@@ -75,6 +77,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XTW_RA2_YR, OnUpdateLaunchXTW_RA2_YR)
 	ON_COMMAND(ID_VIEW_PALETTE_SELECT, OnViewPaletteSelect)
 	ON_COMMAND(ID_VIEW_PALETTE_AUTO_SELECT, OnViewPaletteAutoSelect)
+	ON_COMMAND(ID_VIEW_PALETTE_PREV_SIBLING, OnViewPalettePrevSibling)
+	ON_COMMAND(ID_VIEW_PALETTE_NEXT_SIBLING, OnViewPaletteNextSibling)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_PALETTE_AUTO_SELECT, OnUpdateViewPaletteAutoSelect)
 	ON_COMMAND(ID_LAUNCH_XSTE_GR, OnLaunchXSTE_GR)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSTE_GR, OnUpdateLaunchXSTE_GR)
@@ -90,12 +94,34 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSE_RA2_YR, OnUpdateLaunchXSE_RA2_YR)
 	ON_COMMAND(ID_THEME_LIGHT, OnThemeLight)
 	ON_COMMAND(ID_THEME_DARK, OnThemeDark)
+	ON_COMMAND(ID_THEME_SHOW_GRID, OnThemeShowGrid)
+	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
+	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHP_TRANSPARENCY, OnUpdateThemeShpTransparency)
+	ON_COMMAND(ID_THEME_USE_CHECKERBOARD, OnThemeUseCheckerboard)
+	ON_UPDATE_COMMAND_UI(ID_THEME_USE_CHECKERBOARD, OnUpdateThemeUseCheckerboard)
+	ON_COMMAND(ID_THEME_USE_EXTERNAL_PROGRAMS, OnThemeUseExternalPrograms)
+	ON_UPDATE_COMMAND_UI(ID_THEME_USE_EXTERNAL_PROGRAMS, OnUpdateThemeUseExternalPrograms)
 	ON_UPDATE_COMMAND_UI(ID_THEME_LIGHT, OnUpdateThemeLight)
 	ON_UPDATE_COMMAND_UI(ID_THEME_DARK, OnUpdateThemeDark)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_GRID, OnUpdateThemeShowGrid)
+	ON_COMMAND(ID_THEME_INTERP_NEAREST,  OnThemeInterpNearest)
+	ON_COMMAND(ID_THEME_INTERP_BILINEAR, OnThemeInterpBilinear)
+	ON_COMMAND(ID_THEME_INTERP_BICUBIC,  OnThemeInterpBicubic)
+	ON_COMMAND(ID_THEME_INTERP_LANCZOS,  OnThemeInterpLanczos)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_NEAREST,  OnUpdateThemeInterpNearest)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BILINEAR, OnUpdateThemeInterpBilinear)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BICUBIC,  OnUpdateThemeInterpBicubic)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_LANCZOS,  OnUpdateThemeInterpLanczos)
 	ON_WM_MEASUREITEM()
 	ON_WM_DRAWITEM()
 	ON_WM_CTLCOLOR()
 	ON_WM_ERASEBKGND()
+	ON_MESSAGE(WM_USER + 0x101, &CMainFrame::OnThemeRebuildMenu)
+	ON_COMMAND(ID_THEME_PANES_ONE, OnThemePanesOne)
+	ON_COMMAND(ID_THEME_PANES_TWO, OnThemePanesTwo)
+	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_ONE, OnUpdateThemePanesOne)
+	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_TWO, OnUpdateThemePanesTwo)
 END_MESSAGE_MAP()
 
 
@@ -114,6 +140,7 @@ CMainFrame::CMainFrame()
 	m_palette_i = AfxGetApp()->GetProfileInt(m_reg_key, "palette_i", -1);
 	m_split_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "split_shadows", false);
 	m_use_palette_for_conversion = AfxGetApp()->GetProfileInt(m_reg_key, "use_palette_for_conversion", false);
+	m_two_panes = AfxGetApp()->GetProfileInt(m_reg_key, "two_panes", 1) != 0;
 }
 
 CMainFrame::~CMainFrame()
@@ -132,6 +159,27 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	rebuild_menu_owner_draw();
+	// Suffix the frame caption with the mix-database source so the user can
+	// see at a glance whether names are coming from <data dir>\global mix
+	// database.dat (with their own additions, if any) or from the embedded
+	// fallback. mix_db_source_none means lookup will miss and rows will show
+	// 8-hex IDs — flagged loudly to make the cause obvious.
+	{
+		const char* tag = nullptr;
+		switch (g_mix_db_source)
+		{
+		case mix_db_source_on_disk:  tag = " [DB: on-disk]"; break;
+		case mix_db_source_embedded: tag = " [DB: embedded]"; break;
+		case mix_db_source_none:     tag = " [DB: missing]"; break;
+		}
+		if (tag)
+		{
+			CString t;
+			GetWindowText(t);
+			t += tag;
+			SetWindowText(t);
+		}
+	}
 	return 0;
 }
 
@@ -180,6 +228,8 @@ BOOL CMainFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext)
 	SetActiveView(reinterpret_cast<CView*>(m_left_mix_pane));
 
 	apply_theme_to_children();
+	if (!m_two_panes)
+		set_pane_layout(false);
 	return true;
 }
 
@@ -734,10 +784,31 @@ void CMainFrame::OnViewDirectories()
 	dlg.DoModal();
 }
 
-void CMainFrame::OnFileSearch() 
+void CMainFrame::OnFileSearch()
 {
 	CSearchFileDlg dlg;
 	dlg.set(this);
+	dlg.DoModal();
+}
+
+void CMainFrame::OnFileSearchInMix()
+{
+	CXCCMixerView* pane = nullptr;
+	CWnd* focus = GetFocus();
+	if (focus)
+	{
+		HWND h = focus->GetSafeHwnd();
+		if (m_left_mix_pane && (h == m_left_mix_pane->GetSafeHwnd() || ::IsChild(m_left_mix_pane->GetSafeHwnd(), h)))
+			pane = m_left_mix_pane;
+		else if (m_right_mix_pane && (h == m_right_mix_pane->GetSafeHwnd() || ::IsChild(m_right_mix_pane->GetSafeHwnd(), h)))
+			pane = m_right_mix_pane;
+	}
+	if (!pane)
+		pane = m_left_mix_pane;
+	if (!pane)
+		return;
+	CSearchInPaneDlg dlg;
+	dlg.set(pane);
 	dlg.DoModal();
 }
 
@@ -839,13 +910,30 @@ void CMainFrame::OnLaunchXSE_Open()
 	dlg2.DoModal();
 }
 
-void CMainFrame::OnDestroy() 
+void CMainFrame::OnDestroy()
 {
 	AfxGetApp()->WriteProfileInt(m_reg_key, "combine_shadows", m_combine_shadows);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "enable_compression", m_enable_compression);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "palette_i", m_palette_i);	//i don't care about keeping them wrong for older compatibility
 	AfxGetApp()->WriteProfileInt(m_reg_key, "split_shadows", m_split_shadows);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "use_palette_for_conversion", m_use_palette_for_conversion);
+
+	// Persist window placement so the next launch restores the user's last
+	// size/position instead of always starting maximized. rcNormalPosition is
+	// the restored-state rect (valid even when the window is currently
+	// maximized); showCmd records whether the window was maximized at exit.
+	WINDOWPLACEMENT wp = {};
+	wp.length = sizeof(wp);
+	if (GetWindowPlacement(&wp))
+	{
+		AfxGetApp()->WriteProfileInt(m_reg_key, "win_left",   wp.rcNormalPosition.left);
+		AfxGetApp()->WriteProfileInt(m_reg_key, "win_top",    wp.rcNormalPosition.top);
+		AfxGetApp()->WriteProfileInt(m_reg_key, "win_right",  wp.rcNormalPosition.right);
+		AfxGetApp()->WriteProfileInt(m_reg_key, "win_bottom", wp.rcNormalPosition.bottom);
+		AfxGetApp()->WriteProfileInt(m_reg_key, "win_maximized",
+			wp.showCmd == SW_SHOWMAXIMIZED ? 1 : 0);
+	}
+
 	CFrameWnd::OnDestroy();
 }
 
@@ -1086,6 +1174,151 @@ void CMainFrame::set_palette(int id)
 	m_file_info_pane->Invalidate();
 }
 
+// Walk a (possibly nested) Cmix_file and import every palette inside under
+// pal_parent. mix_label is the human-readable prefix used for entry names
+// ("foo.mix - palette.pal"). Returns count of palettes added at this level
+// + below. Recursion creates a fresh pal-map sub-node per nested MIX.
+static int import_pals_from_mix(CMainFrame& frame, Cmix_file& f, const std::string& mix_label, int pal_parent)
+{
+	int added = 0;
+	for (int i = 0; i < f.get_c_files(); i++)
+	{
+		const int id = f.get_id(i);
+		std::string name = f.get_name(id);
+		if (name.empty())
+			name = nh(8, id);
+		switch (f.get_type(id))
+		{
+		case ft_mix:
+		{
+			Cmix_file g;
+			if (!g.open(id, f))
+			{
+				int sub_parent = frame.pal_list_create_map(name, pal_parent);
+				int sub_added = import_pals_from_mix(frame, g, mix_label + " - " + name, sub_parent);
+				if (!sub_added)
+				{
+					// No palettes deeper in this branch — drop the empty
+					// tree node so the dialog doesn't show dead leaves.
+					auto& map = frame.pal_map_list_mut();
+					map.erase(sub_parent);
+				}
+				added += sub_added;
+			}
+			break;
+		}
+		case ft_pal:
+		{
+			Cpal_file h;
+			if (h.open(id, f))
+				break;
+			t_pal_list_entry e;
+			e.name = mix_label + " - " + name;
+			memcpy(e.palette, h.get_data(), sizeof(t_palette));
+			e.parent = pal_parent;
+			frame.pal_list_mut().push_back(e);
+			added++;
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	return added;
+}
+
+int CMainFrame::load_pal_mix(const string& path)
+{
+	Cmix_file f;
+	if (f.open(path))
+		return -1;
+	std::string mix_name = static_cast<Cfname>(path).get_fname();
+	if (mix_name.empty())
+		mix_name = path;
+	int parent_id = pal_list_create_map(mix_name, -1);
+	int added = import_pals_from_mix(*this, f, mix_name, parent_id);
+	if (!added)
+	{
+		m_pal_map_list.erase(parent_id);
+		return -1;
+	}
+	return parent_id;
+}
+
+int CMainFrame::load_pal_folder(const string& folder)
+{
+	string dir = folder;
+	if (!dir.empty() && dir.back() != '\\' && dir.back() != '/')
+		dir += '\\';
+	WIN32_FIND_DATA fd;
+	HANDLE h = FindFirstFile((dir + "*.pal").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE)
+		return -1;
+	string folder_name = Cfname(dir.substr(0, dir.size() - 1)).get_fname();
+	if (folder_name.empty())
+		folder_name = dir;
+	int parent_id = pal_list_create_map(folder_name, -1);
+	int added = 0;
+	do
+	{
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			continue;
+		Cpal_file pf;
+		if (pf.open(dir + fd.cFileName))
+			continue;
+		t_pal_list_entry e;
+		e.name = folder_name + " - " + fd.cFileName;
+		memcpy(e.palette, pf.get_data(), sizeof(t_palette));
+		e.parent = parent_id;
+		m_pal_list.push_back(e);
+		added++;
+	}
+	while (FindNextFile(h, &fd));
+	FindClose(h);
+	if (!added)
+	{
+		m_pal_map_list.erase(parent_id);
+		return -1;
+	}
+	return parent_id;
+}
+
+void CMainFrame::OnViewPalettePrevSibling()
+{
+	if (m_palette_i < 0 || m_pal_list.empty())
+		return;
+	int parent = m_pal_list[m_palette_i].parent;
+	int n = static_cast<int>(m_pal_list.size());
+	for (int i = 1; i <= n; i++)
+	{
+		int j = (m_palette_i - i + n) % n;
+		if (m_pal_list[j].parent == parent)
+		{
+			set_palette(j);
+			set_msg(m_pal_list[j].name + " selected");
+			return;
+		}
+	}
+}
+
+void CMainFrame::OnViewPaletteNextSibling()
+{
+	if (m_palette_i < 0 || m_pal_list.empty())
+		return;
+	int parent = m_pal_list[m_palette_i].parent;
+	int n = static_cast<int>(m_pal_list.size());
+	for (int i = 1; i <= n; i++)
+	{
+		int j = (m_palette_i + i) % n;
+		if (m_pal_list[j].parent == parent)
+		{
+			set_palette(j);
+			set_msg(m_pal_list[j].name + " selected");
+			return;
+		}
+	}
+}
+
 void CMainFrame::OnViewPaletteAutoSelect() 
 {
 	m_file_info_pane->auto_select();
@@ -1102,31 +1335,181 @@ void CMainFrame::OnThemeLight()
 {
 	theme::set(theme::mode_light);
 	theme::apply_titlebar(GetSafeHwnd());
-	rebuild_menu_owner_draw();
+	// Defer the menu rebuild: when this command is invoked from a click on the
+	// Theme popup, the popup is still mid-dismiss and SetMenuItemInfo against
+	// its items doesn't reliably take effect — leaving them stuck as
+	// MFT_OWNERDRAW so the next time the popup opens it paints blank (the
+	// owner-draw handler returns early in light mode). Posting WM_USER+0x101
+	// runs rebuild_menu_owner_draw after the click's menu loop has fully
+	// unwound. The Ctrl+1/Ctrl+2 accelerator path doesn't have this race, but
+	// posting is harmless there.
+	PostMessage(WM_USER + 0x101);
 	apply_theme_to_children();
-	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
 }
 
 void CMainFrame::OnThemeDark()
 {
 	theme::set(theme::mode_dark);
 	theme::apply_titlebar(GetSafeHwnd());
-	rebuild_menu_owner_draw();
+	PostMessage(WM_USER + 0x101);
 	apply_theme_to_children();
-	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+}
+
+LRESULT CMainFrame::OnThemeRebuildMenu(WPARAM, LPARAM)
+{
+	rebuild_menu_owner_draw();
+	return 0;
 }
 
 void CMainFrame::OnUpdateThemeLight(CCmdUI* pCmdUI)
 {
-	pCmdUI->SetRadio(theme::get() == theme::mode_light);
+	pCmdUI->SetCheck(theme::get() == theme::mode_light);
 }
 
 void CMainFrame::OnUpdateThemeDark(CCmdUI* pCmdUI)
 {
-	pCmdUI->SetRadio(theme::get() == theme::mode_dark);
+	pCmdUI->SetCheck(theme::get() == theme::mode_dark);
 }
 
-static void set_menu_owner_draw(HMENU hm, bool owner_draw)
+void CMainFrame::OnThemeShowGrid()
+{
+	theme::set_show_grid(!theme::show_grid());
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		theme::apply_grid(m_left_mix_pane->GetSafeHwnd());
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		theme::apply_grid(m_right_mix_pane->GetSafeHwnd());
+}
+
+void CMainFrame::OnUpdateThemeShowGrid(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::show_grid() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeAlphaColor()
+{
+	CColorDialog dlg(theme::alpha_color(), CC_FULLOPEN | CC_RGBINIT, this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	theme::set_alpha_color(dlg.GetColor());
+	// Repaint the file-info pane so any currently-shown image with alpha
+	// re-composites against the new checker color.
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
+}
+
+void CMainFrame::OnThemeShpTransparency()
+{
+	theme::set_shp_transparency(!theme::shp_transparency());
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
+}
+
+void CMainFrame::OnUpdateThemeShpTransparency(CCmdUI* p)
+{
+	p->SetCheck(theme::shp_transparency() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeUseCheckerboard()
+{
+	theme::set_use_checkerboard(!theme::use_checkerboard());
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
+}
+
+void CMainFrame::OnUpdateThemeUseCheckerboard(CCmdUI* p)
+{
+	p->SetCheck(theme::use_checkerboard() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeUseExternalPrograms()
+{
+	theme::set_use_external_programs(!theme::use_external_programs());
+}
+
+void CMainFrame::OnUpdateThemeUseExternalPrograms(CCmdUI* p)
+{
+	p->SetCheck(theme::use_external_programs() ? 1 : 0);
+}
+
+void CMainFrame::set_interp(theme::interpolation v)
+{
+	theme::set_interp(v);
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
+}
+
+void CMainFrame::OnThemeInterpNearest()  { set_interp(theme::interp_nearest); }
+void CMainFrame::OnThemeInterpBilinear() { set_interp(theme::interp_bilinear); }
+void CMainFrame::OnThemeInterpBicubic()  { set_interp(theme::interp_bicubic); }
+void CMainFrame::OnThemeInterpLanczos()  { set_interp(theme::interp_lanczos); }
+
+void CMainFrame::OnUpdateThemeInterpNearest(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_nearest); }
+void CMainFrame::OnUpdateThemeInterpBilinear(CCmdUI* p) { p->SetCheck(theme::interp() == theme::interp_bilinear); }
+void CMainFrame::OnUpdateThemeInterpBicubic(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_bicubic); }
+void CMainFrame::OnUpdateThemeInterpLanczos(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_lanczos); }
+
+void CMainFrame::set_pane_layout(bool two)
+{
+	if (!m_wndSplitter.GetSafeHwnd())
+	{
+		m_two_panes = two;
+		return;
+	}
+	int cur_w = 0, cur_min = 0;
+	m_wndSplitter.GetColumnInfo(1, cur_w, cur_min);
+	if (!two)
+	{
+		// Stash the current width so a later switch back to two panes
+		// restores something reasonable instead of a tiny default.
+		if (cur_w > 0)
+			m_saved_middle_pane_w = cur_w;
+		// SetColumnInfo(col, ideal=0, min=0) collapses the column. The pane's
+		// HWND is still alive; the splitter just gives it zero space and the
+		// file-info column to the right takes the slack on RecalcLayout.
+		m_wndSplitter.SetColumnInfo(1, 0, 0);
+	}
+	else
+	{
+		int restore = m_saved_middle_pane_w > 0 ? m_saved_middle_pane_w : 400;
+		m_wndSplitter.SetColumnInfo(1, restore, 50);
+	}
+	m_wndSplitter.RecalcLayout();
+	// RecalcLayout resizes children but doesn't force them to repaint, so the
+	// remaining panes keep their old pixels (clipped/stretched) until the next
+	// real WM_PAINT. Invalidate the whole splitter subtree so the listviews
+	// and the file-info pane redraw at their new sizes immediately.
+	m_wndSplitter.RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	m_two_panes = two;
+	AfxGetApp()->WriteProfileInt(m_reg_key, "two_panes", two ? 1 : 0);
+}
+
+void CMainFrame::OnThemePanesOne() { set_pane_layout(false); }
+void CMainFrame::OnThemePanesTwo() { set_pane_layout(true); }
+void CMainFrame::OnUpdateThemePanesOne(CCmdUI* p) { p->SetCheck(!m_two_panes); }
+void CMainFrame::OnUpdateThemePanesTwo(CCmdUI* p) { p->SetCheck(m_two_panes); }
+
+// Owner-draw menu data: text + a flag for whether the item lives directly on
+// the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction
+// matters for measurement: bar items shouldn't reserve the popup checkmark
+// gutter, otherwise menu-bar entries (File, View, ...) get extra horizontal
+// padding that's invisible in light mode but very visible in the dark
+// owner-draw painter.
+//
+// Stored layout: [theme_menu_data header][NUL-terminated label]. theme.cpp
+// reads via theme_menu_unpack() which returns the label pointer + bar flag.
+struct theme_menu_data
+{
+	uint32_t magic;          // identifies that this dwItemData belongs to us
+	uint8_t is_bar;
+	uint8_t reserved[3];
+	// label bytes follow immediately after this struct
+};
+static const uint32_t kThemeMenuMagic = 0x544D4458u; // 'XDMT' in little-endian view
+
+static void set_menu_owner_draw(HMENU hm, bool owner_draw, bool is_bar = true)
 {
 	if (!hm)
 		return;
@@ -1144,13 +1527,18 @@ static void set_menu_owner_draw(HMENU hm, bool owner_draw)
 
 		if (owner_draw)
 		{
-			char* stored = reinterpret_cast<char*>(mii.dwItemData);
-			if (!stored)
+			byte* stored = reinterpret_cast<byte*>(mii.dwItemData);
+			theme_menu_data* hdr = reinterpret_cast<theme_menu_data*>(stored);
+			bool ours = stored && hdr->magic == kThemeMenuMagic;
+			if (!ours)
 			{
 				size_t len = strlen(buf) + 1;
-				stored = new char[len];
-				memcpy(stored, buf, len);
+				stored = new byte[sizeof(theme_menu_data) + len];
+				hdr = reinterpret_cast<theme_menu_data*>(stored);
+				hdr->magic = kThemeMenuMagic;
+				memcpy(stored + sizeof(theme_menu_data), buf, len);
 			}
+			hdr->is_bar = is_bar ? 1 : 0;
 			MENUITEMINFOA upd = {};
 			upd.cbSize = sizeof(upd);
 			upd.fMask = MIIM_FTYPE | MIIM_DATA;
@@ -1160,45 +1548,168 @@ static void set_menu_owner_draw(HMENU hm, bool owner_draw)
 		}
 		else
 		{
-			char* stored = reinterpret_cast<char*>(mii.dwItemData);
+			byte* stored = reinterpret_cast<byte*>(mii.dwItemData);
+			theme_menu_data* hdr = reinterpret_cast<theme_menu_data*>(stored);
+			bool ours = stored && hdr->magic == kThemeMenuMagic;
+			const char* label = ours
+				? reinterpret_cast<const char*>(stored + sizeof(theme_menu_data))
+				: buf;
 			MENUITEMINFOA upd = {};
 			upd.cbSize = sizeof(upd);
 			upd.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_DATA;
 			upd.fType = (mii.fType & ~MFT_OWNERDRAW) | MFT_STRING;
-			upd.dwTypeData = stored ? stored : buf;
-			upd.cch = static_cast<UINT>(strlen(upd.dwTypeData));
+			upd.dwTypeData = const_cast<char*>(label);
+			upd.cch = static_cast<UINT>(strlen(label));
 			upd.dwItemData = 0;
 			::SetMenuItemInfoA(hm, i, TRUE, &upd);
-			if (stored)
+			if (ours)
 				delete[] stored;
 		}
 
+		// Recurse into submenus. is_bar = false from now on; only the very
+		// first level (the menu bar itself) has bar items.
 		if (mii.hSubMenu)
-			set_menu_owner_draw(mii.hSubMenu, owner_draw);
+			set_menu_owner_draw(mii.hSubMenu, owner_draw, false);
+	}
+}
+
+namespace theme {
+	// Helpers exposed to theme.cpp's measure/draw hooks so they can read
+	// the bar/popup flag and the label out of dwItemData. Defined out-of-
+	// namespace below so theme.cpp doesn't need to know the struct layout.
+	const char* menu_item_label(ULONG_PTR data, bool* out_is_bar);
+}
+
+const char* theme::menu_item_label(ULONG_PTR data, bool* out_is_bar)
+{
+	const byte* p = reinterpret_cast<const byte*>(data);
+	if (!p)
+	{
+		if (out_is_bar) *out_is_bar = false;
+		return nullptr;
+	}
+	const theme_menu_data* hdr = reinterpret_cast<const theme_menu_data*>(p);
+	if (hdr->magic != kThemeMenuMagic)
+	{
+		// Backwards-compat: legacy data was just a raw NUL-terminated string.
+		if (out_is_bar) *out_is_bar = false;
+		return reinterpret_cast<const char*>(p);
+	}
+	if (out_is_bar) *out_is_bar = hdr->is_bar != 0;
+	return reinterpret_cast<const char*>(p + sizeof(theme_menu_data));
+}
+
+static void apply_menu_background_recursive(HMENU hm, HBRUSH hbr)
+{
+	if (!hm)
+		return;
+	MENUINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	mi.fMask = MIM_BACKGROUND;
+	mi.hbrBack = hbr;
+	::SetMenuInfo(hm, &mi);
+	int n = ::GetMenuItemCount(hm);
+	for (int i = 0; i < n; i++)
+	{
+		MENUITEMINFOA mii = {};
+		mii.cbSize = sizeof(mii);
+		mii.fMask = MIIM_SUBMENU;
+		if (::GetMenuItemInfoA(hm, i, TRUE, &mii) && mii.hSubMenu)
+			apply_menu_background_recursive(mii.hSubMenu, hbr);
 	}
 }
 
 void CMainFrame::rebuild_menu_owner_draw()
 {
-	HMENU hm = ::GetMenu(GetSafeHwnd());
+	HWND h = GetSafeHwnd();
+	HMENU hm = ::GetMenu(h);
 	if (!hm)
 		return;
 	set_menu_owner_draw(hm, theme::is_dark());
-	::DrawMenuBar(GetSafeHwnd());
+	// Set the menu bar background brush via MENUINFO::hbrBack on the bar AND
+	// every popup explicitly. MIM_APPLYTOSUBMENUS with a NULL hbrBack does not
+	// reliably clear the brush previously stored on already-attached popups on
+	// all Windows builds — leaving a dark brush on the Theme popup after a
+	// dark→light switch caused white-on-white rendering until a second toggle.
+	// Walking the tree manually guarantees the brush state matches the mode.
+	HBRUSH hbr = theme::is_dark() ? theme::menu_bg_brush() : NULL;
+	apply_menu_background_recursive(hm, hbr);
+	// Force uxtheme to drop any cached popup theme data that was built while
+	// items were owner-draw in the previous mode.
+	HMODULE uxtheme = ::GetModuleHandleW(L"uxtheme.dll");
+	if (uxtheme)
+	{
+		typedef void (WINAPI* PFN_FlushMenuThemes)();
+		PFN_FlushMenuThemes p = reinterpret_cast<PFN_FlushMenuThemes>(
+			::GetProcAddress(uxtheme, MAKEINTRESOURCEA(136)));
+		if (p) p();
+	}
+	// DrawMenuBar alone doesn't force Windows to recompute cached menu-bar
+	// item widths after MFT_OWNERDRAW <-> MFT_STRING flips, so the previous
+	// mode's measurements stick around (e.g. dark→light keeps the wider
+	// owner-draw widths until the user toggles again). Detaching and
+	// reattaching the menu invalidates the cache.
+	::SetMenu(h, NULL);
+	::SetMenu(h, hm);
+	::DrawMenuBar(h);
 }
 
 void CMainFrame::apply_theme_to_children()
 {
+	const UINT inv_flags = RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN;
+
+	// Subclass list-view headers once so NM_CUSTOMDRAW reflects to our themed class.
+	if (!m_headers_subclassed)
+	{
+		if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		{
+			HWND hh = reinterpret_cast<HWND>(::SendMessage(m_left_mix_pane->GetSafeHwnd(), LVM_GETHEADER, 0, 0));
+			if (hh) m_left_header.SubclassWindow(hh);
+		}
+		if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		{
+			HWND hh = reinterpret_cast<HWND>(::SendMessage(m_right_mix_pane->GetSafeHwnd(), LVM_GETHEADER, 0, 0));
+			if (hh) m_right_header.SubclassWindow(hh);
+		}
+		m_headers_subclassed = true;
+	}
+
 	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+	{
 		theme::apply_listview(m_left_mix_pane->GetSafeHwnd());
+		// apply_grid strips/adds LVS_EX_GRIDLINES per the new mode (light
+		// keeps the system gridlines; dark relies on OnCustomDraw painting
+		// theme::border() lines). Without this call the system gridlines
+		// stayed in whatever state the previous mode set them to.
+		theme::apply_grid(m_left_mix_pane->GetSafeHwnd());
+		::RedrawWindow(m_left_mix_pane->GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
 	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+	{
 		theme::apply_listview(m_right_mix_pane->GetSafeHwnd());
+		theme::apply_grid(m_right_mix_pane->GetSafeHwnd());
+		::RedrawWindow(m_right_mix_pane->GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+	{
 		theme::apply_window(m_file_info_pane->GetSafeHwnd());
+		// Re-theme the player band's child controls (Play/Pause buttons, FPS
+		// edit/spin, side-color swatches, Game Grid combobox + its dropdown
+		// listbox). Without this they keep whatever DarkMode_Explorer state
+		// they were created with and don't follow a Light <-> Dark toggle.
+		m_file_info_pane->reapply_player_theme();
+		::RedrawWindow(m_file_info_pane->GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
 	if (m_wndStatusBar.GetSafeHwnd())
+	{
 		theme::apply_window(m_wndStatusBar.GetSafeHwnd());
+		::RedrawWindow(m_wndStatusBar.GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
 	if (m_wndSplitter.GetSafeHwnd())
+	{
 		theme::apply_window(m_wndSplitter.GetSafeHwnd());
+		::RedrawWindow(m_wndSplitter.GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
 }
 
 void CMainFrame::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS)

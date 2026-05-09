@@ -43,5 +43,6 @@ protected:
 	afx_msg void OnResetData();
 	virtual BOOL OnInitDialog();
 	//}}AFX_MSG
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 };

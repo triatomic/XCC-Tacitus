@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "XSE_dlg.h"
+#include "theme.h"
 
 #include "audio_idx_file.h"
 #include "ima_adpcm_wav_decode.h"
@@ -52,7 +53,15 @@ BEGIN_MESSAGE_MAP(CXSE_dlg, ETSLayoutDialog)
 	ON_WM_DROPFILES()
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CXSE_dlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 static int c_colums = 10;
 static const char* column_label[] = {"Name", "Value", "Extra value", "Length", "Offset", "Size", "Samplerate", "Flags", "Chunk size", ""};
@@ -153,6 +162,7 @@ BOOL CXSE_dlg::OnInitDialog()
 	set_extract_to_dir(static_cast<string>(AfxGetApp()->GetProfileString("XSE_dlg", "extract_to_dir", xcc_dirs::get_dir(m_game).c_str())));
 	check_selection();
 	SetRedraw(true);
+	theme::apply_dialog(GetSafeHwnd());
 	Invalidate();
 	return false;
 }

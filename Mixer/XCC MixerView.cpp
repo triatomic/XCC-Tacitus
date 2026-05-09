@@ -59,6 +59,83 @@
 #include "resizedlg.h"
 #include "shp_properties_dlg.h"
 #include "shortcut.h"
+#include "theme.h"
+#include <shellapi.h>
+
+// Temp files written by the "Use external programs" toggle. The user double-
+// clicks a file inside a MIX, we extract the bytes to %TEMP%\xcc_mixer\<name>
+// and ShellExecute("open") it. We can't delete eagerly because the launched
+// app may keep the handle open; the tracked list is flushed in ExitInstance.
+namespace ext_open
+{
+	static std::vector<std::string> g_temp_files;
+	static std::string g_temp_dir; // %TEMP%\xcc_mixer\, lazily resolved
+
+	static const std::string& temp_dir()
+	{
+		if (g_temp_dir.empty())
+		{
+			char buf[MAX_PATH];
+			DWORD n = ::GetTempPath(MAX_PATH, buf);
+			std::string d = (n && n < MAX_PATH) ? std::string(buf, n) : std::string("C:\\Windows\\Temp\\");
+			if (!d.empty() && d.back() != '\\' && d.back() != '/')
+				d += '\\';
+			d += "xcc_mixer\\";
+			::CreateDirectory(d.c_str(), NULL);
+			g_temp_dir = d;
+		}
+		return g_temp_dir;
+	}
+
+	// Sanitize a name for use as a leaf filename. MIX entries may contain
+	// backslashes (folder separators) — replace those and any other illegal
+	// chars so we end up with a single leaf in the temp dir.
+	static std::string sanitize(const std::string& name)
+	{
+		std::string r = name;
+		for (auto& c : r)
+		{
+			if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?'
+				|| c == '"' || c == '<' || c == '>' || c == '|')
+				c = '_';
+		}
+		return r;
+	}
+
+	// Insert "_tmp" before the extension so the user can tell extracted
+	// preview files apart from production assets at a glance. "foo.shp"
+	// becomes "foo_tmp.shp"; a name with no extension just gets "_tmp"
+	// appended.
+	static std::string mark_as_tmp(const std::string& name)
+	{
+		auto dot = name.find_last_of('.');
+		if (dot == std::string::npos || dot == 0)
+			return name + "_tmp";
+		return name.substr(0, dot) + "_tmp" + name.substr(dot);
+	}
+
+	// Extract `data` to <temp_dir>\<sanitized_name> and ShellExecute("open") it.
+	// Returns true on success. Tracks the path for cleanup on app exit.
+	static bool extract_and_open(HWND hwnd, const std::string& name, const Cvirtual_binary& data)
+	{
+		std::string path = temp_dir() + mark_as_tmp(sanitize(name));
+		if (data.save(path))
+			return false;
+		g_temp_files.push_back(path);
+		HINSTANCE rc = ::ShellExecute(hwnd, "open", path.c_str(), NULL, NULL, SW_SHOW);
+		return reinterpret_cast<INT_PTR>(rc) > 32;
+	}
+
+	// Best-effort delete of every temp file we wrote this session. Called from
+	// ExitInstance. Files still held by the launched app will silently fail
+	// to delete, which is fine — the user / OS will clean them eventually.
+	void cleanup()
+	{
+		for (auto& p : g_temp_files)
+			::DeleteFile(p.c_str());
+		g_temp_files.clear();
+	}
+}
 
 IMPLEMENT_DYNCREATE(CXCCMixerView, CListView)
 
@@ -154,7 +231,15 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_COPY_AS_JPEG_SINGLE, OnUpdatePopupCopyAsJpegSingle)
 	ON_COMMAND(ID_POPUP_COPY_AS_TGA_SINGLE, OnPopupCopyAsTgaSingle)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_COPY_AS_TGA_SINGLE, OnUpdatePopupCopyAsTgaSingle)
+	ON_COMMAND(ID_POPUP_COPY_NAME, OnPopupCopyName)
+	ON_UPDATE_COMMAND_UI(ID_POPUP_COPY_NAME, OnUpdatePopupCopyName)
+	ON_COMMAND(ID_POPUP_BATCH_EXTRACT, OnPopupBatchExtract)
+	ON_UPDATE_COMMAND_UI(ID_POPUP_BATCH_EXTRACT, OnUpdatePopupBatchExtract)
+	ON_COMMAND(ID_POPUP_BATCH_EXTRACT_PRESERVE, OnPopupBatchExtractPreserve)
+	ON_UPDATE_COMMAND_UI(ID_POPUP_BATCH_EXTRACT_PRESERVE, OnUpdatePopupBatchExtractPreserve)
 	//}}AFX_MSG_MAP
+	ON_WM_XBUTTONUP()
+	ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
 END_MESSAGE_MAP()
 
 enum t_error_message
@@ -163,6 +248,61 @@ enum t_error_message
 	em_bad_depth,
 	em_bad_size
 };
+
+void CXCCMixerView::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	NMLVCUSTOMDRAW* cd = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
+	const bool dark = theme::is_dark();
+	switch (cd->nmcd.dwDrawStage)
+	{
+	case CDDS_PREPAINT:
+		// Need pre-item-paint (to push theme text/bk colors) and post-item-
+		// paint (to draw our own grid lines on top of the row).
+		*pResult = CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
+		break;
+	case CDDS_ITEMPREPAINT:
+		if (dark)
+		{
+			cd->clrText = theme::text();
+			cd->clrTextBk = theme::bg();
+			*pResult = CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT;
+		}
+		else
+		{
+			*pResult = CDRF_DODEFAULT | CDRF_NOTIFYPOSTPAINT;
+		}
+		break;
+	case CDDS_ITEMPOSTPAINT:
+		// Dark-mode grid: LVS_EX_GRIDLINES is stripped in apply_grid (dark
+		// mode hardcodes light gray), so paint our own row + column
+		// separators here using theme::border().
+		if (dark && theme::show_grid())
+		{
+			HDC hdc = cd->nmcd.hdc;
+			if (hdc)
+			{
+				HPEN pen = ::CreatePen(PS_SOLID, 1, theme::border());
+				HGDIOBJ old = ::SelectObject(hdc, pen);
+				const RECT& rc = cd->nmcd.rc;
+				::MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+				::LineTo(hdc, rc.right, rc.bottom - 1);
+				CHeaderCtrl* hdr = GetListCtrl().GetHeaderCtrl();
+				const int n = hdr ? hdr->GetItemCount() : 0;
+				int x = rc.left;
+				for (int i = 0; i < n; i++)
+				{
+					x += GetListCtrl().GetColumnWidth(i);
+					::MoveToEx(hdc, x - 1, rc.top, NULL);
+					::LineTo(hdc, x - 1, rc.bottom);
+				}
+				::SelectObject(hdc, old);
+				::DeleteObject(pen);
+			}
+		}
+		*pResult = CDRF_DODEFAULT;
+		break;
+	}
+}
 
 const char* error_messages[] =
 {
@@ -218,7 +358,16 @@ void CXCCMixerView::OnInitialUpdate()
 
 	CListView::OnInitialUpdate();
 
-	GetListCtrl().SetExtendedStyle(LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP);
+	{
+		DWORD ex = LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP;
+		// In dark mode the system's LVS_EX_GRIDLINES paints with a hardcoded
+		// light gray that clashes with the theme; we draw our own grid in
+		// OnCustomDraw using theme::border() instead. Only enable the system
+		// gridlines in light mode here, matching theme::apply_grid.
+		if (theme::show_grid() && !theme::is_dark())
+			ex |= LVS_EX_GRIDLINES;
+		GetListCtrl().SetExtendedStyle(ex);
+	}
 	GetListCtrl().InsertColumn(0, "Name", LVCFMT_LEFT);
 	GetListCtrl().InsertColumn(1, "Type", LVCFMT_LEFT);
 	GetListCtrl().InsertColumn(2, "Size", LVCFMT_RIGHT);
@@ -275,28 +424,21 @@ void CXCCMixerView::OnFileOpen()
 
 void CXCCMixerView::OnFileClose()
 {
-	if (m_mix_f)
-		close_location(true);
-	else
-	{
-		int i = m_dir.rfind('\\');
-		if (i != string::npos)
-		{
-			i = m_dir.rfind('\\', i - 1);
-			if (i != string::npos)
-				open_location_dir(m_dir.substr(0, i + 1));
-		}
-	}
+	nav_go_up();
 }
 
 void CXCCMixerView::open_location_dir(const string& name)
 {
+	if (!m_nav_replaying)
+		nav_clear_forward();
 	m_dir = name;
 	update_list();
 }
 
 void CXCCMixerView::open_location_mix(const string& name)
 {
+	if (!m_nav_replaying)
+		nav_clear_forward();
 	Cmix_file* mix_f = new Cmix_file;
 	if (mix_f->open(name))
 	{
@@ -315,6 +457,7 @@ void CXCCMixerView::open_location_mix(const string& name)
 	{
 	MPUSH:
 		m_location.push(m_mix_f);
+		m_entered_ids.push(-1);
 		m_mix_f = mix_f;
 		m_mix_fname = name;
 	}
@@ -379,6 +522,8 @@ void CXCCMixerView::open_location_mix(int mix_id, int sub_mix_id, int file_id)
 
 void CXCCMixerView::open_location_mix(int id)
 {
+	if (!m_nav_replaying)
+		nav_clear_forward();
 	Cmix_file* mix_f = new Cmix_file;
 	if (mix_f->open(id, *m_mix_f))
 	{
@@ -397,6 +542,7 @@ void CXCCMixerView::open_location_mix(int id)
 	{
 	MPUSH:
 		m_location.push(m_mix_f);
+		m_entered_ids.push(id);
 		m_mix_f = mix_f;
 		update_list();
 	}
@@ -409,6 +555,8 @@ void CXCCMixerView::close_location(int reload)
 		delete m_mix_f;
 		m_mix_f = m_location.top();
 		m_location.pop();
+		if (!m_entered_ids.empty())
+			m_entered_ids.pop();
 		if (reload)
 			update_list();
 	}
@@ -418,6 +566,92 @@ void CXCCMixerView::close_all_locations()
 {
 	while (!m_location.empty())
 		close_location(false);
+}
+
+void CXCCMixerView::nav_clear_forward()
+{
+	while (!m_nav_forward.empty())
+		m_nav_forward.pop();
+}
+
+void CXCCMixerView::nav_record_up(const t_nav_entry& e)
+{
+	m_nav_forward.push(e);
+}
+
+bool CXCCMixerView::nav_go_up()
+{
+	if (m_mix_f)
+	{
+		t_nav_entry e;
+		int entered_id = m_entered_ids.empty() ? -1 : m_entered_ids.top();
+		if (entered_id == -1)
+		{
+			e.kind = t_nav_entry::kind_disk_mix;
+			e.s = m_mix_fname;
+			e.id = 0;
+		}
+		else
+		{
+			e.kind = t_nav_entry::kind_nested_mix_id;
+			e.s.clear();
+			e.id = entered_id;
+		}
+		nav_record_up(e);
+		m_nav_replaying = true;
+		close_location(true);
+		m_nav_replaying = false;
+		return true;
+	}
+	int i = m_dir.rfind('\\');
+	if (i == string::npos)
+		return false;
+	i = m_dir.rfind('\\', i - 1);
+	if (i == string::npos)
+		return false;
+	t_nav_entry e;
+	e.kind = t_nav_entry::kind_dir;
+	e.s = m_dir;
+	e.id = 0;
+	nav_record_up(e);
+	m_nav_replaying = true;
+	open_location_dir(m_dir.substr(0, i + 1));
+	m_nav_replaying = false;
+	return true;
+}
+
+bool CXCCMixerView::nav_go_forward()
+{
+	if (m_nav_forward.empty())
+		return false;
+	t_nav_entry e = m_nav_forward.top();
+	m_nav_forward.pop();
+	m_nav_replaying = true;
+	switch (e.kind)
+	{
+	case t_nav_entry::kind_dir:
+		open_location_dir(e.s);
+		break;
+	case t_nav_entry::kind_disk_mix:
+		open_location_mix(e.s);
+		break;
+	case t_nav_entry::kind_nested_mix_id:
+		if (m_mix_f)
+			open_location_mix(e.id);
+		break;
+	}
+	m_nav_replaying = false;
+	return true;
+}
+
+void CXCCMixerView::OnXButtonUp(UINT nFlags, UINT nButton, CPoint point)
+{
+	if (nButton == XBUTTON1)
+		nav_go_up();
+	else if (nButton == XBUTTON2)
+		nav_go_forward();
+	else
+		CListView::OnXButtonUp(nFlags, nButton, point);
 }
 
 void CXCCMixerView::clear_list()
@@ -452,6 +686,7 @@ void CXCCMixerView::update_list()
 		e.name = "..";
 		e.ft = ft_dir;
 		e.size = "";
+		e.size_bytes = -1;
 		e.description = "";
 		m_index[0] = e;
 
@@ -464,7 +699,9 @@ void CXCCMixerView::update_list()
 			e.name = mix_database::get_name(m_game, id);
 			if (e.name.empty())
 				e.name = nh(8, id);
-			e.size = totalSize(m_mix_f->get_size(id));
+			long long sz = m_mix_f->get_size(id);
+			e.size = totalSize(sz);
+			e.size_bytes = sz;
 			m_index[id] = e;
 			if (e.ft == ft_pal)
 			{
@@ -504,14 +741,20 @@ void CXCCMixerView::update_list()
 			{
 				e.name = finddata.cFileName;
 				e.size = "";
+				e.size_bytes = 0;
 				if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 				{
 					if (e.name == ".")
 						continue;
 					e.ft = ft_dir;
+					e.size_bytes = -1;
 				}
 				else
+				{
 					e.ft = static_cast<t_file_type>(-1);
+					e.size_bytes = (static_cast<long long>(finddata.nFileSizeHigh) << 32) | finddata.nFileSizeLow;
+					e.size = totalSize(e.size_bytes);
+				}
 				int id = Cmix_file::get_id(get_game(), finddata.cFileName);
 				e.description = mix_database::get_description(get_game(), id);
 				m_index[id] = e;
@@ -524,7 +767,6 @@ void CXCCMixerView::update_list()
 	CListCtrl& lc = GetListCtrl();
 	for (auto& i : m_index)
 		lc.SetItemData(lc.InsertItem(lc.GetItemCount(), LPSTR_TEXTCALLBACK), i.first);
-	sort_list(0, false);
 	sort_list(1, false);
 	SetRedraw(true);
 	autosize_colums();
@@ -572,33 +814,56 @@ static int compare(const T& a, const T& b)
 
 int CXCCMixerView::compare(int id_a, int id_b) const
 {
+	const t_index_entry& ra = find_ref(m_index, id_a);
+	const t_index_entry& rb = find_ref(m_index, id_b);
+	bool a_anchor = ra.ft == ft_drive || ra.name == "..";
+	bool b_anchor = rb.ft == ft_drive || rb.name == "..";
+	if (a_anchor && !b_anchor)
+		return -1;
+	if (!a_anchor && b_anchor)
+		return 1;
+	if (a_anchor && b_anchor)
+	{
+		if (ra.name == ".." && rb.ft == ft_drive)
+			return 1;
+		if (ra.ft == ft_drive && rb.name == "..")
+			return -1;
+		return 0;
+	}
 	if (m_sort_reverse)
 		swap(id_a, id_b);
 	const t_index_entry& a = find_ref(m_index, id_a);
 	const t_index_entry& b = find_ref(m_index, id_b);
 	if (a.ft != b.ft)
 	{
-		if (a.ft == ft_drive)
-			return -1;
-		if (b.ft == ft_drive)
-			return 1;
 		if (a.ft == ft_dir || a.ft == ft_lnkdir)
 			return -1;
 		if (b.ft == ft_dir || b.ft == ft_lnkdir)
 			return 1;
 	}
+	int r = 0;
 	switch (m_sort_column)
 	{
 	case 0:
-		return ::compare(to_lower(a.name), to_lower(b.name));
+		r = ::compare(to_lower(a.name), to_lower(b.name));
+		break;
 	case 1:
-		return ::compare(a.ft, b.ft);
+		r = ::compare(a.ft, b.ft);
+		break;
 	case 2:
-		return ::compare(b.size, a.size);
+		r = ::compare(a.size_bytes, b.size_bytes);
+		break;
 	case 3:
-		return ::compare(a.description, b.description);
+		r = ::compare(a.description, b.description);
+		break;
 	}
-	return 0;
+	// Tie-breaker: when the primary key compares equal, fall back to name so
+	// items within a type/size/description group stay alphabetized. This used
+	// to be done by running sort_list twice (column 0 then the real column);
+	// folding it into the comparator lets update_list() sort once.
+	if (r == 0 && m_sort_column != 0)
+		r = ::compare(to_lower(a.name), to_lower(b.name));
+	return r;
 }
 
 static int CALLBACK Compare(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
@@ -616,7 +881,8 @@ void CXCCMixerView::sort_list(int i, bool reverse)
 void CXCCMixerView::OnColumnclick(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	int column = reinterpret_cast<NM_LISTVIEW*>(pNMHDR)->iSubItem;
-	sort_list(column, column == m_sort_column ? !m_sort_reverse : false);
+	bool default_reverse = (column == 2);
+	sort_list(column, column == m_sort_column ? !m_sort_reverse : default_reverse);
 	*pResult = 0;
 }
 
@@ -718,6 +984,15 @@ int CXCCMixerView::open_f_id(Ccc_file& f, int id) const
 int CXCCMixerView::open_f_index(Ccc_file& f, int i) const
 {
 	return open_f_id(f, GetListCtrl().GetItemData(i));
+}
+
+int CXCCMixerView::vload_f_index(Ccc_file& f, int i) const
+{
+	Cvirtual_binary d = get_vdata(i);
+	if (!d.data() || d.size() <= 0)
+		return 1;
+	f.load(d);
+	return 0;
 }
 
 Cvirtual_binary CXCCMixerView::get_vdata_id(int id) const
@@ -826,6 +1101,69 @@ void CXCCMixerView::OnPopupExtract()
 void CXCCMixerView::OnUpdatePopupExtract(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(get_current_id() != -1);
+}
+
+void CXCCMixerView::batch_extract(bool preserve)
+{
+	if (m_index_selected.empty())
+		return;
+	CFolderPickerDialog dlg(NULL, 0, this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	string out_dir = static_cast<string>(dlg.GetPathName());
+	if (out_dir.empty())
+		return;
+	if (out_dir.back() != '\\' && out_dir.back() != '/')
+		out_dir += '\\';
+	if (preserve && m_mix_f && !m_mix_fname.empty())
+	{
+		string sub = Cfname(m_mix_fname).get_fname();
+		if (!sub.empty())
+		{
+			create_deep_dir(out_dir, sub + '\\');
+			out_dir += sub + '\\';
+		}
+	}
+	CWaitCursor wait;
+	for (auto& i : m_index_selected)
+	{
+		int id = get_id(i);
+		auto it = m_index.find(id);
+		if (it == m_index.end())
+			continue;
+		const string& src_name = it->second.name;
+		if (src_name.empty() || src_name == ".." || src_name == "Browse...")
+			continue;
+		Ccc_file f(false);
+		if (open_f_id(f, id))
+			continue;
+		string out_name = src_name;
+		for (size_t j = 0; j < out_name.size(); j++)
+			if (out_name[j] == '\\' || out_name[j] == '/')
+				out_name[j] = '_';
+		f.extract(out_dir + out_name);
+	}
+	AfxMessageBox("Extraction successful.", MB_OK | MB_ICONINFORMATION);
+}
+
+void CXCCMixerView::OnPopupBatchExtract()
+{
+	batch_extract(false);
+}
+
+void CXCCMixerView::OnUpdatePopupBatchExtract(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(!m_index_selected.empty());
+}
+
+void CXCCMixerView::OnPopupBatchExtractPreserve()
+{
+	batch_extract(true);
+}
+
+void CXCCMixerView::OnUpdatePopupBatchExtractPreserve(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(!m_index_selected.empty() && m_mix_f != nullptr);
 }
 
 const t_palette_entry* CXCCMixerView::get_default_palette() const
@@ -961,8 +1299,32 @@ bool CXCCMixerView::can_delete()
 
 bool CXCCMixerView::can_copy_as(t_file_type ft)
 {
-	if (m_other_pane->m_mix_f || m_mix_f || m_index_selected.empty())
+	// can_delete() populates m_index_selected from the listview selection.
+	// The Copy-as... update handlers all sit on the same shared vector but
+	// MFC fires OnUpdate* in menu order, so without calling it ourselves
+	// the enable state would depend on whether OnUpdatePopupCopy (which
+	// calls can_copy -> can_delete) happened to run first.
+	if (!can_delete())
 		return false;
+	if (m_index_selected.empty())
+		return false;
+	// Destination-in-MIX: copy_as ignores `ft` and silently falls back to
+	// raw bytes insert, so format conversion would be a lie. Always block.
+	if (m_other_pane->m_mix_f)
+		return false;
+	// Source-in-MIX: most per-format converters open the inner file via
+	// Ccc_file::open(id, mix_f) which is fine. The exception is Copy as
+	// Text on a nested .mix — that re-enters Cmix_file::post_open whose
+	// strict size checks reject many real archives when read at an inner
+	// offset. Block only that case; let the rest run.
+	if (m_mix_f && ft == ft_text)
+	{
+		for (auto& i : m_index_selected)
+		{
+			if (find_ref(m_index, get_id(i)).ft == ft_mix)
+				return false;
+		}
+	}
 	for (auto& i : m_index_selected)
 	{
 		if (!can_convert(find_ref(m_index, get_id(i)).ft, ft))
@@ -1018,6 +1380,8 @@ int big_insert_dir(Cbig_edit& f, const string& dir, const string& name_prefix)
 	}
 	return error;
 }
+
+static int seh_call_dispatch(CXCCMixerView* v, t_file_type ft, int i, Cfname* fname);
 
 void CXCCMixerView::copy_as(t_file_type ft)
 {
@@ -1095,72 +1459,13 @@ void CXCCMixerView::copy_as(t_file_type ft)
 		}
 		else
 		{
-			switch (ft)
-			{
-			case -1:
-				error = copy(i, fname);
-				break;
-			case ft_aud:
-				error = copy_as_aud(i, fname);
-				break;
-			case ft_avi:
-				error = copy_as_avi(i, fname);
-				break;
-			case ft_cps:
-				error = copy_as_cps(i, fname);
-				break;
-			case ft_csv:
-				error = copy_as_csv(i, fname);
-				break;
-			case ft_html:
-				error = copy_as_html(i, fname);
-				break;
-			case ft_hva:
-				error = copy_as_hva(i, fname);
-				break;
-			case ft_jpeg:
-			case ft_jpeg_single:
-			case ft_pcx:
-			case ft_pcx_single:
-			case ft_png:
-			case ft_png_single:
-			case ft_tga:
-			case ft_tga_single:
-				error = copy_as_pcx(i, fname, ft);
-				break;
-			case ft_map_ts_preview:
-				error = copy_as_map_ts_preview(i, fname);
-				break;
-			case ft_pal:
-				error = copy_as_pal(i, fname);
-				break;
-			case ft_pal_jasc:
-				error = copy_as_pal_jasc(i, fname);
-				break;
-			case ft_shp:
-				error = copy_as_shp(i, fname);
-				break;
-			case ft_shp_ts:
-				error = copy_as_shp_ts(i, fname);
-				break;
-			case ft_text:
-				error = copy_as_text(i, fname);
-				break;
-			case ft_vxl:
-				error = copy_as_vxl(i, fname);
-				break;
-			case ft_wav_ima_adpcm:
-				error = copy_as_wav_ima_adpcm(i, fname);
-				break;
-			case ft_wav_pcm:
-				error = copy_as_wav_pcm(i, fname);
-				break;
-			case ft_xif:
-				error = copy_as_xif(i, fname);
-				break;
-			default:
-				error = 1;
-			}
+			// SEH-wrap the per-format dispatch. Decoders read from the
+			// MIX-mapped buffer directly; a malformed header (the JPEG-from-
+			// paletted-SHP bug, an IMA-ADPCM block_align of 0, etc.) can drive
+			// an out-of-bounds read past the mapped page and raise an access
+			// violation. Catching here turns the AV into a "Copy as ... failed"
+			// dialog instead of taking down the app.
+			error = seh_call_dispatch(this, ft, i, const_cast<Cfname*>(&fname));
 			if (error)
 				copy_failed(fname, error);
 			else
@@ -1181,26 +1486,92 @@ int CXCCMixerView::copy(int i, Cfname fname) const
 	return error ? error : f.extract(fname);
 }
 
+static int seh_call_dispatch(CXCCMixerView* v, t_file_type ft, int i, Cfname* fname)
+{
+	__try
+	{
+		return v->dispatch_copy_as(ft, i, *fname);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0xC0000005;
+	}
+}
+
+int CXCCMixerView::dispatch_copy_as(t_file_type ft, int i, const Cfname& fname)
+{
+	switch (ft)
+	{
+	case -1:                  return copy(i, fname);
+	case ft_aud:              return copy_as_aud(i, fname);
+	case ft_avi:              return copy_as_avi(i, fname);
+	case ft_cps:              return copy_as_cps(i, fname);
+	case ft_csv:              return copy_as_csv(i, fname);
+	case ft_html:             return copy_as_html(i, fname);
+	case ft_hva:              return copy_as_hva(i, fname);
+	case ft_jpeg:
+	case ft_jpeg_single:
+	case ft_pcx:
+	case ft_pcx_single:
+	case ft_png:
+	case ft_png_single:
+	case ft_tga:
+	case ft_tga_single:       return copy_as_pcx(i, fname, ft);
+	case ft_map_ts_preview:   return copy_as_map_ts_preview(i, fname);
+	case ft_pal:              return copy_as_pal(i, fname);
+	case ft_pal_jasc:         return copy_as_pal_jasc(i, fname);
+	case ft_shp:              return copy_as_shp(i, fname);
+	case ft_shp_ts:           return copy_as_shp_ts(i, fname);
+	case ft_text:             return copy_as_text(i, fname);
+	case ft_vxl:              return copy_as_vxl(i, fname);
+	case ft_wav_ima_adpcm:    return copy_as_wav_ima_adpcm(i, fname);
+	case ft_wav_pcm:          return copy_as_wav_pcm(i, fname);
+	case ft_xif:              return copy_as_xif(i, fname);
+	}
+	return 1;
+}
+
 int CXCCMixerView::copy_as_aud(int i, Cfname fname) const
 {
 	Cwav_file f;
-	int error = open_f_index(f, i);
+	int error = vload_f_index(f, i);
 	if (error)
 		return error;
 	fname.set_ext(".aud");
 	if (error = f.process())
 		return error;
 	const t_riff_wave_format_chunk& format_chunk = f.get_format_chunk();
-	int cb_data = f.get_data_header().size;
 	int samplerate = format_chunk.samplerate;
-	if (format_chunk.tag != 0x0001 ||
-		format_chunk.c_channels != 1 && format_chunk.c_channels != 2 ||
-		format_chunk.cbits_sample != 16)
+	int c_channels = format_chunk.c_channels;
+	if (c_channels != 1 && c_channels != 2)
 		return 0x100;
+	// AUD encoder consumes PCM s16. Two source paths feed it:
+	//   - tag 1 (PCM) at 16-bit: read raw, no decode.
+	//   - tag 0x11 (IMA-ADPCM) at 4-bit: decode to PCM s16 first.
+	// Anything else is rejected.
 	Cvirtual_binary data;
-	f.seek(f.get_data_ofs());
-	if (error = f.read(data.write_start(cb_data), cb_data))
-		return error;
+	int cb_data;
+	if (format_chunk.tag == 0x0001 && format_chunk.cbits_sample == 16)
+	{
+		cb_data = f.get_data_header().size;
+		f.seek(f.get_data_ofs());
+		if (error = f.read(data.write_start(cb_data), cb_data))
+			return error;
+	}
+	else if (format_chunk.tag == 0x0011 && format_chunk.cbits_sample == 4)
+	{
+		int block = format_chunk.block_align;
+		if (block <= 0)
+			block = 512 * c_channels;
+		Cima_adpcm_wav_decode decode;
+		decode.load(f.get_data() + f.get_data_ofs(), f.get_data_size(), c_channels, block);
+		cb_data = decode.cb_data();
+		if (cb_data <= 0)
+			return 0x100;
+		memcpy(data.write_start(cb_data), decode.data(), cb_data);
+	}
+	else
+		return 0x100;
 	int c_samples = cb_data >> 1;
 	if (format_chunk.c_channels == 2)
 	{
@@ -1428,13 +1799,13 @@ int CXCCMixerView::copy_as_pcx(int i, Cfname fname, t_file_type ft) const
 	case ft_shp_dune2:
 		{
 			Cshp_dune2_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_pcx(fname, ft, get_default_palette());
 		}
 	case ft_shp:
 		{
 			Cshp_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : copy_as_image(f.decoder(get_default_palette()), fname, ft);
 		}
 	case ft_shp_ts:
@@ -1457,25 +1828,25 @@ int CXCCMixerView::copy_as_pcx(int i, Cfname fname, t_file_type ft) const
 	case ft_vqa:
 		{
 			Cvqa_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_pcx(fname, ft);
 		}
 	case ft_vxl:
 		{
 			Cvxl_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_pcx(fname, ft, get_default_palette());
 		}
 	case ft_wsa_dune2:
 		{
 			Cwsa_dune2_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_pcx(fname, ft, get_default_palette());
 		}
 	case ft_wsa:
 		{
 			Cwsa_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : copy_as_image(f.decoder(), fname, ft);
 		}
 	}
@@ -1603,7 +1974,7 @@ int CXCCMixerView::copy_as_shp_ts(int i, Cfname fname) const
 	case ft_shp:
 		{
 			Cshp_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			if (error)
 				return error;
 			memcpy(s_palette, GetMainFrame()->get_game_palette(convert_from_td ? game_td : game_ra), sizeof(t_palette));
@@ -1841,32 +2212,58 @@ int CXCCMixerView::copy_as_wav_ima_adpcm(int i, Cfname fname) const
 	case ft_wav:
 		{
 			Cwav_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			if (error)
 				return error;
 			if (error = f.process())
 				return error;
 			const t_riff_wave_format_chunk& format_chunk = f.get_format_chunk();
-			if (format_chunk.tag != 1
-				|| format_chunk.c_channels != 1 && format_chunk.c_channels != 2
-				|| format_chunk.cbits_sample != 16)
-				return 0x100;
-			int cb_s = f.get_data_header().size;
-			Cvirtual_binary s;
-			f.seek(f.get_data_ofs());
-			if (error = f.read(s.write_start(cb_s), cb_s))
-				return error;
 			int c_channels = format_chunk.c_channels;
-			Cima_adpcm_wav_encode encode;
-			encode.load(reinterpret_cast<short*>(s.data_edit()), cb_s, c_channels);
-			int c_samples = encode.c_samples();
-			int cb_audio = encode.cb_data();
-			int cb_d = sizeof(t_wav_ima_adpcm_header) + cb_audio;
-			Cvirtual_binary d;
-			byte* w = d.write_start(cb_d);
-			w += wav_ima_adpcm_file_write_header(w, cb_audio, c_samples, format_chunk.samplerate, c_channels);
-			memcpy(w, encode.data(), cb_audio);
-			return d.save(fname);
+			if (c_channels != 1 && c_channels != 2)
+				return 0x100;
+			// PCM s16 source: encode to IMA-ADPCM.
+			// IMA-ADPCM source: already in target format, re-emit a
+			// self-contained .wav with our header (the source may have
+			// been embedded in a MIX with stripped/odd RIFF wrapping).
+			if (format_chunk.tag == 1 && format_chunk.cbits_sample == 16)
+			{
+				int cb_s = f.get_data_header().size;
+				Cvirtual_binary s;
+				f.seek(f.get_data_ofs());
+				if (error = f.read(s.write_start(cb_s), cb_s))
+					return error;
+				Cima_adpcm_wav_encode encode;
+				encode.load(reinterpret_cast<short*>(s.data_edit()), cb_s, c_channels);
+				int c_samples = encode.c_samples();
+				int cb_audio = encode.cb_data();
+				int cb_d = sizeof(t_wav_ima_adpcm_header) + cb_audio;
+				Cvirtual_binary d;
+				byte* w = d.write_start(cb_d);
+				w += wav_ima_adpcm_file_write_header(w, cb_audio, c_samples, format_chunk.samplerate, c_channels);
+				memcpy(w, encode.data(), cb_audio);
+				return d.save(fname);
+			}
+			else if (format_chunk.tag == 0x11 && format_chunk.cbits_sample == 4)
+			{
+				int cb_audio = f.get_data_header().size;
+				int block = format_chunk.block_align;
+				if (block <= 0)
+					block = 512 * c_channels;
+				// Decode once just to recover an accurate sample count for
+				// the WAV/fact header; the source data itself is copied
+				// through unchanged.
+				Cima_adpcm_wav_decode decode;
+				decode.load(f.get_data() + f.get_data_ofs(), f.get_data_size(), c_channels, block);
+				int c_samples = decode.c_samples();
+				int cb_d = sizeof(t_wav_ima_adpcm_header) + cb_audio;
+				Cvirtual_binary d;
+				byte* w = d.write_start(cb_d);
+				w += wav_ima_adpcm_file_write_header(w, cb_audio, c_samples, format_chunk.samplerate, c_channels);
+				memcpy(w, f.get_data() + f.get_data_ofs(), cb_audio);
+				return d.save(fname);
+			}
+			else
+				return 0x100;
 		}
 	}
 	return 0;
@@ -1880,25 +2277,25 @@ int CXCCMixerView::copy_as_wav_pcm(int i, Cfname fname) const
 	case ft_aud:
 		{
 			Caud_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_wav(fname);
 		}
 	case ft_voc:
 		{
 			Cvoc_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_wav(fname);
 		}
 	case ft_vqa:
 		{
 			Cvqa_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			return error ? error : f.extract_as_wav(fname);
 		}
 	case ft_wav:
 		{
 			Cwav_file f;
-			int error = open_f_index(f, i);
+			int error = vload_f_index(f, i);
 			if (error)
 				return error;
 			if (error = f.process())
@@ -1914,14 +2311,19 @@ int CXCCMixerView::copy_as_wav_pcm(int i, Cfname fname) const
 			if (error = f.read(s.write_start(cb_s), cb_s))
 				return error;
 			int c_channels = format_chunk.c_channels;
-			int c_samples = f.get_fact_chunk().c_samples;
-			int cb_audio = c_channels * c_samples << 1;
+			// Decode first and trust the decoder's reported sample/byte counts.
+			// The fact chunk's c_samples is unreliable (may be missing, zero, or
+			// a bogus large value, e.g. 29M for a 7 MB source), and using it to
+			// size the destination buffer caused memcpy to read past decode's
+			// own output buffer and crash.
+			Cima_adpcm_wav_decode decode;
+			decode.load(s.data(), cb_s, c_channels, 512 * c_channels);
+			int c_samples = decode.c_samples();
+			int cb_audio = decode.cb_data();
 			int cb_d = sizeof(t_wav_header) + cb_audio;
 			Cvirtual_binary d;
 			byte* w = d.write_start(cb_d);
 			w += wav_file_write_header(w, c_samples, format_chunk.samplerate, 2, c_channels);
-			Cima_adpcm_wav_decode decode;
-			decode.load(s.data(), cb_s, c_channels, 512 * c_channels);
 			memcpy(w, decode.data(), cb_audio);
 			return d.save(fname);
 		}
@@ -2014,6 +2416,11 @@ void CXCCMixerView::OnPopupCopyAsJpegSingle()
 
 void CXCCMixerView::OnUpdatePopupCopyAsJpegSingle(CCmdUI* pCmdUI)
 {
+	// JPEG write path is unstable (libjpeg destination-buffer overrun on
+	// certain SHP-derived inputs). Disabled across the board until the
+	// jpeg_file_write scanline path is rewritten.
+	pCmdUI->Enable(FALSE);
+	return;
 	pCmdUI->Enable(can_copy_as(ft_jpeg_single));
 }
 
@@ -2024,6 +2431,11 @@ void CXCCMixerView::OnPopupCopyAsJpeg()
 
 void CXCCMixerView::OnUpdatePopupCopyAsJpeg(CCmdUI* pCmdUI)
 {
+	// JPEG write path is unstable (libjpeg destination-buffer overrun on
+	// certain SHP-derived inputs). Disabled across the board until the
+	// jpeg_file_write scanline path is rewritten.
+	pCmdUI->Enable(FALSE);
+	return;
 	pCmdUI->Enable(can_copy_as(ft_jpeg));
 }
 
@@ -2656,6 +3068,70 @@ void CXCCMixerView::OnPopupClipboardCopy()
 	get_vimage(get_current_index()).set_clipboard();
 }
 
+void CXCCMixerView::OnPopupCopyName()
+{
+	string text;
+	for (auto& i : m_index_selected)
+	{
+		int id = get_id(i);
+		auto it = m_index.find(id);
+		if (it == m_index.end())
+			continue;
+		const string& n = it->second.name;
+		if (n.empty() || n == ".." || n == "Browse...")
+			continue;
+		if (!text.empty())
+			text += "\r\n";
+		text += n;
+	}
+	if (text.empty())
+	{
+		int id = get_current_id();
+		if (id == -1)
+			return;
+		auto it = m_index.find(id);
+		if (it == m_index.end())
+			return;
+		text = it->second.name;
+		if (text.empty() || text == ".." || text == "Browse...")
+			return;
+	}
+	if (!OpenClipboard())
+		return;
+	EmptyClipboard();
+	size_t cb = text.size() + 1;
+	HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, cb);
+	if (h)
+	{
+		void* p = GlobalLock(h);
+		if (p)
+		{
+			memcpy(p, text.c_str(), cb);
+			GlobalUnlock(h);
+			SetClipboardData(CF_TEXT, h);
+		}
+		else
+			GlobalFree(h);
+	}
+	CloseClipboard();
+}
+
+void CXCCMixerView::OnUpdatePopupCopyName(CCmdUI* pCmdUI)
+{
+	int id = get_current_id();
+	bool ok = false;
+	if (id != -1)
+	{
+		auto it = m_index.find(id);
+		if (it != m_index.end())
+		{
+			const string& n = it->second.name;
+			ok = !n.empty() && n != ".." && n != "Browse...";
+		}
+	}
+	pCmdUI->Enable(ok);
+}
+
 void CXCCMixerView::OnUpdatePopupClipboardCopy(CCmdUI* pCmdUI)
 {
 	int id = get_current_id();
@@ -2873,45 +3349,51 @@ void CXCCMixerView::extract_open_audio_pak(const string& bag, const string& idx)
 void CXCCMixerView::open_item(int id)
 {
 	const t_index_entry& index = find_ref(m_index, id);
+	// External-programs mode: leaf files (anything that's not a MIX/dir
+	// container) get either shell-opened in place (filesystem source) or
+	// extracted to %TEMP%\xcc_mixer\ and shell-opened (MIX source). MIX
+	// containers and dirs always keep their navigate-into behavior.
+	if (theme::use_external_programs())
+	{
+		const bool is_container =
+			index.ft == ft_mix || index.ft == ft_big || index.ft == ft_mix_rg
+			|| index.ft == ft_pak || index.ft == ft_dir || index.ft == ft_drive
+			|| index.ft == ft_lnkdir;
+		if (!is_container && !index.name.empty())
+		{
+			if (m_mix_f)
+			{
+				CWaitCursor wait;
+				Cvirtual_binary d = m_mix_f->get_vdata(id);
+				if (d.size() && ext_open::extract_and_open(m_hWnd, index.name, d))
+					return;
+				// Fall through to default behavior on failure.
+			}
+			else
+			{
+				::ShellExecute(m_hWnd, "open", (m_dir + index.name).c_str(),
+					NULL, NULL, SW_SHOW);
+				return;
+			}
+		}
+	}
 	switch (index.ft)
 	{
 	case ft_aud:
 	case ft_ogg:
 	case ft_voc:
 	case ft_wav:
-	{
-		if (GetMainFrame()->get_ds())
-		{
-			CWaitCursor wait;
-			Ccc_file f(true);
-			if (!open_f_id(f, id))
-			{
-				xap_play(GetMainFrame()->get_ds(), f.vdata(), index.name);
-			}
-		}
+		// Audio play/pause moved off double-click; bound to Space now
+		// (see PreTranslateMessage). Double-click on audio falls through
+		// without action so external-programs mode and built-in mode have
+		// matching semantics for the same gesture.
 		break;
-	}
 	case ft_dir:
 		{
 			string name = index.name;
 			if (name == "..")
 			{
-				if (!m_mix_f)
-				{
-					close_location(false);
-					int i = m_dir.rfind('\\');
-					if (i != string::npos)
-					{
-						i = m_dir.rfind('\\', i - 1);
-						if (i != string::npos)
-							open_location_dir(m_dir.substr(0, i + 1));
-					}
-				}
-				else
-				{
-					close_location(false);
-					open_location_dir(m_dir + '\\');
-				}
+				nav_go_up();
 			}
 			else
 			{
@@ -3046,6 +3528,52 @@ void CXCCMixerView::open_item(int id)
 			break;
 		}
 	}
+}
+
+// Play/toggle the audio file with id `id` via xap_play. Bound to Space in
+// PreTranslateMessage. Same xap_play call the old double-click flow used —
+// pressing Space again on the same file pauses it.
+void CXCCMixerView::play_audio_id(int id)
+{
+	if (!GetMainFrame()->get_ds())
+		return;
+	const t_index_entry& index = find_ref(m_index, id);
+	if (index.ft != ft_aud && index.ft != ft_ogg && index.ft != ft_voc && index.ft != ft_wav)
+		return;
+	CWaitCursor wait;
+	Ccc_file f(true);
+	if (!open_f_id(f, id))
+		xap_play(GetMainFrame()->get_ds(), f.vdata(), index.name);
+}
+
+BOOL CXCCMixerView::PreTranslateMessage(MSG* pMsg)
+{
+	// Spacebar = play/pause for audio files in the listview. Caught here
+	// (not OnKeyDown) so it overrides the listview's default selection-
+	// toggle handling. Only consumes Space when the focused item is audio
+	// — otherwise lets it fall through.
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE
+		&& pMsg->hwnd == GetListCtrl().GetSafeHwnd())
+	{
+		// Filter auto-repeat: holding Space generates ~30 KEYDOWNs per
+		// second; each one would spawn a new playback thread and trash
+		// the shared DirectSound buffer state. lParam bit 30 = 1 means
+		// the key was already down before this event, i.e. auto-repeat.
+		if (pMsg->lParam & (1 << 30))
+			return TRUE;
+		int id = get_current_id();
+		if (id != -1)
+		{
+			const t_index_entry& index = find_ref(m_index, id);
+			if (index.ft == ft_aud || index.ft == ft_ogg
+				|| index.ft == ft_voc || index.ft == ft_wav)
+			{
+				play_audio_id(id);
+				return TRUE;
+			}
+		}
+	}
+	return CListView::PreTranslateMessage(pMsg);
 }
 
 void CXCCMixerView::OnEditSelectAll()

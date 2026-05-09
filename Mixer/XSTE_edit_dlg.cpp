@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "XSTE_edit_dlg.h"
+#include "theme.h"
 
 CXSTE_edit_dlg::CXSTE_edit_dlg(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(CXSTE_edit_dlg::IDD, pParent, "XSTE_edit_dlg")
@@ -24,7 +25,15 @@ void CXSTE_edit_dlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CXSTE_edit_dlg, ETSLayoutDialog)
 	//{{AFX_MSG_MAP(CXSTE_edit_dlg)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH CXSTE_edit_dlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void CXSTE_edit_dlg::set(const string& name, const string& value, const string& extra_value)
 {
@@ -72,5 +81,6 @@ BOOL CXSTE_edit_dlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+	theme::apply_dialog(GetSafeHwnd());
 	return true;
 }

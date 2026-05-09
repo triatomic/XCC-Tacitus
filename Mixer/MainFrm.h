@@ -9,6 +9,7 @@
 #include "cc_structures.h"
 #include "mix_file.h"
 #include "pal_file.h"
+#include "theme.h"
 #include "xm_types.h"
 
 struct t_pal_map_list_entry
@@ -63,6 +64,14 @@ public:
 	void clean_pal_map_list();
 	int mix_list_create_map(string name, string fname, int id, int parent);
 	int pal_list_create_map(string name, int parent);
+	int load_pal_folder(const string& folder);
+	// Load a single archive (MIX/DAT/PAK/BIG/...) from disk and import every
+	// palette entry found inside, recursing into nested archives. Returns the
+	// new pal-map parent id (root tree node for the archive), or -1 if the
+	// file couldn't be opened or contained no palettes.
+	int load_pal_mix(const string& path);
+	t_pal_map_list& pal_map_list_mut() { return m_pal_map_list; }
+	t_pal_list& pal_list_mut() { return m_pal_list; }
 	BOOL OnIdle(LONG lCount);
 	void close_ds();
 	void open_ds();
@@ -145,11 +154,18 @@ protected:
 	CXCCMixerView* m_left_mix_pane;
 	CXCCMixerView* m_right_mix_pane;
 	CXCCFileView* m_file_info_pane;
-	CSplitterWnd m_wndSplitter;
-	CStatusBar m_wndStatusBar;
+	CThemedSplitterWnd m_wndSplitter;
+	CThemedStatusBar m_wndStatusBar;
+	CThemedHeaderCtrl m_left_header;
+	CThemedHeaderCtrl m_right_header;
+	bool m_headers_subclassed = false;
 	LPDIRECTDRAW m_dd = NULL;
 	LPDIRECTSOUND m_ds = NULL;
 	CString m_reg_key = "MainFrame";
+	bool m_two_panes = true;
+	int m_saved_middle_pane_w = 0; // restored when going one→two
+public:
+	void set_pane_layout(bool two_panes);
 
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
@@ -169,6 +185,8 @@ protected:
 	afx_msg void OnUpdateViewPaletteAuto(CCmdUI* pCmdUI);
 	afx_msg void OnViewPalettePrev();
 	afx_msg void OnViewPaletteNext();
+	afx_msg void OnViewPalettePrevSibling();
+	afx_msg void OnViewPaletteNextSibling();
 	afx_msg void OnViewPaletteUseForConversion();
 	afx_msg void OnUpdateViewPaletteUseForConversion(CCmdUI* pCmdUI);
 	afx_msg void OnViewPaletteConvertFromTD();
@@ -195,6 +213,7 @@ protected:
 	afx_msg void OnLaunchXccThemeWriter();
 	afx_msg void OnUpdateLaunchXccThemeWriter(CCmdUI* pCmdUI);
 	afx_msg void OnFileSearch();
+	afx_msg void OnFileSearchInMix();
 	afx_msg void OnConversionEnableCompression();
 	afx_msg void OnUpdateConversionEnableCompression(CCmdUI* pCmdUI);
 	afx_msg void OnDestroy();
@@ -233,14 +252,37 @@ protected:
 	afx_msg void OnUpdateConversionRemapTeamColors(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLight();
 	afx_msg void OnThemeDark();
+	afx_msg void OnThemeShowGrid();
+	afx_msg void OnThemeAlphaColor();
+	afx_msg void OnThemeShpTransparency();
+	afx_msg void OnUpdateThemeShpTransparency(CCmdUI* pCmdUI);
+	afx_msg void OnThemeUseCheckerboard();
+	afx_msg void OnUpdateThemeUseCheckerboard(CCmdUI* pCmdUI);
+	afx_msg void OnThemeUseExternalPrograms();
+	afx_msg void OnUpdateThemeUseExternalPrograms(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeLight(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeDark(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeShowGrid(CCmdUI* pCmdUI);
+	afx_msg void OnThemeInterpNearest();
+	afx_msg void OnThemeInterpBilinear();
+	afx_msg void OnThemeInterpBicubic();
+	afx_msg void OnThemeInterpLanczos();
+	afx_msg void OnUpdateThemeInterpNearest(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeInterpBilinear(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeInterpBicubic(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeInterpLanczos(CCmdUI* pCmdUI);
+	void set_interp(theme::interpolation v);
 	afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS);
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	void apply_theme_to_children();
 	void rebuild_menu_owner_draw();
+	afx_msg LRESULT OnThemeRebuildMenu(WPARAM wp, LPARAM lp);
+	afx_msg void OnThemePanesOne();
+	afx_msg void OnThemePanesTwo();
+	afx_msg void OnUpdateThemePanesOne(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemePanesTwo(CCmdUI* pCmdUI);
 
 	DECLARE_MESSAGE_MAP()
 };

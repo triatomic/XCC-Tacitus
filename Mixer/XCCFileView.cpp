@@ -1,9 +1,11 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "XCCFileView.h"
+#include "resource.h"
 #include <csf_file.h>
 #include <aud_file.h>
 #include <big_file.h>
+#include <cfloat>
 #include <cmath>
 #include <cps_file.h>
 #include <dds_file.h>
@@ -62,15 +64,144 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_WM_MOUSEWHEEL()
 	ON_WM_MOUSEHWHEEL()
 	ON_WM_ERASEBKGND()
+	ON_WM_KEYDOWN()
+	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_WM_MOUSEMOVE()
+	ON_WM_SIZE()
+	ON_WM_TIMER()
+	ON_WM_HSCROLL()
+	ON_BN_CLICKED(IDC_PLAYER_PLAY, OnPlayerPlay)
+	ON_BN_CLICKED(IDC_PLAYER_REVERSE, OnPlayerReverse)
+	ON_BN_CLICKED(IDC_PLAYER_GRID, OnPlayerGrid)
+	ON_BN_CLICKED(IDC_PLAYER_NATIVE, OnPlayerNative)
+	ON_EN_CHANGE(IDC_PLAYER_FPS_EDIT, OnPlayerFpsChange)
+	ON_BN_CLICKED(IDC_PLAYER_SHADOWS, OnPlayerShadows)
+	ON_BN_CLICKED(IDC_PLAYER_BG, OnPlayerBg)
+	ON_CONTROL_RANGE(BN_CLICKED, IDC_PLAYER_SIDE0, IDC_PLAYER_SIDE7, OnPlayerSide)
+	ON_BN_CLICKED(IDC_PLAYER_SIDE_CUSTOM, OnPlayerSideCustom)
+	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
+	ON_WM_DRAWITEM()
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+void CXCCFileView::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	// Click steals focus so M actually reaches our key handler.
+	SetFocus();
+	if (is_vxl_view())
+	{
+		// Only start orbit drag in the image area, not over the controls band.
+		CRect cr;
+		GetClientRect(&cr);
+		if (point.y < cr.bottom - 32)
+		{
+			m_vxl_dragging = true;
+			m_vxl_drag_origin = point;
+			m_vxl_drag_yaw0 = m_vxl_yaw;
+			m_vxl_drag_pitch0 = m_vxl_pitch;
+			SetCapture();
+			return;
+		}
+	}
+	CScrollView::OnLButtonDown(nFlags, point);
+}
+
+void CXCCFileView::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_vxl_dragging)
+	{
+		m_vxl_dragging = false;
+		ReleaseCapture();
+		return;
+	}
+	CScrollView::OnLButtonUp(nFlags, point);
+}
+
+void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
+{
+	if (m_vxl_dragging && (nFlags & MK_LBUTTON))
+	{
+		// 3dsmax-style orbit: horizontal drag = yaw, vertical drag = pitch.
+		// ~0.4 deg per pixel feels right for the tiny VXL framebuffer.
+		const double k = 0.4 * 3.14159265358979323846 / 180.0;
+		m_vxl_yaw = m_vxl_drag_yaw0 + (point.x - m_vxl_drag_origin.x) * k;
+		m_vxl_pitch = m_vxl_drag_pitch0 + (point.y - m_vxl_drag_origin.y) * k;
+		// Clamp pitch so the camera doesn't flip past straight up/down.
+		const double lim = 89.0 * 3.14159265358979323846 / 180.0;
+		if (m_vxl_pitch > lim) m_vxl_pitch = lim;
+		if (m_vxl_pitch < -lim) m_vxl_pitch = -lim;
+		CRect cr;
+		GetClientRect(&cr);
+		cr.bottom -= 32;
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		return;
+	}
+	CScrollView::OnMouseMove(nFlags, point);
+}
+
+void CXCCFileView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+	if (nChar == 'M')
+	{
+		m_show_alpha_only = !m_show_alpha_only;
+		Invalidate();
+		return;
+	}
+	if (nChar == 'P' && is_playable_file())
+	{
+		if (m_player_mode)
+			player_exit();
+		else
+			player_enter();
+		return;
+	}
+	if (m_player_mode && nChar == VK_LEFT)
+	{
+		player_set_frame(m_player_frame - 1);
+		return;
+	}
+	if (m_player_mode && nChar == VK_RIGHT)
+	{
+		player_set_frame(m_player_frame + 1);
+		return;
+	}
+	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+	if (ctrl && m_zoomable_file && (nChar == '0' || nChar == VK_NUMPAD0))
+	{
+		if (m_zoom_pct != 100)
+		{
+			m_zoom_pct = 100;
+			m_text_cache_valid = false;
+			Invalidate();
+		}
+		return;
+	}
+	CScrollView::OnKeyDown(nChar, nRepCnt, nFlags);
+}
 
 BOOL CXCCFileView::OnEraseBkgnd(CDC* pDC)
 {
 	GetClientRect(clientRect);
-	if (theme::is_dark())
-		pDC->FillSolidRect(clientRect, theme::bg());
+	if (m_player_mode)
+	{
+		const int band = player_band_h();
+		// Image area
+		CRect r_img = clientRect;
+		r_img.bottom -= band;
+		if (r_img.bottom > r_img.top)
+			pDC->FillSolidRect(r_img, theme::bg());
+		// Controls area: fill once with bg (controls redraw themselves on top of this).
+		CRect r_ctrl = clientRect;
+		r_ctrl.top = r_ctrl.bottom - band;
+		if (r_ctrl.top < clientRect.bottom)
+			pDC->FillSolidRect(r_ctrl, theme::bg());
+	}
 	else
-		pDC->FillRect(clientRect, &test_brush);
+	{
+		pDC->FillSolidRect(clientRect, theme::bg());
+	}
 	return TRUE;
 }
 
@@ -78,7 +209,22 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
 	CPoint position = GetScrollPosition();
 	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
+	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 
+	if (ctrl && m_zoomable_file)
+	{
+		int step = zDelta > 0 ? 25 : -25;
+		int next = m_zoom_pct + step;
+		if (next < 25) next = 25;
+		if (next > 1600) next = 1600;
+		if (next != m_zoom_pct)
+		{
+			m_zoom_pct = next;
+			m_text_cache_valid = false;
+			Invalidate();
+		}
+		return TRUE;
+	}
 	if (shiftState)
 	{
 		ScrollToPosition(CPoint(position.x - zDelta, position.y));
@@ -114,10 +260,24 @@ void CXCCFileView::OnInitialUpdate()
 
 void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d)
 {
+	int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d_pre = cx_s * zoom_pre / 100;
+	int cy_d_pre = cy_s * zoom_pre / 100;
+	// Skip the entire decode + DIB + StretchBlt path when this frame is
+	// outside the current clip box. Cheap RectVisible test saves the per-
+	// pixel palette walk for stacked SHP grids with many frames offscreen.
+	CRect r_test(x_d, m_y, x_d + cx_d_pre, m_y + cy_d_pre);
+	if (!pDC->RectVisible(&r_test))
+	{
+		m_x = max(m_x, x_d + cx_d_pre);
+		if (zoom_pre != 100)
+			m_y += (cy_d_pre - cy_s);
+		return;
+	}
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
-	{	
+	{
 		BITMAPINFO bmi;
 		ZeroMemory(&bmi, sizeof(BITMAPINFO));
 		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -130,23 +290,51 @@ void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int 
 		mh_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&mp_dib), 0, 0);
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
+	const bool tr = theme::shp_transparency();
+	const COLORREF ck_a = theme::checker_a();
+	const COLORREF ck_b = theme::checker_b();
+	// COLORREF is 0x00BBGGRR; the DIB stores 0x00RRGGBB BGRA. Swap.
+	const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
+	const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
 	for (unsigned int y = 0; y < cy_s; y++)
 	{
 		for (unsigned int x = 0; x < cx_s; x++)
-			mp_dib[x + cx_s * y] = m_color_table[s[x + cx_s * y]];
+		{
+			byte idx = s[x + cx_s * y];
+			if (tr && idx == 0)
+				mp_dib[x + cx_s * y] = (((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d;
+			else
+				mp_dib[x + cx_s * y] = m_color_table[idx];
+		}
 	}
-	pDC->BitBlt(x_d, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	int zoom = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d = cx_s * zoom / 100;
+	int cy_d = cy_s * zoom / 100;
+	theme::stretch_image(pDC, x_d, m_y, cx_d, cy_d, &mem_dc, mh_dib, mp_dib, cx_s, cy_s);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, x_d + cx_s);
+	m_x = max(m_x, x_d + cx_d);
+	if (zoom != 100)
+		m_y += (cy_d - cy_s);
 }
 
 void CXCCFileView::draw_image24(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
+	int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d_pre = cx_s * zoom_pre / 100;
+	int cy_d_pre = cy_s * zoom_pre / 100;
+	CRect r_test(offset, m_y, offset + cx_d_pre, m_y + cy_d_pre);
+	if (!pDC->RectVisible(&r_test))
+	{
+		m_x = max(m_x, offset + cx_d_pre);
+		if (zoom_pre != 100)
+			m_y += (cy_d_pre - cy_s);
+		return;
+	}
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
-	{	
+	{
 		BITMAPINFO bmi;
 		ZeroMemory(&bmi, sizeof(BITMAPINFO));
 		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -170,14 +358,30 @@ void CXCCFileView::draw_image24(const byte* s, int cx_s, int cy_s, CDC* pDC)
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	int zoom = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d = cx_s * zoom / 100;
+	int cy_d = cy_s * zoom / 100;
+	theme::stretch_image(pDC, offset, m_y, cx_d, cy_d, &mem_dc, mh_dib, mp_dib, cx_s, cy_s);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, offset + cx_s);
+	m_x = max(m_x, offset + cx_d);
+	if (zoom != 100)
+		m_y += (cy_d - cy_s);
 }
 
-void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC)
+void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC, bool bgra)
 {
+	int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d_pre = cx_s * zoom_pre / 100;
+	int cy_d_pre = cy_s * zoom_pre / 100;
+	CRect r_test(offset, m_y, offset + cx_d_pre, m_y + cy_d_pre);
+	if (!pDC->RectVisible(&r_test))
+	{
+		m_x = max(m_x, offset + cx_d_pre);
+		if (zoom_pre != 100)
+			m_y += (cy_d_pre - cy_s);
+		return;
+	}
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -194,27 +398,67 @@ void CXCCFileView::draw_image32(const byte* s, int cx_s, int cy_s, CDC* pDC)
 		mh_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&mp_dib), 0, 0);
 	}
 	old_bitmap = mem_dc.SelectObject(mh_dib);
-	const byte* r = s;
+
+	// Composite RGBA over an 8x8 checkerboard so transparency is visible.
+	// When m_show_alpha_only is on, ignore RGB and render alpha as grayscale.
+	const COLORREF ck_a = theme::checker_a();
+	const COLORREF ck_b = theme::checker_b();
+	const byte ck_a_r = GetRValue(ck_a), ck_a_g = GetGValue(ck_a), ck_a_b = GetBValue(ck_a);
+	const byte ck_b_r = GetRValue(ck_b), ck_b_g = GetGValue(ck_b), ck_b_b = GetBValue(ck_b);
+	const bool alpha_only = m_show_alpha_only;
+
 	t_palette32bgr_entry v{};
 	for (unsigned int y = 0; y < cy_s; y++)
 	{
 		for (unsigned int x = 0; x < cx_s; x++)
 		{
-			v.r = *s++;
-			v.g = *s++;
-			v.b = *s++;
-			v.a = *s++;
+			byte b0 = *s++;
+			byte b1 = *s++;
+			byte b2 = *s++;
+			byte sa = *s++;
+			if (alpha_only)
+			{
+				v.r = sa;
+				v.g = sa;
+				v.b = sa;
+				v.a = 0;
+				mp_dib[x + cx_s * y] = v.v;
+				continue;
+			}
+			byte sr = bgra ? b2 : b0;
+			byte sg = b1;
+			byte sb = bgra ? b0 : b2;
+			bool ck = ((x >> 3) ^ (y >> 3)) & 1;
+			byte br = ck ? ck_b_r : ck_a_r;
+			byte bg = ck ? ck_b_g : ck_a_g;
+			byte bb = ck ? ck_b_b : ck_a_b;
+			// Standard alpha-over: out = src*a + bg*(1-a). +127 for rounding.
+			v.r = (sr * sa + br * (255 - sa) + 127) / 255;
+			v.g = (sg * sa + bg * (255 - sa) + 127) / 255;
+			v.b = (sb * sa + bb * (255 - sa) + 127) / 255;
+			v.a = 0;
 			mp_dib[x + cx_s * y] = v.v;
 		}
 	}
-	pDC->BitBlt(offset, m_y, cx_s, cy_s, &mem_dc, 0, 0, SRCCOPY);
+	int zoom = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+	int cx_d = cx_s * zoom / 100;
+	int cy_d = cy_s * zoom / 100;
+	theme::stretch_image(pDC, offset, m_y, cx_d, cy_d, &mem_dc, mh_dib, mp_dib, cx_s, cy_s);
 	mem_dc.SelectObject(old_bitmap);
 	DeleteObject(mh_dib);
-	m_x = max(m_x, offset + cx_s);
+	m_x = max(m_x, offset + cx_d);
+	if (zoom != 100)
+		m_y += (cy_d - cy_s);
 }
 
 void CXCCFileView::draw_image48(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
+	CRect r_test(offset, m_y, offset + cx_s, m_y + cy_s);
+	if (!pDC->RectVisible(&r_test))
+	{
+		m_x = max(m_x, offset + cx_s);
+		return;
+	}
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -251,6 +495,12 @@ void CXCCFileView::draw_image48(const byte* s, int cx_s, int cy_s, CDC* pDC)
 
 void CXCCFileView::draw_image64(const byte* s, int cx_s, int cy_s, CDC* pDC)
 {
+	CRect r_test(offset, m_y, offset + cx_s, m_y + cy_s);
+	if (!pDC->RectVisible(&r_test))
+	{
+		m_x = max(m_x, offset + cx_s);
+		return;
+	}
 	CDC mem_dc;
 	mem_dc.CreateCompatibleDC(pDC);
 	void* old_bitmap;
@@ -395,6 +645,19 @@ void fnt_adjust(byte* d, int size)
 	}
 }
 
+// Side-color presets (matches the Advanced SHP Editor preview palette).
+// Order: Red, Gold, Green, Blue, Light Red, Orange, Teal, Pink.
+static const COLORREF k_side_colors[8] = {
+	RGB(0xbf, 0x00, 0x00),
+	RGB(0xe3, 0xa5, 0x02),
+	RGB(0x48, 0xbb, 0x78),
+	RGB(0x22, 0x55, 0xff),
+	RGB(0xf5, 0x65, 0x65),
+	RGB(0xed, 0x89, 0x36),
+	RGB(0x4f, 0xd1, 0xc5),
+	RGB(0xd5, 0x3f, 0x8c),
+};
+
 struct t_vector
 {
 	double x;
@@ -454,15 +717,17 @@ void CXCCFileView::OnDraw(CDC* pDC)
 	const char* b2a[] = {"no", "yes"};
 	pDC->SelectObject(&m_font);
 
-	if (theme::is_dark())
-	{
-		pDC->SetTextColor(theme::text());
-		pDC->SetBkColor(theme::bg());
-		pDC->SetBkMode(TRANSPARENT);
-	}
+	pDC->SetTextColor(theme::text());
+	pDC->SetBkColor(theme::bg());
+	pDC->SetBkMode(OPAQUE);
 
 	//pDC->SetBkColor(m_colour);
 
+	if (m_is_open && m_player_mode)
+	{
+		player_draw(pDC);
+		return;
+	}
 	if (m_is_open)
 	{
 		TEXTMETRIC tm;
@@ -550,13 +815,14 @@ void CXCCFileView::OnDraw(CDC* pDC)
 						" bits (" + nwzl(4, 1000 * get_size(ddsd.ddpfPixelFormat.dwRGBAlphaBitMask) + 100 * get_size(ddsd.ddpfPixelFormat.dwRBitMask) + 10
 							* get_size(ddsd.ddpfPixelFormat.dwGBitMask) + get_size(ddsd.ddpfPixelFormat.dwBBitMask)) + ')');		
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_FOURCC)
-				{					
+				{
 					Cvirtual_image image = f.vimage();
 					if (image.image())
 					{
-						image.remove_alpha();
 						m_y += m_y_inc;
-						draw_image24(image.image(), f.cx(), f.cy(), pDC);
+						// Decoded DDS data is 32-bit RGBA; draw_image32 will composite
+						// alpha against a checkerboard so transparency is visible.
+						draw_image32(image.image(), f.cx(), f.cy(), pDC, /*bgra=*/false);
 						m_y += f.cy() + m_y_inc;
 					}
 				}
@@ -830,17 +1096,22 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				{
 					const int cx = f.get_cx(i);
 					const int cy = f.get_cy(i);
-					byte* image = new byte[cx * cy];
-					if (f.is_compressed(i))
+					int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+					CRect r_test(offset, m_y, offset + cx * zoom_pre / 100, m_y + cy * zoom_pre / 100);
+					if (pDC->RectVisible(&r_test))
 					{
-						byte* d = new byte[f.get_image_header(i)->size_out];
-						decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
-						delete[] d;
+						byte* image = new byte[cx * cy];
+						if (f.is_compressed(i))
+						{
+							byte* d = new byte[f.get_image_header(i)->size_out];
+							decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
+							delete[] d;
+						}
+						else
+							decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
+						draw_image8(image, cx, cy, pDC, offset);
+						delete[] image;
 					}
-					else
-						decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
-					draw_image8(image, cx, cy, pDC, offset);
-					delete[] image;
 					m_y += cy + m_y_inc;
 				}
 				break;
@@ -899,14 +1170,19 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					const int cy = f.get_cy(i);
 					if (cx && cy)
 					{
-						if (f.is_compressed(i))
+						int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+						CRect r_test(offset, m_y, offset + cx * zoom_pre / 100, m_y + cy * zoom_pre / 100);
+						if (pDC->RectVisible(&r_test))
 						{
-							Cvirtual_binary image;
-							RLEZeroTSDecompress(f.get_image(i), image.write_start(cx * cy), cx, cy);
-							draw_image8(image.data(), cx, cy, pDC, offset);
+							if (f.is_compressed(i))
+							{
+								Cvirtual_binary image;
+								RLEZeroTSDecompress(f.get_image(i), image.write_start(cx * cy), cx, cy);
+								draw_image8(image.data(), cx, cy, pDC, offset);
+							}
+							else
+								draw_image8(f.get_image(i), cx, cy, pDC, offset);
 						}
-						else
-							draw_image8(f.get_image(i), cx, cy, pDC, offset);
 						m_y += cy + m_y_inc;
 					}
 				}
@@ -916,22 +1192,51 @@ void CXCCFileView::OnDraw(CDC* pDC)
 			{
 				Ctga_file f;
 				f.load(m_data);
-				Cvirtual_image image;
-				if (!f.decode(image))
+				if (f.cb_pixel() == 4)
 				{
-					const int cx = image.cx();
-					const int cy = image.cy();
-					draw_info("Bits/Pixel:", n(8 * image.cb_pixel()));
+					// 32-bit BGRA: keep alpha and composite against checkerboard.
+					const int cx = f.cx();
+					const int cy = f.cy();
+					draw_info("Bits/Pixel:", n(32));
 					draw_info("Size:", n(cx) + " x " + n(cy));
 					m_y += m_y_inc;
-					if (image.cb_pixel() == 1)
+
+					// TGA stores bottom-up unless the "vertical" flag is set; flip rows
+					// into a temporary buffer when needed so draw_image32 sees top-down.
+					Cvirtual_binary buf;
+					byte* dst = buf.write_start(cx * cy * 4);
+					const byte* src = f.image();
+					if (f.header().vertical)
 					{
-						load_color_table(image.palette(), false);
-						draw_image8(image.image(), cx, cy, pDC, offset);
+						memcpy(dst, src, cx * cy * 4);
 					}
-					else if (image.cb_pixel() == 3)
-						draw_image24(image.image(), cx, cy, pDC);
+					else
+					{
+						for (int y = 0; y < cy; y++)
+							memcpy(dst + y * cx * 4, src + (cy - 1 - y) * cx * 4, cx * 4);
+					}
+					draw_image32(dst, cx, cy, pDC, /*bgra=*/true);
 					m_y += cy + m_y_inc;
+				}
+				else
+				{
+					Cvirtual_image image;
+					if (!f.decode(image))
+					{
+						const int cx = image.cx();
+						const int cy = image.cy();
+						draw_info("Bits/Pixel:", n(8 * image.cb_pixel()));
+						draw_info("Size:", n(cx) + " x " + n(cy));
+						m_y += m_y_inc;
+						if (image.cb_pixel() == 1)
+						{
+							load_color_table(image.palette(), false);
+							draw_image8(image.image(), cx, cy, pDC, offset);
+						}
+						else if (image.cb_pixel() == 3)
+							draw_image24(image.image(), cx, cy, pDC);
+						m_y += cy + m_y_inc;
+					}
 				}
 				break;
 			}
@@ -1461,7 +1766,17 @@ void CXCCFileView::post_open(Ccc_file& f)
 		f.close();
 		m_text_cache_valid = false;
 		m_is_open = true;
+		m_zoom_pct = 100;
+		m_zoomable_file =
+			m_ft == ft_dds || m_ft == ft_cps ||
+			m_ft == ft_jpeg || m_ft == ft_jpeg_single ||
+			m_ft == ft_png || m_ft == ft_png_single ||
+			m_ft == ft_pcx || m_ft == ft_pcx_single ||
+			m_ft == ft_tga || m_ft == ft_tga_single ||
+			m_ft == ft_bmp;
 	}
+	if (m_player_mode)
+		player_exit();
 	ScrollToPosition(CPoint(0, 0));
 	Invalidate();
 }
@@ -1470,6 +1785,1215 @@ void CXCCFileView::close_f()
 {
 	m_is_open = false;
 	m_text_cache.clear();
+}
+
+bool CXCCFileView::is_playable_file() const
+{
+	if (!m_is_open)
+		return false;
+	return m_ft == ft_shp || m_ft == ft_shp_dune2 || m_ft == ft_shp_ts ||
+		m_ft == ft_wsa || m_ft == ft_wsa_dune2 || m_ft == ft_vxl;
+}
+
+int CXCCFileView::player_total_frames() const
+{
+	return m_player_cf;
+}
+
+void CXCCFileView::player_decode_frames()
+{
+	m_player_frames.clear();
+	m_player_cx = 0;
+	m_player_cy = 0;
+	m_player_cf = 0;
+	if (!is_playable_file())
+		return;
+	if (m_ft == ft_shp)
+	{
+		Cshp_file f;
+		f.load(m_data);
+		load_color_table(get_default_palette(), true);
+		m_player_cx = f.cx();
+		m_player_cy = f.cy();
+		m_player_cf = f.cf();
+		Cvirtual_image image = f.vimage();
+		const byte* r = image.image();
+		int cb = f.cb_image();
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			Cvirtual_binary v;
+			memcpy(v.write_start(cb), r, cb);
+			m_player_frames.push_back(v);
+			r += cb;
+		}
+	}
+	else if (m_ft == ft_shp_dune2)
+	{
+		Cshp_dune2_file f;
+		f.load(m_data);
+		load_color_table(get_default_palette(), true);
+		m_player_cf = f.get_c_images();
+		// Frames have different sizes; find a bounding box.
+		int max_cx = 0, max_cy = 0;
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			max_cx = std::max(max_cx, f.get_cx(i));
+			max_cy = std::max(max_cy, f.get_cy(i));
+		}
+		m_player_cx = max_cx > 0 ? max_cx : 1;
+		m_player_cy = max_cy > 0 ? max_cy : 1;
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			int cx = f.get_cx(i);
+			int cy = f.get_cy(i);
+			Cvirtual_binary v;
+			byte* w = v.write_start(m_player_cx * m_player_cy);
+			memset(w, 0, m_player_cx * m_player_cy);
+			if (cx > 0 && cy > 0)
+			{
+				byte* image = new byte[cx * cy];
+				if (f.is_compressed(i))
+				{
+					byte* d = new byte[f.get_image_header(i)->size_out];
+					decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
+					delete[] d;
+				}
+				else
+					decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
+				int x_off = (m_player_cx - cx) / 2;
+				int y_off = (m_player_cy - cy) / 2;
+				for (int y = 0; y < cy; y++)
+					memcpy(w + (y + y_off) * m_player_cx + x_off, image + y * cx, cx);
+				delete[] image;
+			}
+			m_player_frames.push_back(v);
+		}
+	}
+	else if (m_ft == ft_shp_ts)
+	{
+		Cshp_ts_file f;
+		f.load(m_data);
+		load_color_table(get_default_palette(), true);
+		m_player_cx = f.cx();
+		m_player_cy = f.cy();
+		m_player_cf = f.cf();
+		// SHP(TS) frames vary in size and store their own (x, y) offsets inside
+		// the global cx*cy canvas. Use those offsets, not centering — body and
+		// shadow frames have different (x, y) and shadows must align to body
+		// positions when composited.
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			int cx = f.get_cx(i);
+			int cy = f.get_cy(i);
+			Cvirtual_binary v;
+			byte* w = v.write_start(m_player_cx * m_player_cy);
+			memset(w, 0, m_player_cx * m_player_cy);
+			if (cx > 0 && cy > 0)
+			{
+				Cvirtual_binary tmp;
+				const byte* src = f.get_image(i);
+				if (f.is_compressed(i))
+				{
+					RLEZeroTSDecompress(src, tmp.write_start(cx * cy), cx, cy);
+					src = tmp.data();
+				}
+				int x_off = f.get_x(i);
+				int y_off = f.get_y(i);
+				int dst_x0 = std::max(0, x_off);
+				int dst_y0 = std::max(0, y_off);
+				int dst_x1 = std::min(m_player_cx, x_off + cx);
+				int dst_y1 = std::min(m_player_cy, y_off + cy);
+				for (int y = dst_y0; y < dst_y1; y++)
+				{
+					int sy = y - y_off;
+					memcpy(w + y * m_player_cx + dst_x0,
+						src + sy * cx + (dst_x0 - x_off),
+						dst_x1 - dst_x0);
+				}
+			}
+			m_player_frames.push_back(v);
+		}
+	}
+	else if (m_ft == ft_wsa)
+	{
+		Cwsa_file f;
+		f.load(m_data);
+		load_color_table(f.palette(), true);
+		m_player_cx = f.cx();
+		m_player_cy = f.cy();
+		m_player_cf = f.cf();
+		Cvirtual_image image = f.vimage();
+		const byte* r = image.image();
+		int cb = f.cb_image();
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			Cvirtual_binary v;
+			memcpy(v.write_start(cb), r, cb);
+			m_player_frames.push_back(v);
+			r += cb;
+		}
+	}
+	else if (m_ft == ft_wsa_dune2)
+	{
+		Cwsa_dune2_file f;
+		f.load(m_data);
+		load_color_table(get_default_palette(), true);
+		Cvirtual_image image = f.vimage();
+		m_player_cx = image.cx();
+		m_player_cy = image.cy();
+		m_player_cf = f.cf();
+		const byte* r = image.image();
+		int cb = m_player_cx * m_player_cy;
+		for (int i = 0; i < m_player_cf; i++)
+		{
+			Cvirtual_binary v;
+			memcpy(v.write_start(cb), r, cb);
+			m_player_frames.push_back(v);
+			r += cb;
+		}
+	}
+	else if (m_ft == ft_vxl)
+	{
+		Cvxl_file f;
+		f.load(m_data);
+		load_color_table(get_default_palette(), true);
+
+		// Build the object-space point cloud once. The viewer rasterizes it
+		// per frame at the current m_vxl_yaw/m_vxl_pitch.
+		m_vxl_cloud.clear();
+		const int n_sections = f.get_c_section_headers();
+		for (int i = 0; i < n_sections; i++)
+		{
+			const t_vxl_section_tailer& st = *f.get_section_tailer(i);
+			const int cx = st.cx;
+			const int cy = st.cy;
+			const int cz = st.cz;
+			double sx = (st.x_max_scale - st.x_min_scale) / std::max(1, cx);
+			double sy = (st.y_max_scale - st.y_min_scale) / std::max(1, cy);
+			double sz = (st.z_max_scale - st.z_min_scale) / std::max(1, cz);
+			int j = 0;
+			for (int y = 0; y < cy; y++)
+			{
+				for (int x = 0; x < cx; x++)
+				{
+					const byte* r = f.get_span_data(i, j++);
+					if (!r)
+						continue;
+					int z = 0;
+					while (z < cz)
+					{
+						z += *r++;
+						int c = *r++;
+						while (c--)
+						{
+							double lx = (x + 0.5 - cx / 2.0) * sx;
+							double ly = (y + 0.5 - cy / 2.0) * sy;
+							double lz = (z + 0.5 - cz / 2.0) * sz;
+							double wx = st.transform[0][0] * lx + st.transform[0][1] * ly + st.transform[0][2] * lz + st.transform[0][3];
+							double wy = st.transform[1][0] * lx + st.transform[1][1] * ly + st.transform[1][2] * lz + st.transform[1][3];
+							double wz = st.transform[2][0] * lx + st.transform[2][1] * ly + st.transform[2][2] * lz + st.transform[2][3];
+							t_vxl_voxel v{ wx, wy, wz, *r };
+							m_vxl_cloud.push_back(v);
+							r += 2;
+							z++;
+						}
+						r++;
+					}
+				}
+			}
+		}
+
+		if (m_vxl_cloud.empty())
+			return;
+
+		double max_r2 = 0;
+		for (const auto& v : m_vxl_cloud)
+		{
+			double r2 = v.x * v.x + v.y * v.y + v.z * v.z;
+			if (r2 > max_r2) max_r2 = r2;
+		}
+		const double bound = std::sqrt(max_r2);
+		m_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
+		m_player_cx = 2 * m_vxl_half;
+		m_player_cy = 2 * m_vxl_half;
+		m_player_cf = 1; // single interactive frame
+	}
+}
+
+void CXCCFileView::player_enter()
+{
+	if (!is_playable_file())
+		return;
+	player_decode_frames();
+	if (m_player_cf <= 0)
+		return;
+	m_player_mode = true;
+	m_player_frame = 0;
+	m_player_playing = true;
+	if (m_ft == ft_vxl)
+	{
+		m_vxl_yaw = 0.0;
+		invalidate_vxl_splat();
+		m_vxl_pitch = 30.0 * 3.14159265358979323846 / 180.0;
+		m_vxl_dragging = false;
+	}
+	if (!m_player_controls_created)
+	{
+		CRect r(0, 0, 1, 1);
+		m_player_play.Create("Pause", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_PLAY);
+		m_player_reverse.Create("<<", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_REVERSE);
+		m_player_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
+		m_player_native.Create("Native", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_NATIVE);
+		m_player_slider.Create(WS_CHILD | TBS_HORZ | TBS_NOTICKS, r, this, IDC_PLAYER_SLIDER);
+		m_player_label.Create("", WS_CHILD | SS_LEFT, r, this, IDC_PLAYER_FRAME_LABEL);
+		m_player_fps_label.Create("FPS", WS_CHILD | SS_LEFT, r, this, IDC_PLAYER_FPS_LABEL);
+		m_player_fps_edit.Create(WS_CHILD | ES_NUMBER | ES_RIGHT | WS_BORDER, r, this, IDC_PLAYER_FPS_EDIT);
+		m_player_fps_spin.Create(WS_CHILD | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, r, this, IDC_PLAYER_FPS_SPIN);
+		m_player_fps_spin.SetBuddy(&m_player_fps_edit);
+		m_player_fps_spin.SetRange(1, 120);
+		m_player_play.SetFont(&m_font);
+		m_player_reverse.SetFont(&m_font);
+		m_player_grid.SetFont(&m_font);
+		m_player_native.SetFont(&m_font);
+		m_player_label.SetFont(&m_font);
+		m_player_fps_label.SetFont(&m_font);
+		m_player_fps_edit.SetFont(&m_font);
+		theme::apply_window(m_player_play.GetSafeHwnd());
+		theme::apply_window(m_player_reverse.GetSafeHwnd());
+		theme::apply_window(m_player_grid.GetSafeHwnd());
+		theme::apply_window(m_player_native.GetSafeHwnd());
+		theme::apply_window(m_player_slider.GetSafeHwnd());
+		theme::apply_window(m_player_label.GetSafeHwnd());
+		theme::apply_window(m_player_fps_label.GetSafeHwnd());
+		theme::apply_window(m_player_fps_edit.GetSafeHwnd());
+		theme::apply_window(m_player_fps_spin.GetSafeHwnd());
+
+		m_player_shadows.Create("Shadows", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_SHADOWS);
+		m_player_bg.Create("BG", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_BG);
+		for (int i = 0; i < 8; i++)
+		{
+			m_player_side[i].Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE0 + i);
+		}
+		m_player_side_custom.Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE_CUSTOM);
+		// Owner-draw: the system combobox refused to paint dark even with
+		// styles matching a known-working app's combo. Owner-draw is the
+		// pragmatic fix — paint it ourselves in WM_DRAWITEM and we get
+		// guaranteed theming with no uxtheme dependency.
+		m_player_iso_grid.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+			| CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
+			r, this, IDC_PLAYER_GRID_SEL);
+		m_player_iso_grid.AddString("No Grid");
+		m_player_iso_grid.AddString("TS Grid");
+		m_player_iso_grid.AddString("RA2 Grid");
+		m_player_iso_grid.SetCurSel(m_player_grid_mode);
+		m_player_shadows.SetFont(&m_font);
+		m_player_bg.SetFont(&m_font);
+		m_player_iso_grid.SetFont(&m_font);
+		theme::apply_window(m_player_shadows.GetSafeHwnd());
+		theme::apply_window(m_player_bg.GetSafeHwnd());
+		theme::apply_window(m_player_iso_grid.GetSafeHwnd());
+		// Combobox internals: theme the dropdown listbox + edit field too,
+		// otherwise the dropped-down list paints white in dark mode.
+		{
+			COMBOBOXINFO cbi = {};
+			cbi.cbSize = sizeof(cbi);
+			if (::GetComboBoxInfo(m_player_iso_grid.GetSafeHwnd(), &cbi))
+			{
+				if (cbi.hwndList) theme::apply_window(cbi.hwndList);
+				if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
+			}
+		}
+		for (int i = 0; i < 8; i++)
+			theme::apply_window(m_player_side[i].GetSafeHwnd());
+		theme::apply_window(m_player_side_custom.GetSafeHwnd());
+
+		m_player_controls_created = true;
+	}
+	const bool vxl = (m_ft == ft_vxl);
+	m_player_slider.SetRange(0, std::max(0, m_player_cf - 1));
+	m_player_slider.SetPos(0);
+	m_player_fps_edit.SetWindowText(n(m_player_fps).c_str());
+	m_player_fps_spin.SetPos(m_player_fps);
+	const int playback_show = vxl ? SW_HIDE : SW_SHOW;
+	m_player_play.ShowWindow(playback_show);
+	m_player_reverse.ShowWindow(playback_show);
+	m_player_reverse.SetCheck(m_player_reverse_dir ? BST_CHECKED : BST_UNCHECKED);
+	m_player_grid.ShowWindow(SW_SHOW);
+	m_player_native.ShowWindow(SW_SHOW);
+	m_player_native.SetCheck(m_player_native_size ? BST_CHECKED : BST_UNCHECKED);
+	m_player_slider.ShowWindow(playback_show);
+	m_player_label.ShowWindow(playback_show);
+	m_player_fps_label.ShowWindow(playback_show);
+	m_player_fps_edit.ShowWindow(playback_show);
+	m_player_fps_spin.ShowWindow(playback_show);
+	// Shadow/BG/SideColor controls are SHP-family only (not VXL).
+	const int shp_show = vxl ? SW_HIDE : SW_SHOW;
+	const bool can_shadows = !vxl && m_player_cf >= 2 && (m_player_cf % 2) == 0;
+	m_player_shadows.ShowWindow(shp_show);
+	m_player_shadows.EnableWindow(can_shadows ? TRUE : FALSE);
+	if (!can_shadows) m_player_shadows_on = false;
+	m_player_shadows.SetCheck(m_player_shadows_on ? BST_CHECKED : BST_UNCHECKED);
+	m_player_bg.ShowWindow(shp_show);
+	m_player_bg.SetCheck(m_player_bg_on ? BST_CHECKED : BST_UNCHECKED);
+	for (int i = 0; i < 8; i++)
+		m_player_side[i].ShowWindow(shp_show);
+	m_player_side_custom.ShowWindow(shp_show);
+	// Game Grid combobox shows for both SHP and VXL — the overlay applies in
+	// either case (already drawn for VXL via the post-stretch path below).
+	m_player_iso_grid.ShowWindow(SW_SHOW);
+	m_player_iso_grid.SetCurSel(m_player_grid_mode);
+	player_layout_controls();
+	player_update_label();
+	if (!vxl)
+		SetTimer(1, 1000 / std::max(1, m_player_fps), NULL);
+	else
+		m_player_playing = false;
+	SetScrollSizes(MM_TEXT, CSize(1, 1));
+	Invalidate();
+}
+
+void CXCCFileView::player_exit()
+{
+	if (m_player_mode)
+	{
+		KillTimer(1);
+		m_player_mode = false;
+		m_player_playing = false;
+	}
+	if (m_player_controls_created)
+	{
+		m_player_play.ShowWindow(SW_HIDE);
+		m_player_reverse.ShowWindow(SW_HIDE);
+		m_player_grid.ShowWindow(SW_HIDE);
+		m_player_native.ShowWindow(SW_HIDE);
+		m_player_slider.ShowWindow(SW_HIDE);
+		m_player_label.ShowWindow(SW_HIDE);
+		m_player_fps_label.ShowWindow(SW_HIDE);
+		m_player_fps_edit.ShowWindow(SW_HIDE);
+		m_player_fps_spin.ShowWindow(SW_HIDE);
+		m_player_shadows.ShowWindow(SW_HIDE);
+		m_player_bg.ShowWindow(SW_HIDE);
+		for (int i = 0; i < 8; i++)
+			m_player_side[i].ShowWindow(SW_HIDE);
+		m_player_side_custom.ShowWindow(SW_HIDE);
+		m_player_iso_grid.ShowWindow(SW_HIDE);
+	}
+	m_player_frames.clear();
+	m_vxl_cloud.clear();
+	m_vxl_dragging = false;
+	if (GetCapture() == this)
+		ReleaseCapture();
+	m_text_cache_valid = false;
+	Invalidate();
+}
+
+void CXCCFileView::player_toggle_play()
+{
+	m_player_playing = !m_player_playing;
+	if (m_player_controls_created)
+		m_player_play.SetWindowText(m_player_playing ? "Pause" : "Play");
+	if (m_player_playing)
+		SetTimer(1, 1000 / std::max(1, m_player_fps), NULL);
+	else
+		KillTimer(1);
+}
+
+void CXCCFileView::player_set_frame(int f)
+{
+	if (m_player_cf <= 0)
+		return;
+	int range = m_player_cf;
+	if (m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0)
+		range = m_player_cf / 2;
+	if (f < 0)
+		f = range - 1;
+	if (f >= range)
+		f = 0;
+	m_player_frame = f;
+	if (m_player_controls_created)
+		m_player_slider.SetPos(f);
+	player_update_label();
+	// Only invalidate the image area above the controls band; the controls paint themselves.
+	CRect cr;
+	GetClientRect(&cr);
+	cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::player_layout_controls()
+{
+	if (!m_player_controls_created)
+		return;
+	CRect cr;
+	GetClientRect(&cr);
+	const int H = 24;
+	const int pad = 4;
+	const bool vxl = is_vxl_view();
+	// Bottom row: transport controls (Play, <<, Grid, Native, slider, FPS).
+	int y = cr.bottom - H - pad;
+	int x = pad;
+	m_player_play.MoveWindow(x, y, 60, H);            x += 60 + pad;
+	m_player_reverse.MoveWindow(x, y, 30, H);         x += 30 + pad;
+	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
+	m_player_native.MoveWindow(x, y, 60, H);          x += 60 + pad;
+	int label_w = 110;
+	m_player_label.MoveWindow(x, y + 4, label_w, H - 8); x += label_w + pad;
+	int fps_label_w = 26;
+	m_player_fps_label.MoveWindow(x, y + 4, fps_label_w, H - 8); x += fps_label_w + 2;
+	int fps_w = 44;
+	m_player_fps_edit.MoveWindow(x, y, fps_w, H);     x += fps_w + pad;
+	int slider_x = x;
+	int slider_w = cr.right - slider_x - pad;
+	if (slider_w < 60) slider_w = 60;
+	m_player_slider.MoveWindow(slider_x, y, slider_w, H);
+	if (vxl)
+	{
+		// VXL: most transport controls are hidden, so the iso-grid combo
+		// sits to the right of the Native button on the single visible row.
+		// Slider/label/FPS positions above are computed but never shown.
+		int gx = pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
+		m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
+		return;
+	}
+	// Upper row (SHP family only): Shadows, BG, 8 side-color swatches.
+	int y2 = y - H - pad;
+	int x2 = pad;
+	m_player_shadows.MoveWindow(x2, y2, 64, H);       x2 += 64 + pad;
+	m_player_bg.MoveWindow(x2, y2, 36, H);            x2 += 36 + pad;
+	const int swatch = H;
+	for (int i = 0; i < 8; i++)
+	{
+		m_player_side[i].MoveWindow(x2, y2, swatch, H);
+		x2 += swatch + 2;
+	}
+	// 9th swatch — custom (opens color picker).
+	m_player_side_custom.MoveWindow(x2, y2, swatch, H); x2 += swatch + pad;
+	// Game Grid combo. Use a tall MoveWindow so the dropdown list fits.
+	m_player_iso_grid.MoveWindow(x2, y2, 90, H * 8);
+}
+
+void CXCCFileView::player_update_label()
+{
+	if (!m_player_controls_created)
+		return;
+	int total = m_player_cf;
+	if (m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0)
+		total = m_player_cf / 2;
+	string s = "Frame " + n(m_player_frame + 1) + " / " + n(total);
+	m_player_label.SetWindowText(s.c_str());
+}
+
+void CXCCFileView::player_draw(CDC* pDC)
+{
+	CRect cr;
+	GetClientRect(&cr);
+	const int controls_h = player_band_h();
+	int avail_w = cr.Width();
+	int avail_h = cr.Height() - controls_h;
+	if (avail_w < 1) avail_w = 1;
+	if (avail_h < 1) avail_h = 1;
+	if (m_player_cx <= 0 || m_player_cy <= 0)
+		return;
+
+	// VXL: rasterize the cached point cloud into a fresh framebuffer at the
+	// current yaw/pitch. When the interpolation mode is Nearest we point-
+	// splat into an 8bpp paletted buffer (sharp voxels). Otherwise we EWA-
+	// style splat into a 32bpp BGRA buffer with weighted color accumulation
+	// — this gives true anti-aliased voxel edges. The chosen path is
+	// signalled by which of vxl_buf8 / vxl_buf32 ends up populated.
+	Cvirtual_binary vxl_buf;
+	const byte* s = nullptr;
+	const DWORD* s32 = nullptr;
+	const bool vxl_smooth = is_vxl_view() && (theme::interp() != theme::interp_nearest);
+	if (is_vxl_view())
+	{
+		if (m_vxl_cloud.empty())
+			return;
+		const int c_pixels = m_player_cx * m_player_cy;
+		const double cosY = std::cos(m_vxl_yaw);
+		const double sinY = std::sin(m_vxl_yaw);
+		const double cosP = std::cos(m_vxl_pitch);
+		const double sinP = std::sin(m_vxl_pitch);
+
+		if (!vxl_smooth)
+		{
+			// Point splat into 8bpp framebuffer + per-pixel z-buffer.
+			byte* d = vxl_buf.write_start(c_pixels);
+			memset(d, 0, c_pixels);
+			vector<short> z_buf(c_pixels, SHRT_MIN);
+			for (const auto& v : m_vxl_cloud)
+			{
+				double rx = v.x * cosY - v.y * sinY;
+				double ry = v.x * sinY + v.y * cosY;
+				double rz = v.z;
+				double py = ry * cosP - rz * sinP;
+				double pz = ry * sinP + rz * cosP;
+				int sx_pix = static_cast<int>(rx) + m_vxl_half;
+				int sy_pix = -static_cast<int>(py) + m_vxl_half;
+				if (sx_pix < 0 || sx_pix >= m_player_cx || sy_pix < 0 || sy_pix >= m_player_cy)
+					continue;
+				int ofs = sx_pix + m_player_cx * sy_pix;
+				short depth = static_cast<short>(pz);
+				if (depth > z_buf[ofs])
+				{
+					z_buf[ofs] = depth;
+					d[ofs] = v.color;
+				}
+			}
+			s = vxl_buf.data();
+		}
+		else
+		{
+			// Cached: skip the entire splat if yaw/pitch/canvas/transparency
+			// haven't changed since last paint (slider scrubs, focus changes).
+			const bool tr = theme::shp_transparency();
+			const bool cb = theme::use_checkerboard();
+			const bool cache_hit = m_vxl_splat_cache.size() == static_cast<size_t>(c_pixels)
+				&& m_vxl_splat_yaw == m_vxl_yaw
+				&& m_vxl_splat_pitch == m_vxl_pitch
+				&& m_vxl_splat_cx == m_player_cx
+				&& m_vxl_splat_cy == m_player_cy
+				&& m_vxl_splat_tr == tr
+				&& m_vxl_splat_cb == cb;
+			if (cache_hit)
+				s32 = m_vxl_splat_cache.data();
+			else {
+			// 2D Gaussian splat into BGRA accumulator. Each voxel writes a
+			// small footprint (radius ~1.2 px) weighted by exp(-d^2/2*sigma^2).
+			// Z-buffer is per-pixel: a fragment contributes only if its depth
+			// is within an epsilon of the deepest pixel seen (so closer voxels
+			// fully occlude farther ones, but co-planar voxels blend at edges).
+			//
+			// Background follows the SHP transparency toggle: off = paint
+			// uncovered pixels with the palette's index-0 color (matches the
+			// Nearest path, which goes through draw_image8 + palette lookup);
+			// on = paint the alpha checkerboard. Without this, the smooth path
+			// would always show black where no voxel hit, diverging from
+			// Nearest as the user toggled interpolation modes.
+			m_vxl_splat_cache.assign(c_pixels, 0u);
+			{
+				const COLORREF ck_a = theme::checker_a();
+				const COLORREF ck_b = theme::checker_b();
+				const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
+				const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
+				const DWORD bg_solid = m_color_table[0];
+				for (int y = 0; y < m_player_cy; y++)
+					for (int x = 0; x < m_player_cx; x++)
+						m_vxl_splat_cache[x + m_player_cx * y] = tr
+							? ((((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d)
+							: bg_solid;
+			}
+			DWORD* dst32 = m_vxl_splat_cache.data();
+			std::vector<float> accW(c_pixels, 0.0f);
+			std::vector<float> accB(c_pixels, 0.0f);
+			std::vector<float> accG(c_pixels, 0.0f);
+			std::vector<float> accR(c_pixels, 0.0f);
+			// Float z-buffer at sub-pixel precision. The previous short
+			// quantization made coplanar voxels of a single flat surface
+			// round to slightly different depths under oblique rotation,
+			// which combined with the z-eps "near-coplanar blend" branch
+			// caused back-face colors to bleed into front-face pixels.
+			std::vector<float> z_buf(c_pixels, -FLT_MAX);
+			const float sigma = 0.7f;
+			const float two_sigma2 = 2.0f * sigma * sigma;
+			const int kr = 1; // splat radius in pixels (3x3 footprint)
+			for (const auto& v : m_vxl_cloud)
+			{
+				double rx = v.x * cosY - v.y * sinY;
+				double ry = v.x * sinY + v.y * cosY;
+				double rz = v.z;
+				double py = ry * cosP - rz * sinP;
+				double pz = ry * sinP + rz * cosP;
+				const double fx = rx + m_vxl_half;
+				const double fy = -py + m_vxl_half;
+				const int cx = static_cast<int>(std::floor(fx));
+				const int cy = static_cast<int>(std::floor(fy));
+				const float depth = static_cast<float>(pz);
+				DWORD bgra = m_color_table[v.color];
+				const float B = static_cast<float>(bgra & 0xff);
+				const float G = static_cast<float>((bgra >> 8) & 0xff);
+				const float R = static_cast<float>((bgra >> 16) & 0xff);
+				for (int dy = -kr; dy <= kr; dy++)
+				{
+					int py_pix = cy + dy;
+					if (py_pix < 0 || py_pix >= m_player_cy) continue;
+					for (int dx = -kr; dx <= kr; dx++)
+					{
+						int px_pix = cx + dx;
+						if (px_pix < 0 || px_pix >= m_player_cx) continue;
+						float ddx = static_cast<float>(px_pix + 0.5 - fx);
+						float ddy = static_cast<float>(py_pix + 0.5 - fy);
+						float d2 = ddx * ddx + ddy * ddy;
+						float w = std::exp(-d2 / two_sigma2);
+						if (w < 0.01f) continue;
+						int ofs = px_pix + m_player_cx * py_pix;
+						// Strict z-test (no eps blending): closer fragment
+						// supersedes; equal-depth (only same-surface coplanar
+						// voxels at float precision) accumulates. The Gaussian
+						// footprint then anti-aliases the silhouette, which is
+						// the only place we actually want blending.
+						if (depth < z_buf[ofs])
+							continue;
+						if (depth > z_buf[ofs])
+						{
+							accW[ofs] = 0; accB[ofs] = 0; accG[ofs] = 0; accR[ofs] = 0;
+							z_buf[ofs] = depth;
+						}
+						accW[ofs] += w;
+						accB[ofs] += w * B;
+						accG[ofs] += w * G;
+						accR[ofs] += w * R;
+					}
+				}
+			}
+			for (int i = 0; i < c_pixels; i++)
+			{
+				if (accW[i] <= 0.0f)
+					continue;
+				float inv = 1.0f / accW[i];
+				int b = static_cast<int>(accB[i] * inv + 0.5f);
+				int g = static_cast<int>(accG[i] * inv + 0.5f);
+				int r = static_cast<int>(accR[i] * inv + 0.5f);
+				if (b > 255) b = 255;
+				if (g > 255) g = 255;
+				if (r > 255) r = 255;
+				dst32[i] = static_cast<DWORD>(b) | (static_cast<DWORD>(g) << 8) | (static_cast<DWORD>(r) << 16);
+			}
+			// Stamp cache key.
+			m_vxl_splat_yaw = m_vxl_yaw;
+			m_vxl_splat_pitch = m_vxl_pitch;
+			m_vxl_splat_cx = m_player_cx;
+			m_vxl_splat_cy = m_player_cy;
+			m_vxl_splat_tr = tr;
+			m_vxl_splat_cb = cb;
+			s32 = m_vxl_splat_cache.data();
+			} // end of cache-miss block
+		}
+	}
+	else
+	{
+		if (m_player_frames.empty())
+			return;
+		s = m_player_frames[m_player_frame].data();
+	}
+	int cx_s = m_player_cx;
+	int cy_s = m_player_cy;
+	int s_pct;
+	if (m_player_native_size)
+	{
+		s_pct = 100;
+	}
+	else
+	{
+		int sx = avail_w * 100 / cx_s;
+		int sy = avail_h * 100 / cy_s;
+		s_pct = std::min(sx, sy);
+		if (s_pct < 1) s_pct = 1;
+		if (s_pct > 1600) s_pct = 1600;
+	}
+	int cx_d = cx_s * s_pct / 100;
+	int cy_d = cy_s * s_pct / 100;
+	int x_d = (avail_w - cx_d) / 2;
+	int y_d = (avail_h - cy_d) / 2;
+	if (x_d < 0) x_d = 0;
+	if (y_d < 0) y_d = 0;
+
+	// Paint the four margins around the centered image with theme::bg so
+	// stale pixels from the previous frame don't bleed through. Doing it
+	// here (instead of in OnEraseBkgnd) lets us drag the slider with
+	// bErase=FALSE — no full-area solid flash on every drag tick.
+	{
+		const COLORREF bg = theme::bg();
+		if (y_d > 0)
+			pDC->FillSolidRect(0, 0, avail_w, y_d, bg);
+		int img_bottom = y_d + cy_d;
+		if (img_bottom < avail_h)
+			pDC->FillSolidRect(0, img_bottom, avail_w, avail_h - img_bottom, bg);
+		if (x_d > 0)
+			pDC->FillSolidRect(0, y_d, x_d, cy_d, bg);
+		int img_right = x_d + cx_d;
+		if (img_right < avail_w)
+			pDC->FillSolidRect(img_right, y_d, avail_w - img_right, cy_d, bg);
+	}
+
+	CDC mem_dc;
+	mem_dc.CreateCompatibleDC(pDC);
+	HBITMAP h_dib;
+	DWORD* p_dib;
+	{
+		BITMAPINFO bmi;
+		ZeroMemory(&bmi, sizeof(bmi));
+		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bmi.bmiHeader.biWidth = cx_s;
+		bmi.bmiHeader.biHeight = -cy_s;
+		bmi.bmiHeader.biPlanes = 1;
+		bmi.bmiHeader.biBitCount = 32;
+		bmi.bmiHeader.biCompression = BI_RGB;
+		bmi.bmiHeader.biSizeImage = cx_s * cy_s * 4;
+		h_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&p_dib), 0, 0);
+	}
+	HGDIOBJ old = mem_dc.SelectObject(h_dib);
+	if (s32)
+	{
+		memcpy(p_dib, s32, static_cast<size_t>(cx_s) * cy_s * 4);
+	}
+	else
+	{
+		// Paletted SHP/WSA path with three optional ASE-style modifiers:
+		//   - BG off: index 0 paints as alpha-checker (transparent preview).
+		//   - Side-color remap: indices 16..31 retinted via brightness * preset.
+		//   - Shadow pair: when on and cf is even, blend frame[f + cf/2] black
+		//     at 120/255 alpha over the body frame (engine convention).
+		const bool show_bg = m_player_bg_on;
+		const int side = m_player_side_idx;
+		const COLORREF ck_a = theme::checker_a();
+		const COLORREF ck_b = theme::checker_b();
+		const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
+		const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
+		float remap_r = 0, remap_g = 0, remap_b = 0;
+		if (side >= 0 && side < 8)
+		{
+			remap_r = GetRValue(k_side_colors[side]);
+			remap_g = GetGValue(k_side_colors[side]);
+			remap_b = GetBValue(k_side_colors[side]);
+		}
+		else if (side == 8)
+		{
+			remap_r = GetRValue(m_player_side_custom_color);
+			remap_g = GetGValue(m_player_side_custom_color);
+			remap_b = GetBValue(m_player_side_custom_color);
+		}
+		const bool shadow_on = m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0;
+		const byte* sshad = nullptr;
+		if (shadow_on)
+		{
+			int shadow_idx = m_player_frame + m_player_cf / 2;
+			if (shadow_idx >= 0 && shadow_idx < static_cast<int>(m_player_frames.size()))
+				sshad = m_player_frames[shadow_idx].data();
+		}
+		const int n = cx_s * cy_s;
+		for (int i = 0; i < n; i++)
+		{
+			byte idx = s[i];
+			DWORD bgra;
+			if (idx == 0)
+			{
+				if (show_bg)
+					bgra = m_color_table[0];
+				else
+				{
+					int x = i % cx_s, y = i / cx_s;
+					bgra = (((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d;
+				}
+			}
+			else
+			{
+				bgra = m_color_table[idx];
+				if (side >= 0 && idx >= 16 && idx <= 31)
+				{
+					float b = static_cast<float>(bgra & 0xff);
+					float g = static_cast<float>((bgra >> 8) & 0xff);
+					float r = static_cast<float>((bgra >> 16) & 0xff);
+					float bright = std::max(r, std::max(g, b)) / 255.0f * 1.25f;
+					int rr = static_cast<int>(remap_r * bright + 0.5f);
+					int gg = static_cast<int>(remap_g * bright + 0.5f);
+					int bb = static_cast<int>(remap_b * bright + 0.5f);
+					if (rr > 255) rr = 255; if (gg > 255) gg = 255; if (bb > 255) bb = 255;
+					bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
+				}
+			}
+			// Shadow overlay: black tint at 47% alpha over the body pixel.
+			if (sshad && sshad[i] != 0)
+			{
+				float fa = 120.0f / 255.0f;
+				float r = static_cast<float>((bgra >> 16) & 0xff) * (1.0f - fa);
+				float g = static_cast<float>((bgra >> 8) & 0xff) * (1.0f - fa);
+				float b = static_cast<float>(bgra & 0xff) * (1.0f - fa);
+				int rr = static_cast<int>(r + 0.5f), gg = static_cast<int>(g + 0.5f), bb = static_cast<int>(b + 0.5f);
+				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
+			}
+			p_dib[i] = bgra;
+		}
+	}
+	// Game Grid overlay (isometric guide, ASE convention). Drawn into the
+	// source DIB before scaling so the lines participate in the chosen
+	// interpolation. Works for SHP (skips sprite pixels via index 0) and
+	// VXL (skips covered pixels via the BGRA buffer's non-bg color).
+	if (m_player_grid_mode > 0)
+	{
+		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
+		const int gcx = cx_s / 2;
+		const int gcy = cy_s;
+		const DWORD line = 0x00FFFFFF;
+		// For VXL we need to know what counts as a "background" pixel — the
+		// splat path initializes the buffer to either palette[0] or the
+		// alpha-checker, both of which are present in s32 untouched.
+		// Easiest sprite-content check that works for both: compare against
+		// the top-left pixel of the rendered DIB (always a background pixel
+		// for centered models). If the model fills the canvas we just skip
+		// the grid for that pixel.
+		const DWORD bg_probe = p_dib[0];
+		for (int py = 0; py < cy_s; py++)
+		{
+			for (int px = 0; px < cx_s; px++)
+			{
+				int i = px + cx_s * py;
+				if (s)
+				{
+					if (s[i] != 0) continue; // SHP: sprite pixel — keep
+				}
+				else
+				{
+					if (p_dib[i] != bg_probe) continue; // VXL: covered — keep
+				}
+				int dx = px - gcx;
+				int dy = py - gcy;
+				int u = dx + 2 * dy;
+				int v = 2 * dy - dx;
+				int au = u % tileW; if (au < 0) au += tileW;
+				int av = v % tileW; if (av < 0) av += tileW;
+				if (au < 2 || av < 2 || au > tileW - 2 || av > tileW - 2)
+					p_dib[i] = line;
+			}
+		}
+	}
+	theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
+	mem_dc.SelectObject(old);
+	DeleteObject(h_dib);
+}
+
+void CXCCFileView::OnSize(UINT nType, int cx, int cy)
+{
+	CScrollView::OnSize(nType, cx, cy);
+	if (m_player_mode)
+		player_layout_controls();
+}
+
+void CXCCFileView::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 1 && m_player_mode && m_player_playing && m_player_cf > 0)
+	{
+		int range = m_player_cf;
+		if (m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0)
+			range = m_player_cf / 2;
+		int next;
+		if (m_player_reverse_dir)
+		{
+			next = m_player_frame - 1;
+			if (next < 0)
+				next = range - 1;
+		}
+		else
+		{
+			next = m_player_frame + 1;
+			if (next >= range)
+				next = 0;
+		}
+		player_set_frame(next);
+		return;
+	}
+	CScrollView::OnTimer(nIDEvent);
+}
+
+void CXCCFileView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	if (m_player_mode && pScrollBar && pScrollBar->GetSafeHwnd() == m_player_slider.GetSafeHwnd())
+	{
+		int pos = m_player_slider.GetPos();
+		if (pos != m_player_frame)
+		{
+			// Pause auto-advance while the user is scrubbing — prevents the
+			// timer from fighting the drag and stuttering between two frames.
+			if (m_player_playing && nSBCode == TB_THUMBTRACK)
+				KillTimer(1);
+			m_player_frame = pos;
+			player_update_label();
+			// Partial invalidate of the image area only, no erase. Full
+			// Invalidate() would repaint the controls band too, making the
+			// slider thumb flicker on every drag tick.
+			CRect cr; GetClientRect(&cr);
+			cr.bottom -= player_band_h();
+			if (cr.bottom < cr.top) cr.bottom = cr.top;
+			InvalidateRect(&cr, FALSE);
+			// Resume the timer when the drag ends.
+			if (m_player_playing && nSBCode == TB_ENDTRACK)
+				SetTimer(1, 1000 / std::max(1, m_player_fps), NULL);
+		}
+		return;
+	}
+	CScrollView::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CXCCFileView::OnPlayerPlay()
+{
+	player_toggle_play();
+}
+
+void CXCCFileView::OnPlayerGrid()
+{
+	player_exit();
+}
+
+void CXCCFileView::OnPlayerReverse()
+{
+	if (!m_player_controls_created)
+		return;
+	m_player_reverse_dir = m_player_reverse.GetCheck() == BST_CHECKED;
+}
+
+void CXCCFileView::OnPlayerNative()
+{
+	if (!m_player_controls_created)
+		return;
+	m_player_native_size = m_player_native.GetCheck() == BST_CHECKED;
+	CRect cr;
+	GetClientRect(&cr);
+	cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, TRUE);
+}
+
+HBRUSH CXCCFileView::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (theme::is_dark())
+	{
+		pDC->SetTextColor(theme::text());
+		pDC->SetBkColor(theme::bg());
+		pDC->SetBkMode(TRANSPARENT);
+		return theme::bg_brush();
+	}
+	return CScrollView::OnCtlColor(pDC, pWnd, nCtlColor);
+}
+
+void CXCCFileView::reapply_player_theme()
+{
+	if (!m_player_controls_created)
+		return;
+	HWND ctrls[] = {
+		m_player_play.GetSafeHwnd(),
+		m_player_reverse.GetSafeHwnd(),
+		m_player_grid.GetSafeHwnd(),
+		m_player_native.GetSafeHwnd(),
+		m_player_slider.GetSafeHwnd(),
+		m_player_label.GetSafeHwnd(),
+		m_player_fps_label.GetSafeHwnd(),
+		m_player_fps_edit.GetSafeHwnd(),
+		m_player_fps_spin.GetSafeHwnd(),
+		m_player_shadows.GetSafeHwnd(),
+		m_player_bg.GetSafeHwnd(),
+		m_player_iso_grid.GetSafeHwnd(),
+		m_player_side_custom.GetSafeHwnd(),
+	};
+	for (HWND h : ctrls)
+		if (h)
+		{
+			theme::apply_window(h);
+			::InvalidateRect(h, NULL, TRUE);
+		}
+	for (int i = 0; i < 8; i++)
+		if (HWND h = m_player_side[i].GetSafeHwnd())
+		{
+			theme::apply_window(h);
+			::InvalidateRect(h, NULL, TRUE);
+		}
+	// Comboboxes are composed: closed-state edit/button (themed by apply_window
+	// on the combobox HWND) + dropped-down listbox (separate HWND). Pull the
+	// listbox out via CB_GETCOMBOBOXINFO and theme it explicitly so the
+	// dropdown also paints dark.
+	if (HWND h = m_player_iso_grid.GetSafeHwnd())
+	{
+		COMBOBOXINFO cbi = {};
+		cbi.cbSize = sizeof(cbi);
+		if (::GetComboBoxInfo(h, &cbi))
+		{
+			if (cbi.hwndList) theme::apply_window(cbi.hwndList);
+			if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
+		}
+	}
+}
+
+void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)
+{
+	// Owner-draw Game Grid combobox: paint dark in dark mode, system colors
+	// otherwise. Same handler covers the closed-state field and each
+	// dropped-down item (CtlType=ODT_COMBOBOX in both cases, itemID =
+	// current sel for the closed state, item index for dropdown items).
+	if (dis && nIDCtl == IDC_PLAYER_GRID_SEL && dis->CtlType == ODT_COMBOBOX)
+	{
+		HDC hdc = dis->hDC;
+		RECT r = dis->rcItem;
+		const bool dark = theme::is_dark();
+		const bool selected = (dis->itemState & ODS_SELECTED) != 0;
+		COLORREF bk = dark
+			? (selected ? theme::accent() : theme::bg())
+			: (selected ? ::GetSysColor(COLOR_HIGHLIGHT) : ::GetSysColor(COLOR_WINDOW));
+		COLORREF fg = dark
+			? (selected ? theme::accent_text() : theme::text())
+			: (selected ? ::GetSysColor(COLOR_HIGHLIGHTTEXT) : ::GetSysColor(COLOR_WINDOWTEXT));
+		HBRUSH bkbr = ::CreateSolidBrush(bk);
+		::FillRect(hdc, &r, bkbr);
+		::DeleteObject(bkbr);
+		if (static_cast<int>(dis->itemID) >= 0)
+		{
+			char buf[64] = {};
+			m_player_iso_grid.GetLBText(dis->itemID, buf);
+			::SetBkMode(hdc, TRANSPARENT);
+			::SetTextColor(hdc, fg);
+			RECT tr = r; tr.left += 4;
+			::DrawTextA(hdc, buf, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+		}
+		if (dis->itemState & ODS_FOCUS)
+			::DrawFocusRect(hdc, &r);
+		return;
+	}
+	const bool is_preset = dis && nIDCtl >= IDC_PLAYER_SIDE0 && nIDCtl <= IDC_PLAYER_SIDE7;
+	const bool is_custom = dis && nIDCtl == IDC_PLAYER_SIDE_CUSTOM;
+	if (!is_preset && !is_custom)
+	{
+		CScrollView::OnDrawItem(nIDCtl, dis);
+		return;
+	}
+	HDC hdc = dis->hDC;
+	RECT r = dis->rcItem;
+	int slot;          // active-state index this swatch corresponds to
+	COLORREF fill;
+	if (is_preset)
+	{
+		slot = nIDCtl - IDC_PLAYER_SIDE0;
+		fill = k_side_colors[slot];
+	}
+	else
+	{
+		slot = 8;
+		fill = m_player_side_custom_color;
+	}
+	// Solid color fill.
+	HBRUSH brush = ::CreateSolidBrush(fill);
+	::FillRect(hdc, &r, brush);
+	::DeleteObject(brush);
+	// "+" hint on the unselected custom swatch so it's discoverable.
+	if (is_custom && m_player_side_idx != 8)
+	{
+		::SetBkMode(hdc, TRANSPARENT);
+		::SetTextColor(hdc, RGB(255, 255, 255));
+		::DrawTextA(hdc, "+", 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	}
+	// Active outline if this swatch is currently selected.
+	if (m_player_side_idx == slot)
+	{
+		HPEN pen = ::CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+		HGDIOBJ old = ::SelectObject(hdc, pen);
+		HGDIOBJ old_b = ::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+		::Rectangle(hdc, r.left, r.top, r.right, r.bottom);
+		::SelectObject(hdc, old);
+		::SelectObject(hdc, old_b);
+		::DeleteObject(pen);
+	}
+}
+
+void CXCCFileView::OnPlayerShadows()
+{
+	if (!m_player_controls_created) return;
+	m_player_shadows_on = m_player_shadows.GetCheck() == BST_CHECKED;
+	// Pair-mode reduces navigable range to cf/2; clamp current frame.
+	if (m_player_shadows_on)
+	{
+		int max_f = std::max(0, m_player_cf / 2 - 1);
+		if (m_player_frame > max_f) m_player_frame = 0;
+		m_player_slider.SetRange(0, max_f);
+	}
+	else
+	{
+		m_player_slider.SetRange(0, std::max(0, m_player_cf - 1));
+	}
+	m_player_slider.SetPos(m_player_frame);
+	player_update_label();
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnPlayerBg()
+{
+	if (!m_player_controls_created) return;
+	m_player_bg_on = m_player_bg.GetCheck() == BST_CHECKED;
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnPlayerSide(UINT id)
+{
+	int i = static_cast<int>(id) - IDC_PLAYER_SIDE0;
+	if (i < 0 || i > 7) return;
+	// Toggle: clicking the active swatch clears.
+	m_player_side_idx = (m_player_side_idx == i) ? -1 : i;
+	for (int k = 0; k < 8; k++)
+		m_player_side[k].Invalidate();
+	m_player_side_custom.Invalidate();
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnPlayerSideCustom()
+{
+	// Open color picker. If user accepts, activate slot 8 with the chosen color.
+	// Clicking the active custom swatch (without changing color) clears remap.
+	if (m_player_side_idx == 8)
+	{
+		m_player_side_idx = -1;
+		for (int k = 0; k < 8; k++)
+			m_player_side[k].Invalidate();
+		m_player_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		return;
+	}
+	CColorDialog dlg(m_player_side_custom_color, CC_FULLOPEN | CC_RGBINIT, this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	m_player_side_custom_color = dlg.GetColor();
+	m_player_side_idx = 8;
+	for (int k = 0; k < 8; k++)
+		m_player_side[k].Invalidate();
+	m_player_side_custom.Invalidate();
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnPlayerGridSel()
+{
+	if (!m_player_controls_created) return;
+	int sel = m_player_iso_grid.GetCurSel();
+	if (sel == CB_ERR) sel = 0;
+	m_player_grid_mode = sel;
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnPlayerFpsChange()
+{
+	if (!m_player_controls_created)
+		return;
+	CString s;
+	m_player_fps_edit.GetWindowText(s);
+	int v = atoi(s);
+	if (v < 1) v = 1;
+	if (v > 120) v = 120;
+	if (v != m_player_fps)
+	{
+		m_player_fps = v;
+		if (m_player_mode && m_player_playing)
+		{
+			KillTimer(1);
+			SetTimer(1, 1000 / m_player_fps, NULL);
+		}
+	}
 }
 
 void CXCCFileView::auto_select()

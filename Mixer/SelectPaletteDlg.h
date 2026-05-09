@@ -11,6 +11,7 @@ public:
 	void update_list(int parent_id, int current_palette);
 	void insert_tree_entry(int parent_id, HTREEITEM parent_item);
 	void set(CMainFrame* main_frame, t_pal_map_list pal_map_list, t_pal_list pal_list);
+	void rebuild_tree();
 	CSelectPaletteDlg(CWnd* pParent = NULL);   // standard constructor
 
 	int current_palette() const
@@ -41,7 +42,10 @@ protected:
 	afx_msg void OnSelchangedTree(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnItemchangedList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLoadFolder();
+	afx_msg void OnLoadMix();
 	//}}AFX_MSG
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 private:
 	t_pal_map_list m_pal_map_list;

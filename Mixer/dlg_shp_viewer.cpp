@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "dlg_shp_viewer.h"
+#include "theme.h"
 
 Cdlg_shp_viewer::Cdlg_shp_viewer(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(Cdlg_shp_viewer::IDD, pParent, "shp_viewer_dlg")
@@ -23,7 +24,15 @@ BEGIN_MESSAGE_MAP(Cdlg_shp_viewer, ETSLayoutDialog)
 	ON_WM_TIMER()
 	ON_BN_CLICKED(IDC_PLAY, OnPlay)
 	//}}AFX_MSG_MAP
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+HBRUSH Cdlg_shp_viewer::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(), pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+		return br;
+	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 void Cdlg_shp_viewer::write(Cvideo_decoder* decoder)
 {
@@ -76,7 +85,8 @@ BOOL Cdlg_shp_viewer::OnInitDialog()
 	show_frame();
 	m_last_access = 0;
 	m_timer_id = SetTimer(1, 100, NULL);
-	return true;	
+	theme::apply_dialog(GetSafeHwnd());
+	return true;
 }
 
 void Cdlg_shp_viewer::OnTimer(UINT nIDEvent) 
