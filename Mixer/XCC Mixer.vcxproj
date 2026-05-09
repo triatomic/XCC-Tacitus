@@ -74,8 +74,7 @@
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <VcpkgUseStatic>
-    </VcpkgUseStatic>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -88,7 +87,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
-      <AdditionalIncludeDirectories>..\vcpkg_installed\x86-windows\x86-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\vcpkg_installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -184,6 +183,8 @@
     </ClCompile>
     <ClCompile Include="SearchFileDlg.cpp">
     </ClCompile>
+    <ClCompile Include="SearchInPaneDlg.cpp">
+    </ClCompile>
     <ClCompile Include="SearchStringDlg.cpp">
     </ClCompile>
     <ClCompile Include="SelectPaletteDlg.cpp">
@@ -234,6 +235,7 @@
     <ClInclude Include="ResizeDlg.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="SearchFileDlg.h" />
+    <ClInclude Include="SearchInPaneDlg.h" />
     <ClInclude Include="SearchStringDlg.h" />
     <ClInclude Include="SelectPaletteDlg.h" />
     <ClInclude Include="shortcut.h" />
