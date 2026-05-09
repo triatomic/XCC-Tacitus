@@ -15,10 +15,15 @@ static string get_fname()
 
 static int get_ft_crc()
 {
+	// Sentinel mixed in to invalidate older caches whose entries were built
+	// by a different probe path. Bump when the magic_dispatch / probe order
+	// changes in cc_file.cpp so old type-tables don't get reused.
+	static const char* probe_version = "probe-v2";
 	Ccrc crc;
 	crc.init();
 	for (int i = 0; i < ft_count; i++)
 		crc.do_block(ft_name[i], strlen(ft_name[i]));
+	crc.do_block(probe_version, strlen(probe_version));
 	return crc.get_crc();
 }
 

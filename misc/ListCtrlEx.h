@@ -2,6 +2,22 @@
 
 #include <string>
 
+// Optional theme hook. When set, CListCtrlEx::OnCustomDraw will pull row
+// colors from this provider instead of using the hardcoded light-mode
+// alternating rows. Each app (Mixer, XCCD2D, ...) installs its own provider
+// at startup; Library code stays decoupled from any specific theme module.
+struct CListCtrlEx_theme
+{
+	bool (*is_dark)();        // true => use dark colors; false => default light alternating rows
+	COLORREF (*row_bg)();     // background for even rows (and odd rows in dark)
+	COLORREF (*row_bg_alt)(); // background for odd rows (light mode); ignored in dark
+	COLORREF (*text)();       // foreground text color (dark mode only)
+	COLORREF (*grid)();       // grid line color (dark mode only); row + column separators
+	bool (*show_grid)();      // when true, draw row + column separators in dark mode
+};
+
+void CListCtrlEx_set_theme(const CListCtrlEx_theme* hook);
+
 class CListCtrlEx: public CListCtrl
 {
 public:

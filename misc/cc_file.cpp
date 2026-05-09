@@ -318,6 +318,74 @@ Ccc_file::Ccc_file(bool read_on_open) :
 
 #ifndef NO_MIX_SUPPORT
 #ifndef NO_FT_SUPPORT
+
+// Magic-byte prefilter. For formats with a strong, unambiguous prefix the
+// full ~30-probe chain is wasted work — a 4-19 byte compare rules everything
+// else out. We *only* short-circuit when the prefix is unique enough that no
+// other Westwood format could plausibly start with these bytes; even then we
+// stick to formats whose Cxxx_file::is_valid() has no extra structural check
+// beyond the prefix (PNG, OGG, DDS, BINK, VOC). JPEG keeps a lighter check
+// in is_valid (size threshold + magic), so we still skip straight to it.
+//
+// Anything else (MP3 ID3 tag — too short / common; CSF/VQA/XCC/XIF/W3D —
+// header-versioned; SHP/TMP/AUD/VXL/HVA/VQP/FNT/CPS/MIX/PAK/BIG/WSA/ST/BIN —
+// no magic) falls through to the full probe so its is_valid() still gates
+// the classification.
+static t_file_type magic_dispatch(const byte* p, size_t size)
+{
+	if (size < 4)
+		return ft_unknown;
+	const auto u32 = [](const byte* b) -> uint32_t {
+		return uint32_t(b[0]) | uint32_t(b[1]) << 8 | uint32_t(b[2]) << 16 | uint32_t(b[3]) << 24;
+	};
+	const uint32_t m = u32(p);
+	// PNG: 89 50 4E 47 0D 0A 1A 0A — 8-byte exact, no false positives.
+	if (size >= 8 && m == 0x474E5089u && p[4] == 0x0D && p[5] == 0x0A && p[6] == 0x1A && p[7] == 0x0A)
+		return ft_png;
+	// OGG: "OggS"
+	if (m == 0x5367674Fu)
+		return ft_ogg;
+	// DDS: "DDS "
+	if (m == 0x20534444u)
+		return ft_dds;
+	// BINK: "BIKi"
+	if (m == 0x696B4942u)
+		return ft_bink;
+	// VOC: full "Creative Voice File" prefix, 19 bytes.
+	if (size >= 19 && !memcmp(p, "Creative Voice File", 19))
+		return ft_voc;
+	// JPEG: FF D8 FF — 3 bytes is enough; no other Westwood format starts
+	// with those, and Cjpeg_file::is_valid does the same prefix check anyway.
+	if (p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF)
+		return ft_jpeg;
+	// MP3: deliberately NOT shortcut here. "ID3" is only 3 bytes and the
+	// existing Cmp3_file probe validates the first frame header, not the
+	// ID3 tag — a binary file beginning with bytes 49 44 33 would otherwise
+	// be misclassified as mp3 without that gate. Let it fall through.
+	return ft_unknown;
+}
+
+// Cheap "looks like an INI file" check for the first ~4 KiB of a text-y
+// buffer. Only when this returns true do we run the heavy map/pkt INI
+// readers, each of which scans the whole file. Without this gate, every
+// large text/CSV/log file paid 4-5 full INI parses to be classified as
+// ft_text.
+static bool looks_like_ini(const byte* p, size_t size)
+{
+	const size_t n = std::min<size_t>(size, 4 << 10);
+	for (size_t i = 0; i + 1 < n; i++)
+	{
+		// Match a `[X` pattern at start-of-line or buffer-start, where X is
+		// an ASCII letter — covers `[General]`, `[Map]`, etc.
+		if (p[i] == '[' && (isalpha(p[i + 1]) || p[i + 1] == '_'))
+		{
+			if (i == 0 || p[i - 1] == '\n' || p[i - 1] == '\r')
+				return true;
+		}
+	}
+	return false;
+}
+
 	t_file_type Ccc_file::get_file_type(bool fast)
 	{
 		Cvirtual_binary data;
@@ -338,6 +406,14 @@ Ccc_file::Ccc_file(bool read_on_open) :
 			if (read(data.write_start(size), size))
 				return ft_unknown;
 			seek(0);
+		}
+		// Magic-byte short-circuit: if the first few bytes uniquely identify
+		// a format, return immediately. Saves ~30 load/is_valid probes per
+		// matching file. See magic_dispatch above for the candidate set.
+		{
+			t_file_type m_ft = magic_dispatch(data.data(), size);
+			if (m_ft != ft_unknown)
+				return m_ft;
 		}
 		Caud_file aud_f;
 		Cbin_file bin_f;
@@ -473,6 +549,15 @@ Ccc_file::Ccc_file(bool read_on_open) :
 		{
 			//if (fast)
 			//	return ft_text;
+			// Skip the heavy INI / map / pkt parses entirely unless the buffer
+			// looks like an INI (a `[Section]` header in the first 4 KiB).
+			// Without this, every plain text/CSV/log paid 5 full-buffer parses.
+			if (!looks_like_ini(data.data(), size))
+			{
+				if (m_fext == ".ini")
+					return ft_ini;
+				return ft_text;
+			}
 			Cvirtual_tfile tf;
 			tf.load_data(data);
 			Cnull_ini_reader ir;

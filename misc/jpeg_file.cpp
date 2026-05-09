@@ -136,11 +136,23 @@ int jpeg_file_write(const string& name, const byte* image, const t_palette_entry
 
 	if (palette || pixel == 3)
 	{
-		auto r = reinterpret_cast<const t_palette_entry*>(image);
+		// When `palette` is set, the expanded RGB pixels live in `s` (the
+		// per-pixel palette lookup populated above). When `palette` is null
+		// and pixel == 3, the caller already passed RGB pixels in `image`.
+		// Either way, libjpeg consumes 3 bytes per pixel, so the scanline
+		// pointer must reference the RGB buffer, not the paletted `image`.
+		// Mirror the other branches: hand libjpeg a fresh per-row pointer
+		// (tmp_line_p) so any internal pointer mutation can't drift our row
+		// stride. Cast through byte* so jpeg_write_scanlines sees a
+		// byte** scanline array per its API contract.
+		auto r = palette
+			? reinterpret_cast<const byte*>(static_cast<const t_palette_entry*>(s))
+			: image;
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
-			jpeg_write_scanlines(&cinfo, const_cast<byte**>(reinterpret_cast<const byte**>(&r)), 1);
-			r += cx;
+			byte* tmp_line_p = const_cast<byte*>(r);
+			jpeg_write_scanlines(&cinfo, &tmp_line_p, 1);
+			r += cx * 3;
 		}
 	}
 	else if (pixel > 3)

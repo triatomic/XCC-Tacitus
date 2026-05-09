@@ -37,17 +37,24 @@ static void read_list(t_game game, const char*& s)
 	}
 }
 
+int mix_database::load_from_buffer(const void* data, int size)
+{
+	if (!data || size < 16)
+		return 1;
+	const char* base = reinterpret_cast<const char*>(data);
+	const char* p = base;
+	read_list(game_td, p);	//td for default id value (td, ra)
+	p = base;				//refresh
+	read_list(game_ts, p);	//ts for ts and ra2 value
+	return 0;
+}
+
 int mix_database::load()
 {
 	Cvirtual_binary f;
-	if (f.load(xcc_dirs::get_data_dir() + "global mix database.dat") || f.size() < 16)
+	if (f.load(xcc_dirs::get_data_dir() + "global mix database.dat"))
 		return 1;
-	const char* data = reinterpret_cast<const char*>(f.data());
-	read_list(game_td, data);	//td for default id value (td, ra)
-	data = reinterpret_cast<const char*>(f.data());	//refresh
-	read_list(game_ts, data);	//ts for ts and ra2 value
-
-	return 0;
+	return load_from_buffer(f.data(), f.size());
 	char name[12] = "scg00ea.bin";	//i have no idea what's going on here, ra and td isn't my expertise
 	const char char1[] = "bgjm";
 	const char char2[] = "ew";

@@ -546,12 +546,23 @@ void ETSLayoutMgr::EraseBkgnd(CDC* pDC)
 		pWndChild = pWndChild->GetNextWindow();
 	}
 
-	HBRUSH hBrBack = (HBRUSH) ::GetClassLong(GetWnd()->GetSafeHwnd(), -10) ;
+	// Optional theme override. ETSLayoutDialog ignores WM_CTLCOLORDLG by
+	// painting its own background here in OnEraseBkgnd, which is why the
+	// dialog body stayed light even after WM_CTLCOLOR* returned a dark
+	// brush. Apps install ETSLayout_theme_brush() to redirect the fill in
+	// dark mode without coupling the Library to any specific theme module.
+	extern HBRUSH (*ETSLayout_theme_brush)();
+	HBRUSH hBrBack = ETSLayout_theme_brush ? ETSLayout_theme_brush() : NULL;
+	if( hBrBack == 0 )
+		hBrBack = (HBRUSH) ::GetClassLong(GetWnd()->GetSafeHwnd(), -10) ;
 	if( hBrBack == 0 )
 		hBrBack = ::GetSysColorBrush(COLOR_BTNFACE);
-	
+
 	pDC->FillRgn( &rgn, CBrush::FromHandle( hBrBack ));
 }
+
+// Library-side hook; defaults to NULL (preserves original behavior).
+HBRUSH (*ETSLayout_theme_brush)() = NULL;
 
 /////////////////////////////////////////////////////////////////////////////
 // ETSLayoutMgr::PaneItem implementation

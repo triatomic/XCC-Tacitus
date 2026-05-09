@@ -21,7 +21,7 @@
 //
 // DISCLAIMER:
 //
-// This Sourcecode and all accompaning material is ©1998-1999 Erwin Tratar. 
+// This Sourcecode and all accompaning material is ï¿½1998-1999 Erwin Tratar. 
 // All rights reserved.
 //
 // The source code may be used in compiled form in any way you desire 
@@ -734,7 +734,12 @@ class ETSGUI_EXT_CLASS ETSLayoutDialog : public ETSLayout::CBaseDialog, protecte
 {
 // Construction
 public:
-	ETSLayoutDialog(UINT nID, CWnd* pParent = NULL, LPCTSTR strName = NULL, bool bGripper = true);   // standard constructor
+	// Default changed from true -> false: WS_THICKFRAME (added unconditionally
+	// in OnInitDialog) already provides full edge/corner resize, and the
+	// legacy status-bar gripper paints with the system theme so it doesn't
+	// follow the app's dark mode. Modern Win11-style dialogs don't show one.
+	// Pass true explicitly if a particular dialog needs the legacy grip.
+	ETSLayoutDialog(UINT nID, CWnd* pParent = NULL, LPCTSTR strName = NULL, bool bGripper = false);   // standard constructor
 
 // Dialog Data
 	//{{AFX_DATA(ETSLayoutDialog)

@@ -48,8 +48,14 @@ public:
 
 	t_file_type get_type(int id)
 	{
-		assert(get_index(id) != -1);
-		return m_index_ft[get_index(id)];
+		// Corrupted / encrypted-header MIXes can leave m_index_ft empty
+		// even when m_index is populated (post_open's per-file probe is
+		// gated on `vdata().size() == get_size()`). Fall back to ft_unknown
+		// instead of indexing past end and crashing the listview.
+		int i = get_index(id);
+		if (i < 0 || static_cast<size_t>(i) >= m_index_ft.size())
+			return ft_unknown;
+		return m_index_ft[i];
 	}
 
 	int get_id(int index) const
