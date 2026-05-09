@@ -1411,15 +1411,27 @@
 #define ID_THEME_USE_EXTERNAL_PROGRAMS    41011
 #define ID_THEME_PANES_ONE                41012
 #define ID_THEME_PANES_TWO                41013
+#define ID_THEME_SIZE_FORMAT_AUTO         41014
+#define ID_THEME_SIZE_FORMAT_BYTES        41015
+
+#define IDD_PAL_PATHS                     142
+#define IDC_PAL_PATHS_LIST                1130
+#define IDC_PAL_PATHS_ADD_FOLDER          1131
+#define IDC_PAL_PATHS_ADD_MIX             1132
+#define IDC_PAL_PATHS_REMOVE              1133
+#define IDC_PAL_PATHS_UP                  1134
+#define IDC_PAL_PATHS_DOWN                1135
+#define IDC_PAL_PATHS_BUTTON              1136
+#define IDC_PAL_PATHS_OVERRIDE            1137
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        142
+#define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         33138
-#define _APS_NEXT_CONTROL_VALUE         1112
+#define _APS_NEXT_CONTROL_VALUE         1138
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif

@@ -191,7 +191,7 @@ int Cmix_file_rd::post_open()
 				}
 			}
 		}
-		if (vdata().size() == get_size() && m_index.size())
+		if (vdata().size() == get_size() && m_index.size() && !m_is_encrypted)
 		{
 			int crc = compute_crc(&m_index[0], get_c_files() * sizeof(t_mix_index_entry));
 			Cvirtual_binary s = mix_cache::get_data(crc);
@@ -212,6 +212,32 @@ int Cmix_file_rd::post_open()
 					m_index_ft[i.second] = f.get_file_type();
 				}
 				mix_cache::set_data(crc, Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type)));
+			}
+		}
+		else if (m_is_encrypted && m_index.size())
+		{
+			// Body is ciphertext — can't probe content. Classify by filename
+			// extension from the mix database so palette auto-load still works.
+			m_index_ft.resize(get_c_files(), ft_unknown);
+			for (int i = 0; i < get_c_files(); i++)
+			{
+				string name = mix_database::get_name(m_game, get_id(i));
+				if (name.empty())
+					continue;
+				auto dot = name.rfind('.');
+				string ext = dot != string::npos ? name.substr(dot) : string();
+				for (auto& c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+				if (ext == ".pal") m_index_ft[i] = ft_pal;
+				else if (ext == ".mix") m_index_ft[i] = ft_mix;
+				else if (ext == ".ini" || ext == ".map") m_index_ft[i] = ft_ini;
+				else if (ext == ".shp") m_index_ft[i] = ft_shp_ts;
+				else if (ext == ".vxl") m_index_ft[i] = ft_vxl;
+				else if (ext == ".hva") m_index_ft[i] = ft_hva;
+				else if (ext == ".aud") m_index_ft[i] = ft_aud;
+				else if (ext == ".vqa") m_index_ft[i] = ft_vqa;
+				else if (ext == ".csf") m_index_ft[i] = ft_csf;
+				else if (ext == ".pcx") m_index_ft[i] = ft_pcx;
+				else if (ext == ".tmp") m_index_ft[i] = ft_tmp_ts;
 			}
 			for (int i = 0; i < get_c_files(); i++)
 			{

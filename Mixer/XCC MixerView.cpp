@@ -796,7 +796,7 @@ void CXCCMixerView::OnGetdispinfo(NMHDR* pNMHDR, LRESULT* pResult)
 			m_buffer[m_buffer_w] = ft_name[e.ft];
 		break;
 	case 2:
-		m_buffer[m_buffer_w] = e.size;
+		m_buffer[m_buffer_w] = e.size_bytes > 0 ? theme::format_size(e.size_bytes) : std::string();
 		break;
 	case 3:
 		m_buffer[m_buffer_w] = e.description;
@@ -3443,7 +3443,15 @@ void CXCCMixerView::open_item(int id)
 	case ft_csf:
 	{
 		CXSTE_dlg dlg2(game_unknown);
-		dlg2.open(m_dir + index.name);
+		if (m_mix_f)
+		{
+			std::string path = ext_open::temp_dir() + ext_open::sanitize(index.name);
+			get_vdata_id(id).save(path);
+			ext_open::g_temp_files.push_back(path);
+			dlg2.open(path);
+		}
+		else
+			dlg2.open(m_dir + index.name);
 		dlg2.DoModal();
 		break;
 	}

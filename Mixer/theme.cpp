@@ -18,6 +18,7 @@ namespace theme
 	{
 		mode g_mode = mode_light;
 		bool g_show_grid = true;
+		size_format g_size_fmt = size_auto;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
 		bool g_use_checkerboard = true;
@@ -85,6 +86,9 @@ namespace theme
 		// Out-of-range falls back to nearest (covers stale interp_ewa=4 values).
 		if (iv < interp_nearest || iv > interp_lanczos) iv = interp_nearest;
 		g_interp = static_cast<interpolation>(iv);
+		int sf = AfxGetApp()->GetProfileInt("Theme", "size_format", size_auto);
+		if (sf != size_auto && sf != size_bytes) sf = size_auto;
+		g_size_fmt = static_cast<size_format>(sf);
 		create_brushes();
 	}
 
@@ -97,6 +101,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "use_external_programs", g_use_external_programs ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "interpolation", static_cast<int>(g_interp));
+		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
 	}
 
 	mode get() { return g_mode; }
@@ -120,6 +125,36 @@ namespace theme
 			return;
 		g_show_grid = v;
 		save();
+	}
+
+	size_format size_fmt() { return g_size_fmt; }
+
+	void set_size_fmt(size_format v)
+	{
+		if (g_size_fmt == v)
+			return;
+		g_size_fmt = v;
+		save();
+	}
+
+	std::string format_size(long long bytes)
+	{
+		if (bytes < 0)
+			return std::string();
+		if (g_size_fmt == size_bytes)
+			return std::to_string(bytes);
+		// size_auto — Vodrix's totalSize: integer-truncated value with B/KB/MB/GB suffix.
+		static const char* names[] = { " B", " KB", " MB", " GB" };
+		size_t v = static_cast<size_t>(bytes);
+		size_t div = 0;
+		while (v >= 1024 && div < (sizeof names / sizeof *names) - 1)
+		{
+			div++;
+			v /= 1024;
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof buf, "%zu%s", v, names[div]);
+		return buf;
 	}
 
 	bool shp_transparency() { return g_shp_transparency; }
@@ -388,6 +423,13 @@ namespace theme
 	void stretch_image(CDC* dst, int dx, int dy, int dw, int dh,
 		CDC* src_dc, HBITMAP src_dib, const DWORD* src_bits, int sw, int sh)
 	{
+		stretch_image(dst, dx, dy, dw, dh, src_dc, src_dib, src_bits, sw, sh, g_interp);
+	}
+
+	void stretch_image(CDC* dst, int dx, int dy, int dw, int dh,
+		CDC* src_dc, HBITMAP src_dib, const DWORD* src_bits, int sw, int sh,
+		interpolation mode)
+	{
 		if (!dst || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0)
 			return;
 		// 1:1 → BitBlt regardless of mode (no scaling, no filter).
@@ -396,7 +438,7 @@ namespace theme
 			dst->BitBlt(dx, dy, dw, dh, src_dc, 0, 0, SRCCOPY);
 			return;
 		}
-		switch (g_interp)
+		switch (mode)
 		{
 		case interp_bilinear:
 			if (src_bits)
