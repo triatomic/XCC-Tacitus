@@ -12,6 +12,38 @@
 #define IDD_DIRECTORIES                 130
 #define IDD_RESIZE                      131
 #define IDD_SEARCH_FILE                 132
+#define IDD_SEARCH_IN_PANE              141
+#define IDC_REGEX_TOGGLE                1100
+#define IDC_PLAYER_PLAY                 1101
+#define IDC_PLAYER_GRID                 1102
+#define IDC_PLAYER_SLIDER               1103
+#define IDC_PLAYER_FRAME_LABEL          1104
+#define IDC_PLAYER_FPS_LABEL            1105
+#define IDC_PLAYER_FPS_EDIT             1106
+#define IDC_PLAYER_FPS_SPIN             1107
+#define IDC_PLAYER_NATIVE               1108
+#define IDC_PRESERVE_STRUCTURE          1109
+#define IDC_LOAD_FOLDER                 1110
+#define IDC_PLAYER_REVERSE              1111
+#define IDC_PLAYER_SHADOWS              1112
+#define IDC_PLAYER_BG                   1113
+#define IDC_PLAYER_SIDE0                1114
+#define IDC_PLAYER_SIDE1                1115
+#define IDC_PLAYER_SIDE2                1116
+#define IDC_PLAYER_SIDE3                1117
+#define IDC_PLAYER_SIDE4                1118
+#define IDC_PLAYER_SIDE5                1119
+#define IDC_PLAYER_SIDE6                1120
+#define IDC_PLAYER_SIDE7                1121
+#define IDC_PLAYER_SIDE_CUSTOM          1122
+#define IDC_PLAYER_GRID_SEL             1123
+#define IDC_LOAD_MIX                    1124
+#define ID_FILE_SEARCH_IN_MIX           33132
+#define ID_POPUP_COPY_NAME              33133
+#define ID_VIEW_PALETTE_PREV_SIBLING    33134
+#define ID_VIEW_PALETTE_NEXT_SIBLING    33135
+#define ID_POPUP_BATCH_EXTRACT          33136
+#define ID_POPUP_BATCH_EXTRACT_PRESERVE 33137
 #define IDD_XSTE                        134
 #define IDD_XSTE_EDIT                   135
 #define IDD_XSE                         136
@@ -1368,15 +1400,26 @@
 #define ID_VIEW_PALETTE_PAL999            40999
 #define ID_THEME_LIGHT                    41000
 #define ID_THEME_DARK                     41001
+#define ID_THEME_SHOW_GRID                41002
+#define ID_THEME_ALPHA_COLOR              41003
+#define ID_THEME_INTERP_NEAREST           41004
+#define ID_THEME_INTERP_BILINEAR          41005
+#define ID_THEME_INTERP_BICUBIC           41006
+#define ID_THEME_INTERP_LANCZOS           41007
+#define ID_THEME_SHP_TRANSPARENCY         41008
+#define ID_THEME_USE_CHECKERBOARD         41010
+#define ID_THEME_USE_EXTERNAL_PROGRAMS    41011
+#define ID_THEME_PANES_ONE                41012
+#define ID_THEME_PANES_TWO                41013
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        141
-#define _APS_NEXT_COMMAND_VALUE         33132
-#define _APS_NEXT_CONTROL_VALUE         1047
+#define _APS_NEXT_RESOURCE_VALUE        142
+#define _APS_NEXT_COMMAND_VALUE         33138
+#define _APS_NEXT_CONTROL_VALUE         1112
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif
