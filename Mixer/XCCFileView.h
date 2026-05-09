@@ -56,7 +56,10 @@ protected:
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnRButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
@@ -103,6 +106,19 @@ public:
 	CButton m_player_grid;
 	CButton m_player_native;
 	bool m_player_native_size = false;
+	// Ctrl+wheel zoom override for the player (SHP/WSA/VXL). 0 = follow
+	// auto-fit / Native mode; otherwise an explicit percentage 25..1600.
+	int m_player_zoom_pct = 0;
+	// Right-drag pan offset (added to the centered image x_d/y_d in
+	// player_draw). Reset when entering the player, when zoom changes, and
+	// on Native toggle. Useful when Ctrl+wheel zoom makes the SHP/WSA/VXL
+	// larger than the viewport.
+	int  m_player_pan_x = 0;
+	int  m_player_pan_y = 0;
+	bool m_player_panning = false;
+	CPoint m_player_pan_origin = CPoint(0, 0);
+	int  m_player_pan_x0 = 0;
+	int  m_player_pan_y0 = 0;
 	bool m_player_reverse_dir = false;
 	CSliderCtrl m_player_slider;
 	CStatic m_player_label;

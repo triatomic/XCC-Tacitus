@@ -10,6 +10,7 @@
 #include "fname.h"
 #include "searchfiledlg.h"
 #include "SearchInPaneDlg.h"
+#include "PalPathsDlg.h"
 #include "SelectPaletteDlg.h"
 #include "string_conversion.h"
 #include "theme.h"
@@ -122,6 +123,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_PANES_TWO, OnThemePanesTwo)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_ONE, OnUpdateThemePanesOne)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_TWO, OnUpdateThemePanesTwo)
+	ON_COMMAND(ID_THEME_SIZE_FORMAT_AUTO, OnThemeSizeFormatAuto)
+	ON_COMMAND(ID_THEME_SIZE_FORMAT_BYTES, OnThemeSizeFormatBytes)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_AUTO, OnUpdateThemeSizeFormatAuto)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_BYTES, OnUpdateThemeSizeFormatBytes)
 END_MESSAGE_MAP()
 
 
@@ -306,7 +311,13 @@ int CMainFrame::mix_list_create_map(string name, string fname, int file_id, int 
 
 int CMainFrame::pal_list_create_map(string name, int parent)
 {
-	int id = m_pal_map_list.size();
+	// Use max-key + 1 instead of size() so we don't collide with surviving
+	// IDs after clean_pal_map_list / reload_pal_paths erase entries. Erasure
+	// punches gaps in the map, and using size() to mint a new ID can land on
+	// a still-living game-side node, overwriting it via operator[]. The bug
+	// surfaced as the Select Palette tree losing its game-side mix children
+	// after the second OK from PAL Paths dialog.
+	int id = m_pal_map_list.empty() ? 0 : (m_pal_map_list.rbegin()->first + 1);
 	t_pal_map_list_entry& e = m_pal_map_list[id];
 	e.name = name;
 	e.parent = parent;
@@ -538,6 +549,9 @@ void CMainFrame::initialize_lists()
 		memcpy(m_ra2_palette, pal_f.get_palette(), sizeof(t_palette));
 	if (m_palette_i >= m_pal_list.size())
 		m_palette_i = -1;
+	// User-configured PAL paths (folders + archives, registry-persisted).
+	// Loaded after the per-game ranges so m_pal_i[] stays the boundary.
+	reload_pal_paths();
 	clean_pal_map_list();
 	m_lists_initialized = true;
 	xcc_log::write_line("initialize_lists ends");
@@ -618,15 +632,135 @@ void CMainFrame::OnViewPaletteNext()
 
 bool CMainFrame::auto_select(t_game game, string palette)
 {
-	for (int i = game < 1 ? 0 : m_pal_i[game - 1]; i < m_pal_i[game]; i++)
+	const int user_start = m_pal_i[game_unknown - 1];
+	const int per_game_lo = game < 1 ? 0 : m_pal_i[game - 1];
+	const int per_game_hi = m_pal_i[game];
+	const int user_hi = static_cast<int>(m_pal_list.size());
+	const bool override_on = CPalPathsDlg::override_per_game();
+
+	auto try_range = [&](int lo, int hi) -> bool
 	{
-		if (m_pal_list[i].name.find(palette) == string::npos)
-			continue;	
-		set_palette(i);
-		set_msg(m_pal_list[m_palette_i].name + " selected");
-		return true;
+		for (int i = lo; i < hi; i++)
+		{
+			if (m_pal_list[i].name.find(palette) == string::npos)
+				continue;
+			set_palette(i);
+			set_msg(m_pal_list[m_palette_i].name + " selected");
+			return true;
+		}
+		return false;
+	};
+
+	if (override_on)
+	{
+		// User-loaded PAL Paths win: try the user slice first, fall back to
+		// the per-game range. A matching temperat.pal in PalPaths shadows the
+		// stock RA2/TS/etc. one.
+		if (try_range(user_start, user_hi)) return true;
+		if (try_range(per_game_lo, per_game_hi)) return true;
+	}
+	else
+	{
+		// Default: per-game first, PalPaths only as a fallback.
+		if (try_range(per_game_lo, per_game_hi)) return true;
+		if (try_range(user_start, user_hi)) return true;
 	}
 	return false;
+}
+
+void CMainFrame::reload_pal_paths()
+{
+	// Build the set of map-tree nodes to drop: user roots from a previous
+	// reload (registry-backed PalPaths) and all their descendants. Skip
+	// game roots (parent == -1, name == game_name[g]) and session-only
+	// roots created by the Select Palette dialog's Load Pal / Load Mix
+	// buttons (preserved across reloads so an ad-hoc archive isn't wiped
+	// just because the user opened the PAL Paths editor).
+	std::set<int> drop_roots;
+	for (auto& kv : m_pal_map_list)
+	{
+		if (kv.second.parent != -1)
+			continue;
+		bool is_game = false;
+		for (int g = 0; g < game_unknown; g++)
+		{
+			if (kv.second.name == game_name[g])
+			{
+				is_game = true;
+				break;
+			}
+		}
+		if (is_game || kv.second.session_only)
+			continue;
+		drop_roots.insert(kv.first);
+	}
+	std::set<int> drop_all = drop_roots;
+	for (bool added = true; added; )
+	{
+		added = false;
+		for (auto& kv : m_pal_map_list)
+		{
+			if (drop_all.count(kv.first) || !drop_all.count(kv.second.parent))
+				continue;
+			drop_all.insert(kv.first);
+			added = true;
+		}
+	}
+	// Erase m_pal_list entries whose parent chain ends in a dropped root.
+	// A list entry survives when its parent (or any ancestor) is NOT in
+	// drop_all — i.e. it's under a game root or a session-only root.
+	// While compacting, also remap m_palette_i so an existing selection
+	// follows its underlying entry to its new index.
+	{
+		auto write = m_pal_list.begin();
+		const size_t per_game_end = m_pal_i[game_unknown - 1];
+		int new_palette_i = -1;
+		for (size_t r = 0; r < m_pal_list.size(); r++)
+		{
+			bool dropped = false;
+			if (r >= per_game_end)  // never drop entries inside per-game ranges
+			{
+				int p = m_pal_list[r].parent;
+				while (p != -1)
+				{
+					auto it = m_pal_map_list.find(p);
+					if (it == m_pal_map_list.end()) break;
+					if (drop_all.count(p)) { dropped = true; break; }
+					p = it->second.parent;
+				}
+			}
+			if (!dropped)
+			{
+				if (static_cast<int>(r) == m_palette_i)
+					new_palette_i = static_cast<int>(write - m_pal_list.begin());
+				if (write != m_pal_list.begin() + r)
+					*write = std::move(m_pal_list[r]);
+				++write;
+			}
+		}
+		m_pal_list.erase(write, m_pal_list.end());
+		m_palette_i = new_palette_i;
+	}
+	for (int id : drop_all)
+		m_pal_map_list.erase(id);
+
+	// Load each PalPaths registry entry in order. No leaf-name dedupe:
+	// stripping later-loaded duplicates would orphan the tree node created
+	// inside load_pal_folder/load_pal_mix and leave the dialog showing an
+	// empty branch. "Higher priority wins" applies to Auto Select instead —
+	// auto_select() walks the user slice top-to-bottom and accepts the first
+	// match, so the registry order naturally encodes priority without us
+	// having to throw away later entries here.
+	auto entries = CPalPathsDlg::load_from_registry();
+	for (size_t idx = 0; idx < entries.size(); idx++)
+	{
+		const auto& e = entries[idx];
+		if (e.path.empty())
+			continue;
+		int root = e.is_folder ? load_pal_folder(e.path) : load_pal_mix(e.path);
+		if (root >= 0)
+			m_pal_map_list[root].order = static_cast<int>(idx);
+	}
 }
 
 void CMainFrame::OnViewPaletteUseForConversion() 
@@ -1245,36 +1379,69 @@ int CMainFrame::load_pal_mix(const string& path)
 	return parent_id;
 }
 
+// Walk a folder recursively, importing every .pal file under it. Each
+// subdirectory becomes a child tree node so the dialog shows the on-disk
+// hierarchy. label is the prefix used for entry names ("foo - palette.pal");
+// parent_id is the pal_map_list parent under which this level's entries go.
+// Returns the count of palettes added at this level + below.
+static int import_pals_from_dir(CMainFrame& frame, const std::string& dir,
+	const std::string& label, int parent_id)
+{
+	int added = 0;
+	WIN32_FIND_DATA fd;
+	HANDLE h = FindFirstFile((dir + "*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE)
+		return 0;
+	do
+	{
+		const std::string name = fd.cFileName;
+		if (name == "." || name == "..")
+			continue;
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			// Lazy: create the sub-node only if the recursion finds palettes
+			// inside it. Otherwise we'd litter the tree with empty folders.
+			int sub_parent = frame.pal_list_create_map(name, parent_id);
+			int sub_added = import_pals_from_dir(frame, dir + name + '\\',
+				label + " - " + name, sub_parent);
+			if (!sub_added)
+				frame.pal_map_list_mut().erase(sub_parent);
+			added += sub_added;
+			continue;
+		}
+		// Match *.pal case-insensitively. FindFirstFile gives us everything
+		// since we asked for "*"; do the extension test ourselves.
+		if (name.size() < 4)
+			continue;
+		std::string ext = name.substr(name.size() - 4);
+		for (char& c : ext) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+		if (ext != ".pal")
+			continue;
+		Cpal_file pf;
+		if (pf.open(dir + name))
+			continue;
+		t_pal_list_entry e;
+		e.name = label + " - " + name;
+		memcpy(e.palette, pf.get_data(), sizeof(t_palette));
+		e.parent = parent_id;
+		frame.pal_list_mut().push_back(e);
+		added++;
+	}
+	while (FindNextFile(h, &fd));
+	FindClose(h);
+	return added;
+}
+
 int CMainFrame::load_pal_folder(const string& folder)
 {
 	string dir = folder;
 	if (!dir.empty() && dir.back() != '\\' && dir.back() != '/')
 		dir += '\\';
-	WIN32_FIND_DATA fd;
-	HANDLE h = FindFirstFile((dir + "*.pal").c_str(), &fd);
-	if (h == INVALID_HANDLE_VALUE)
-		return -1;
 	string folder_name = Cfname(dir.substr(0, dir.size() - 1)).get_fname();
 	if (folder_name.empty())
 		folder_name = dir;
 	int parent_id = pal_list_create_map(folder_name, -1);
-	int added = 0;
-	do
-	{
-		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-			continue;
-		Cpal_file pf;
-		if (pf.open(dir + fd.cFileName))
-			continue;
-		t_pal_list_entry e;
-		e.name = folder_name + " - " + fd.cFileName;
-		memcpy(e.palette, pf.get_data(), sizeof(t_palette));
-		e.parent = parent_id;
-		m_pal_list.push_back(e);
-		added++;
-	}
-	while (FindNextFile(h, &fd));
-	FindClose(h);
+	int added = import_pals_from_dir(*this, dir, folder_name, parent_id);
 	if (!added)
 	{
 		m_pal_map_list.erase(parent_id);
@@ -1490,6 +1657,26 @@ void CMainFrame::OnThemePanesOne() { set_pane_layout(false); }
 void CMainFrame::OnThemePanesTwo() { set_pane_layout(true); }
 void CMainFrame::OnUpdateThemePanesOne(CCmdUI* p) { p->SetCheck(!m_two_panes); }
 void CMainFrame::OnUpdateThemePanesTwo(CCmdUI* p) { p->SetCheck(m_two_panes); }
+
+void CMainFrame::apply_size_format(theme::size_format v)
+{
+	theme::set_size_fmt(v);
+	// Pane listviews read e.size_bytes through theme::format_size in OnGetdispinfo,
+	// so a redraw refreshes the Size column. The file-info pane bakes the formatted
+	// bytes into its draw lines, so it needs Invalidate too.
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		m_left_mix_pane->Invalidate(FALSE);
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		m_right_mix_pane->Invalidate(FALSE);
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate(FALSE);
+}
+
+void CMainFrame::OnThemeSizeFormatAuto()  { apply_size_format(theme::size_auto); }
+void CMainFrame::OnThemeSizeFormatBytes() { apply_size_format(theme::size_bytes); }
+
+void CMainFrame::OnUpdateThemeSizeFormatAuto(CCmdUI* p)  { p->SetCheck(theme::size_fmt() == theme::size_auto); }
+void CMainFrame::OnUpdateThemeSizeFormatBytes(CCmdUI* p) { p->SetCheck(theme::size_fmt() == theme::size_bytes); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction

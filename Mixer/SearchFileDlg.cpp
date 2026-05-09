@@ -488,7 +488,7 @@ void CSearchFileDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		buffer = (sep == std::string::npos) ? full : full.substr(sep + 3);
 		break;
 	case 1:
-		buffer = e.size_bytes > 0 ? totalSize(static_cast<size_t>(e.size_bytes)) : std::string();
+		buffer = e.size_bytes > 0 ? theme::format_size(e.size_bytes) : std::string();
 		break;
 	case 2:
 	{

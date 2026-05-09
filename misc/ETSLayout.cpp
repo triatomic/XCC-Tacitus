@@ -779,6 +779,15 @@ bool ETSLayoutMgr::PaneItem::resizeTo(CRect& rcNewArea)
     CWnd* pTempWnd = CWnd::FromHandle( m_hwndCtrl );
     pTempWnd->MoveWindow( rcNewArea.left, rcNewArea.top, rcNewArea.Width(), rcNewArea.Height() );
 
+	// Force the resized child to invalidate + erase + repaint its FULL client
+	// area. MoveWindow alone leaves the newly-grown region inside listviews,
+	// treeviews, and multi-line edits filled with uninitialized GDI bytes
+	// (visible as vertical streaks in dark mode), because those classes only
+	// repaint per-row/per-line on WM_PAINT and WM_ERASEBKGND fires only for
+	// the explicitly-invalidated subrect, not the un-invalidated grown area.
+	::RedrawWindow(m_hwndCtrl, NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+
 		if( m_bComboSpecial && !(dwStyle & CBS_DROPDOWN) && !(dwStyle & CBS_NOINTEGRALHEIGHT) ) {
 
 			// Keep CB Size = Edit + LB ( if not CBS_NOINTEGRALHEIGHT)
@@ -1872,16 +1881,24 @@ BOOL ETSLayoutDialog::OnEraseBkgnd(CDC* pDC)
 	return true;
 }
 
-void ETSLayoutDialog::OnSize(UINT nType, int cx, int cy) 
+void ETSLayoutDialog::OnSize(UINT nType, int cx, int cy)
 {
 	CBaseDialog::OnSize(nType, cx, cy);
 
-	if( abs(cx) + abs(cy) > 0) 
+	if( abs(cx) + abs(cy) > 0)
 	{
 		// Reposition Size Marker
 		// Re-Layout all controls
 		UpdateLayout();
 		RepositionBars(AFX_IDW_CONTROLBAR_FIRST, AFX_IDW_CONTROLBAR_LAST, 0);
+		// MoveWindow alone leaves uninitialized pixels inside children that
+		// just grew (most visible on listviews / treeviews / multi-line edits
+		// in dark mode — vertical streaks of garbage where the new region
+		// was never erased + painted). Force the whole dialog subtree to
+		// invalidate + erase + repaint synchronously so the new area gets
+		// the theme background fill before the child draws over it.
+		::RedrawWindow(GetSafeHwnd(), NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	}
 
 }

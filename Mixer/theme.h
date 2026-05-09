@@ -49,6 +49,20 @@ namespace theme
 	bool show_grid();
 	void set_show_grid(bool v);
 
+	// Size column format: Auto = "1.5 MB" via totalSize(); Bytes = grouped
+	// raw byte count "1,572,864". Applies to the listview panes and to the
+	// right-pane MIX/PAK/BIG/RG-MIX content listings.
+	enum size_format
+	{
+		size_auto = 0,
+		size_bytes = 1,
+	};
+	size_format size_fmt();
+	void set_size_fmt(size_format v);
+	// Format a byte count using the active size_format. Pass negative for
+	// "no size" (returns empty string).
+	std::string format_size(long long bytes);
+
 	// When on, paletted Westwood images (SHP/PCX/CPS/WSA) treat palette index 0
 	// as transparent — the engine convention. Off = paint index 0 with whatever
 	// color the palette says, like older XCC builds.
@@ -88,6 +102,12 @@ namespace theme
 	// for the Lanczos path — others read from src_dc).
 	void stretch_image(CDC* dst, int dx, int dy, int dw, int dh,
 		CDC* src_dc, HBITMAP src_dib, const DWORD* src_bits, int sw, int sh);
+	// Same, but with an explicit interpolation mode (overrides theme::interp()).
+	// Used by the VXL viewer to force nearest, since 2D image filters don't
+	// improve the output of an already-rasterized 3D voxel splat.
+	void stretch_image(CDC* dst, int dx, int dy, int dw, int dh,
+		CDC* src_dc, HBITMAP src_dib, const DWORD* src_bits, int sw, int sh,
+		interpolation mode);
 	COLORREF checker_a();   // alpha_color
 	COLORREF checker_b();   // black
 

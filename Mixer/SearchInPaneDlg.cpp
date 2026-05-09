@@ -238,7 +238,7 @@ void CSearchInPaneDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		switch (pDispInfo->item.iSubItem)
 		{
 		case 0: buffer = m.name; break;
-		case 1: buffer = m.size_bytes ? totalSize(static_cast<size_t>(m.size_bytes)) : string(); break;
+		case 1: buffer = m.size_bytes ? theme::format_size(m.size_bytes) : string(); break;
 		default: buffer.clear(); break;
 		}
 	}

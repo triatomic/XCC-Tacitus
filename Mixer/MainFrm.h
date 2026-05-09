@@ -16,6 +16,17 @@ struct t_pal_map_list_entry
 {
 	string name;
 	int parent;
+	// User-PAL-path priority: 0..N-1 for the N entries in PalPaths registry,
+	// in dialog order. -1 for game roots and nested children (those sort
+	// alphabetically as before). Lets the Select Palette tree show user
+	// folders/mixes in the same order Ctrl+Q walks them.
+	int order = -1;
+	// True for ad-hoc roots created by the Select Palette dialog's Load Pal /
+	// Load Mix buttons. reload_pal_paths() preserves these so reopening the
+	// PAL Paths editor doesn't wipe session-only loads. Also the tree sorts
+	// them with the registry-backed PalPaths entries, but they don't get
+	// persisted to registry.
+	bool session_only = false;
 };
 
 struct t_pal_list_entry
@@ -70,6 +81,10 @@ public:
 	// new pal-map parent id (root tree node for the archive), or -1 if the
 	// file couldn't be opened or contained no palettes.
 	int load_pal_mix(const string& path);
+	// Walk the user's PalPaths registry list and import every entry into
+	// m_pal_list. Idempotent: clears any previously-loaded PalPath slice (the
+	// portion of m_pal_list past m_pal_i[game_unknown - 1]) before reloading.
+	void reload_pal_paths();
 	t_pal_map_list& pal_map_list_mut() { return m_pal_map_list; }
 	t_pal_list& pal_list_mut() { return m_pal_list; }
 	BOOL OnIdle(LONG lCount);
@@ -283,6 +298,11 @@ protected:
 	afx_msg void OnThemePanesTwo();
 	afx_msg void OnUpdateThemePanesOne(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemePanesTwo(CCmdUI* pCmdUI);
+	void apply_size_format(theme::size_format v);
+	afx_msg void OnThemeSizeFormatAuto();
+	afx_msg void OnThemeSizeFormatBytes();
+	afx_msg void OnUpdateThemeSizeFormatAuto(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeSizeFormatBytes(CCmdUI* pCmdUI);
 
 	DECLARE_MESSAGE_MAP()
 };

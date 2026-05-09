@@ -18,6 +18,7 @@
 #include <map_td_ini_reader.h>
 #include <map_ts_ini_reader.h>
 #include <mp3_file.h>
+#include <mix_rg_file.h>
 #include <pak_file.h>
 #include <pal_file.h>
 #include <pcx_decode.h>
@@ -67,7 +68,10 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_WM_KEYDOWN()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
+	ON_WM_RBUTTONDOWN()
+	ON_WM_RBUTTONUP()
 	ON_WM_MOUSEMOVE()
+	ON_WM_SETCURSOR()
 	ON_WM_SIZE()
 	ON_WM_TIMER()
 	ON_WM_HSCROLL()
@@ -118,6 +122,39 @@ void CXCCFileView::OnLButtonUp(UINT nFlags, CPoint point)
 	CScrollView::OnLButtonUp(nFlags, point);
 }
 
+void CXCCFileView::OnRButtonDown(UINT nFlags, CPoint point)
+{
+	// Right-drag pan: only meaningful in player mode, and only when the
+	// click lands inside the image area (not on the control band).
+	if (m_player_mode)
+	{
+		CRect cr;
+		GetClientRect(&cr);
+		if (point.y < cr.bottom - player_band_h())
+		{
+			m_player_panning = true;
+			m_player_pan_origin = point;
+			m_player_pan_x0 = m_player_pan_x;
+			m_player_pan_y0 = m_player_pan_y;
+			SetCapture();
+			::SetCursor(::LoadCursor(NULL, IDC_SIZEALL));
+			return;
+		}
+	}
+	CScrollView::OnRButtonDown(nFlags, point);
+}
+
+void CXCCFileView::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_player_panning)
+	{
+		m_player_panning = false;
+		ReleaseCapture();
+		return;
+	}
+	CScrollView::OnRButtonUp(nFlags, point);
+}
+
 void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (m_vxl_dragging && (nFlags & MK_LBUTTON))
@@ -138,7 +175,41 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
+	if (m_player_panning && (nFlags & MK_RBUTTON))
+	{
+		m_player_pan_x = m_player_pan_x0 + (point.x - m_player_pan_origin.x);
+		m_player_pan_y = m_player_pan_y0 + (point.y - m_player_pan_origin.y);
+		// Repaint the image area only (margins included). Skip the control
+		// band so the panning doesn't strobe the buttons.
+		CRect cr;
+		GetClientRect(&cr);
+		cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		return;
+	}
 	CScrollView::OnMouseMove(nFlags, point);
+}
+
+BOOL CXCCFileView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+	// In player mode, show the hand cursor over the image area to advertise
+	// right-drag-to-pan. Outside the image area (control band) and outside
+	// player mode, fall through to the default arrow.
+	if (m_player_mode && nHitTest == HTCLIENT)
+	{
+		CPoint pt;
+		::GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		CRect cr;
+		GetClientRect(&cr);
+		if (pt.y >= 0 && pt.y < cr.bottom - player_band_h())
+		{
+			::SetCursor(::LoadCursor(NULL, IDC_SIZEALL));
+			return TRUE;
+		}
+	}
+	return CScrollView::OnSetCursor(pWnd, nHitTest, message);
 }
 
 void CXCCFileView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
@@ -211,6 +282,48 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
 	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 
+	if (ctrl && m_player_mode)
+	{
+		// Player zoom: works for SHP/WSA frames and the VXL orbit viewer.
+		// Seed from the currently-displayed s_pct (auto-fit or 100 for Native)
+		// so the first wheel tick zooms relative to what the user sees, not 0.
+		int cur = m_player_zoom_pct;
+		if (cur <= 0)
+		{
+			if (m_player_native_size)
+				cur = 100;
+			else
+			{
+				CRect rc; GetClientRect(&rc);
+				int avail_w = rc.Width();
+				int avail_h = rc.Height() - player_band_h();
+				if (m_player_cx > 0 && m_player_cy > 0 && avail_w > 0 && avail_h > 0)
+				{
+					int sx = avail_w * 100 / m_player_cx;
+					int sy = avail_h * 100 / m_player_cy;
+					cur = std::min(sx, sy);
+				}
+				else
+					cur = 100;
+			}
+			if (cur < 25) cur = 25;
+			if (cur > 1600) cur = 1600;
+		}
+		int step = zDelta > 0 ? 25 : -25;
+		int next = cur + step;
+		if (next < 25) next = 25;
+		if (next > 1600) next = 1600;
+		if (next != m_player_zoom_pct)
+		{
+			m_player_zoom_pct = next;
+			// Reset pan so the new zoom level starts centered. Without this,
+			// the user's previous pan would persist into the new zoom and
+			// could leave the image out of view at a higher magnification.
+			m_player_pan_x = m_player_pan_y = 0;
+			Invalidate(FALSE);
+		}
+		return TRUE;
+	}
 	if (ctrl && m_zoomable_file)
 	{
 		int step = zDelta > 0 ? 25 : -25;
@@ -762,7 +875,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				for (int i = 0; i < c_files; i++)
 				{
 					string name = f.get_name(i);
-					draw_info(nwzl(4, i) + " - " + nwsl(11, f.get_size(name)) + ' ' + name, "");
+					draw_info(nwzl(4, i) + " - " + swsl(11, theme::format_size(f.get_size(name))) + ' ' + name, "");
 				}
 				break;
 			}
@@ -999,7 +1112,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Files:", n(c_files));
 				draw_info("Checksum:", f.has_checksum() ? "Yes" : "No");
 				draw_info("Encrypted:", f.is_encrypted() ? "Yes" : "No");
-				draw_info("Game:", game_name[game]);
+				draw_info("Game:", (game >= 0 && game < game_unknown) ? game_name[game] : "unknown");
 				if (game > game_td)
 				{
 					draw_info("Raw Flags:", nh(8, f.rawflags()));
@@ -1008,7 +1121,21 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				for (int i = 0; i < c_files; i++)
 				{
 					int id = f.get_id(i);
-					draw_info(nwzl(4, i) + " - " + nh(8, id) + nwsl(11, f.get_size(id)) + ' ' + mix_database::get_name(game, id), "");
+					draw_info(nwzl(4, i) + " - " + nh(8, id) + swsl(11, theme::format_size(f.get_size(id))) + ' ' + mix_database::get_name(game, id), "");
+				}
+				break;
+			}
+		case ft_mix_rg:
+			{
+				Cmix_rg_file f;
+				f.load(m_data, m_size);
+				const int c_files = f.get_c_files();
+				draw_info("Files:", n(c_files));
+				m_y += m_y_inc;
+				for (int i = 0; i < c_files; i++)
+				{
+					const string name = f.get_name(i);
+					draw_info(nwzl(4, i) + " - " + swsl(11, theme::format_size(f.get_size(name))) + ' ' + name, "");
 				}
 				break;
 			}
@@ -1021,7 +1148,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				m_y += m_y_inc;
 				for (int i = 0; i < c_files; i++)
 				{
-					draw_info(nwzl(4, i) + " - " + nwsl(11, f.get_size(f.get_name(i))) + ' ' + f.get_name(i), "");
+					draw_info(nwzl(4, i) + " - " + swsl(11, theme::format_size(f.get_size(f.get_name(i)))) + ' ' + f.get_name(i), "");
 				}
 				break;
 			}
@@ -1670,7 +1797,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					draw_info("Files:", n(c_files));
 					draw_info("Checksum:", f.has_checksum() ? "Yes" : "No");
 					draw_info("Encrypted:", f.is_encrypted() ? "Yes" : "No");
-					draw_info("Game:", game_name[game]);
+					draw_info("Game:", (game >= 0 && game < game_unknown) ? game_name[game] : "unknown");
 					if (game > game_td)
 					{
 						draw_info("Raw Flags:", nh(8, f.rawflags()));
@@ -1678,7 +1805,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					for (int i = 0; i < c_files; i++)
 					{
 						int id = f.get_id(i);
-						draw_info(nwzl(4, i) + " - " + nh(8, id) + nwsl(11, f.get_size(id)) + ' ' + mix_database::get_name(game, id), "");
+						draw_info(nwzl(4, i) + " - " + nh(8, id) + swsl(11, theme::format_size(f.get_size(id))) + ' ' + mix_database::get_name(game, id), "");
 					}
 					m_y += m_y_inc;
 					break;
@@ -1757,7 +1884,7 @@ void CXCCFileView::post_open(Ccc_file& f)
 		m_ft = f.get_file_type(false);
 		m_size = f.get_size();
 		int cb_max_data = (m_ft == ft_dds || m_ft == ft_jpeg || m_ft == ft_map_td || m_ft == ft_map_ra
-			|| m_ft == ft_map_ts || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
+			|| m_ft == ft_map_ts || m_ft == ft_mix_rg || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
 			|| m_ft == ft_shp_ts || m_ft == ft_tga || m_ft == ft_vxl || m_ft == ft_wsa_dune2
 			|| m_ft == ft_wsa || m_ft == ft_xif) ? m_size :
 			(m_ft == ft_csf ? 64 << 8 : 256 << 10);
@@ -1987,7 +2114,9 @@ void CXCCFileView::player_decode_frames()
 						while (c--)
 						{
 							double lx = (x + 0.5 - cx / 2.0) * sx;
-							double ly = (y + 0.5 - cy / 2.0) * sy;
+							// Flip file Y so the model's front faces the camera at
+							// yaw=0 (matches Vengi's VXL viewer convention).
+							double ly = (cy - y - 0.5 - cy / 2.0) * sy;
 							double lz = (z + 0.5 - cz / 2.0) * sz;
 							double wx = st.transform[0][0] * lx + st.transform[0][1] * ly + st.transform[0][2] * lz + st.transform[0][3];
 							double wy = st.transform[1][0] * lx + st.transform[1][1] * ly + st.transform[1][2] * lz + st.transform[1][3];
@@ -2030,6 +2159,9 @@ void CXCCFileView::player_enter()
 	m_player_mode = true;
 	m_player_frame = 0;
 	m_player_playing = true;
+	m_player_zoom_pct = 0;
+	m_player_pan_x = m_player_pan_y = 0;
+	m_player_panning = false;
 	if (m_ft == ft_vxl)
 	{
 		m_vxl_yaw = 0.0;
@@ -2480,7 +2612,12 @@ void CXCCFileView::player_draw(CDC* pDC)
 	int cx_s = m_player_cx;
 	int cy_s = m_player_cy;
 	int s_pct;
-	if (m_player_native_size)
+	if (m_player_zoom_pct > 0)
+	{
+		// Ctrl+wheel override (set in OnMouseWheel during player mode).
+		s_pct = m_player_zoom_pct;
+	}
+	else if (m_player_native_size)
 	{
 		s_pct = 100;
 	}
@@ -2496,25 +2633,42 @@ void CXCCFileView::player_draw(CDC* pDC)
 	int cy_d = cy_s * s_pct / 100;
 	int x_d = (avail_w - cx_d) / 2;
 	int y_d = (avail_h - cy_d) / 2;
-	if (x_d < 0) x_d = 0;
-	if (y_d < 0) y_d = 0;
+	// Apply right-drag pan when the image is larger than the viewport. Pan
+	// is meaningless when the image fits, so suppress it there to avoid
+	// confusing offsets after a zoom-out.
+	if (cx_d > avail_w) x_d += m_player_pan_x;
+	if (cy_d > avail_h) y_d += m_player_pan_y;
 
-	// Paint the four margins around the centered image with theme::bg so
-	// stale pixels from the previous frame don't bleed through. Doing it
-	// here (instead of in OnEraseBkgnd) lets us drag the slider with
-	// bErase=FALSE — no full-area solid flash on every drag tick.
+	// Paint only the four margins around the (possibly panned) image rect
+	// with theme::bg. A full-canvas FillSolidRect every frame would strobe
+	// under the image during playback, so we erase only what the image
+	// itself doesn't cover. The pan offsets are already baked into x_d/y_d
+	// above, so this works for both centered and right-dragged images.
 	{
 		const COLORREF bg = theme::bg();
-		if (y_d > 0)
-			pDC->FillSolidRect(0, 0, avail_w, y_d, bg);
-		int img_bottom = y_d + cy_d;
-		if (img_bottom < avail_h)
-			pDC->FillSolidRect(0, img_bottom, avail_w, avail_h - img_bottom, bg);
-		if (x_d > 0)
-			pDC->FillSolidRect(0, y_d, x_d, cy_d, bg);
-		int img_right = x_d + cx_d;
-		if (img_right < avail_w)
-			pDC->FillSolidRect(img_right, y_d, avail_w - img_right, cy_d, bg);
+		// Top: 0..min(y_d, avail_h)
+		int top = std::max(0, std::min(y_d, avail_h));
+		if (top > 0)
+			pDC->FillSolidRect(0, 0, avail_w, top, bg);
+		// Bottom: max(y_d+cy_d, 0)..avail_h
+		int bottom = std::max(0, std::min(y_d + cy_d, avail_h));
+		if (bottom < avail_h)
+			pDC->FillSolidRect(0, bottom, avail_w, avail_h - bottom, bg);
+		// Left/right margins are clipped to the band actually covered by the
+		// image vertically — outside that band the top/bottom fills already
+		// painted those columns.
+		int band_top = std::max(0, y_d);
+		int band_bot = std::max(band_top, std::min(y_d + cy_d, avail_h));
+		int band_h = band_bot - band_top;
+		if (band_h > 0)
+		{
+			int left = std::max(0, std::min(x_d, avail_w));
+			if (left > 0)
+				pDC->FillSolidRect(0, band_top, left, band_h, bg);
+			int right = std::max(0, std::min(x_d + cx_d, avail_w));
+			if (right < avail_w)
+				pDC->FillSolidRect(right, band_top, avail_w - right, band_h, bg);
+		}
 	}
 
 	CDC mem_dc;
@@ -2658,7 +2812,21 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 		}
 	}
-	theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
+	// Clip the blit to the image area so a Ctrl+wheel-zoomed sprite that's
+	// larger than the available canvas doesn't paint over the player control
+	// band beneath it. Without this, an oversize SHP/WSA bleeds through and
+	// the buttons end up textured by the sprite's pixels.
+	pDC->SaveDC();
+	pDC->IntersectClipRect(0, 0, avail_w, avail_h);
+	// VXL: skip the 2D image interpolator. The splat path (point-or-Gaussian,
+	// chosen earlier from theme::interp()) IS the AA — applying Bilinear/Bicubic/
+	// Lanczos on top of an already-rasterized voxel splat blurs silhouettes and
+	// adds ringing. SHP/WSA paths still use the configured interpolation.
+	if (is_vxl_view())
+		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s, theme::interp_nearest);
+	else
+		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
+	pDC->RestoreDC(-1);
 	mem_dc.SelectObject(old);
 	DeleteObject(h_dib);
 }
@@ -2747,6 +2915,10 @@ void CXCCFileView::OnPlayerNative()
 	if (!m_player_controls_created)
 		return;
 	m_player_native_size = m_player_native.GetCheck() == BST_CHECKED;
+	// Native is an explicit user choice; clear any wheel-zoom override so it
+	// takes effect (otherwise the override would silently shadow the toggle).
+	m_player_zoom_pct = 0;
+	m_player_pan_x = m_player_pan_y = 0;
 	CRect cr;
 	GetClientRect(&cr);
 	cr.bottom -= player_band_h();

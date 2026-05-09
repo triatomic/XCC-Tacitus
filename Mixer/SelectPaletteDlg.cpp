@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "MainFrm.h"
+#include "PalPathsDlg.h"
 #include "SelectPaletteDlg.h"
 #include "theme.h"
 
@@ -29,6 +30,7 @@ BEGIN_MESSAGE_MAP(CSelectPaletteDlg, ETSLayoutDialog)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	ON_BN_CLICKED(IDC_LOAD_FOLDER, OnLoadFolder)
 	ON_BN_CLICKED(IDC_LOAD_MIX, OnLoadMix)
+	ON_BN_CLICKED(IDC_PAL_PATHS_BUTTON, OnPalPathsButton)
 	//}}AFX_MSG_MAP
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
@@ -57,6 +59,7 @@ BOOL CSelectPaletteDlg::OnInitDialog()
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_LOAD_FOLDER, NORESIZE)
 			<< item(IDC_LOAD_MIX, NORESIZE)
+			<< item(IDC_PAL_PATHS_BUTTON, NORESIZE)
 			<< itemGrowing(HORIZONTAL)
 			<< item(IDOK, NORESIZE)
 			<< item(IDCANCEL, NORESIZE)
@@ -91,6 +94,9 @@ void CSelectPaletteDlg::OnLoadFolder()
 		AfxMessageBox("No .pal files found in that folder.", MB_OK | MB_ICONINFORMATION);
 		return;
 	}
+	// Mark as session-only so reload_pal_paths() (triggered by the PAL
+	// Paths editor) preserves it instead of wiping it.
+	m_main_frame->pal_map_list_mut()[parent_id].session_only = true;
 	rebuild_tree();
 }
 
@@ -124,8 +130,14 @@ void CSelectPaletteDlg::OnLoadMix()
 		CString path = dlg.GetNextPathName(pos);
 		if (path.IsEmpty())
 			continue;
-		if (m_main_frame->load_pal_mix(static_cast<std::string>(path)) >= 0)
+		int root = m_main_frame->load_pal_mix(static_cast<std::string>(path));
+		if (root >= 0)
+		{
+			// Session-only: preserved across reload_pal_paths(), not written
+			// to PalPaths registry.
+			m_main_frame->pal_map_list_mut()[root].session_only = true;
 			total++;
+		}
 	}
 	if (!total)
 	{
@@ -135,20 +147,39 @@ void CSelectPaletteDlg::OnLoadMix()
 	rebuild_tree();
 }
 
+void CSelectPaletteDlg::OnPalPathsButton()
+{
+	CPalPathsDlg dlg(this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	// Reload the user-loaded palette slice from the new registry list. The
+	// per-game ranges (m_pal_i[]) are not touched.
+	m_main_frame->reload_pal_paths();
+	rebuild_tree();
+}
+
 void CSelectPaletteDlg::insert_tree_entry(int parent_id, HTREEITEM parent_item)
 {
 	CTreeCtrl& tc = m_tree;
-	using t_sort_map = multimap<string, int>;
+	// Sort key: (order, name). User-PAL-path roots have order=0..N-1 and
+	// appear first in dialog order. Game roots and all nested nodes have
+	// order=-1, mapped to INT_MAX so they sort after the user roots and
+	// fall back to alphabetical among themselves.
+	using t_sort_map = multimap<std::pair<int, string>, int>;
 	t_sort_map sort_map;
 	for (auto& i : m_pal_map_list)
 	{
-		if (i.second.parent == parent_id)
-			sort_map.insert(t_sort_map::value_type(i.second.name, i.first));
+		if (i.second.parent != parent_id)
+			continue;
+		int order = i.second.order < 0 ? INT_MAX : i.second.order;
+		sort_map.insert(t_sort_map::value_type(std::make_pair(order, i.second.name), i.first));
 	}
 	for (auto& j : sort_map)
 	{
 		auto& i = *m_pal_map_list.find(j.second);
-		HTREEITEM h = tc.InsertItem(i.second.name.c_str(), parent_item);
+		string display_name = (i.second.session_only && parent_id == -1)
+			? "[M] " + i.second.name : i.second.name;
+		HTREEITEM h = tc.InsertItem(display_name.c_str(), parent_item);
 		tc.SetItemData(h, i.first);
 		insert_tree_entry(i.first, h);
 		if (m_current_palette != -1 && m_pal_list[m_current_palette].parent == i.first)

@@ -187,6 +187,8 @@
     </ClCompile>
     <ClCompile Include="SearchStringDlg.cpp">
     </ClCompile>
+    <ClCompile Include="PalPathsDlg.cpp">
+    </ClCompile>
     <ClCompile Include="SelectPaletteDlg.cpp">
     </ClCompile>
     <ClCompile Include="shp_properties_dlg.cpp">
@@ -237,6 +239,7 @@
     <ClInclude Include="SearchFileDlg.h" />
     <ClInclude Include="SearchInPaneDlg.h" />
     <ClInclude Include="SearchStringDlg.h" />
+    <ClInclude Include="PalPathsDlg.h" />
     <ClInclude Include="SelectPaletteDlg.h" />
     <ClInclude Include="shortcut.h" />
     <ClInclude Include="shp_properties_dlg.h" />
