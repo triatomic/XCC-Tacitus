@@ -351,6 +351,20 @@ static t_file_type magic_dispatch(const byte* p, size_t size)
 	// BINK: "BIKi"
 	if (m == 0x696B4942u)
 		return ft_bink;
+	// Renegade RG MIX: "MIX1" + non-zero index/tailer offsets (Cmix_file's
+	// loose c_files check at mix_file.cpp:33 reads "MI" as 0x494D = 18765 and
+	// claims any MIX1 file as a regular MIX, so shortcut before the probe loop).
+	if (m == 0x3158494Du && size >= 16)
+	{
+		const uint32_t index_offset  = u32(p + 4);
+		const uint32_t tailer_offset = u32(p + 8);
+		const uint32_t zero          = u32(p + 12);
+		if (zero == 0
+			&& index_offset >= 16
+			&& index_offset + 4 <= tailer_offset
+			&& tailer_offset + 4 <= size)
+			return ft_mix_rg;
+	}
 	// VOC: full "Creative Voice File" prefix, 19 bytes.
 	if (size >= 19 && !memcmp(p, "Creative Voice File", 19))
 		return ft_voc;

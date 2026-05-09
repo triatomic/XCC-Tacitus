@@ -18,6 +18,7 @@
 #include <map_td_ini_reader.h>
 #include <map_ts_ini_reader.h>
 #include <mp3_file.h>
+#include <mix_rg_file.h>
 #include <pak_file.h>
 #include <pal_file.h>
 #include <pcx_decode.h>
@@ -1012,6 +1013,20 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				}
 				break;
 			}
+		case ft_mix_rg:
+			{
+				Cmix_rg_file f;
+				f.load(m_data, m_size);
+				const int c_files = f.get_c_files();
+				draw_info("Files:", n(c_files));
+				m_y += m_y_inc;
+				for (int i = 0; i < c_files; i++)
+				{
+					const string name = f.get_name(i);
+					draw_info(nwzl(4, i) + " - " + nwsl(11, f.get_size(name)) + ' ' + name, "");
+				}
+				break;
+			}
 		case ft_pak:
 			{
 				Cpak_file f;
@@ -1757,7 +1772,7 @@ void CXCCFileView::post_open(Ccc_file& f)
 		m_ft = f.get_file_type(false);
 		m_size = f.get_size();
 		int cb_max_data = (m_ft == ft_dds || m_ft == ft_jpeg || m_ft == ft_map_td || m_ft == ft_map_ra
-			|| m_ft == ft_map_ts || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
+			|| m_ft == ft_map_ts || m_ft == ft_mix_rg || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
 			|| m_ft == ft_shp_ts || m_ft == ft_tga || m_ft == ft_vxl || m_ft == ft_wsa_dune2
 			|| m_ft == ft_wsa || m_ft == ft_xif) ? m_size :
 			(m_ft == ft_csf ? 64 << 8 : 256 << 10);
