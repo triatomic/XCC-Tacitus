@@ -2,6 +2,10 @@
 
 A fork of XCC Mixer focused on a Win11-style dark mode, an in-pane SHP/WSA/VXL player, and improved search & navigation.
 
+## Downloads
+
+Download latest official release: <https://github.com/triatomic/XCC-Tacitus/releases>
+
 ## Lineage
 
 This project descends from a chain of forks:
