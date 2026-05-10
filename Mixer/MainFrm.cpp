@@ -119,6 +119,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_WM_CTLCOLOR()
 	ON_WM_ERASEBKGND()
 	ON_MESSAGE(WM_USER + 0x101, &CMainFrame::OnThemeRebuildMenu)
+	ON_MESSAGE(WM_USER + 0x102, &CMainFrame::OnPostPickerRetheme)
 	ON_COMMAND(ID_THEME_PANES_ONE, OnThemePanesOne)
 	ON_COMMAND(ID_THEME_PANES_TWO, OnThemePanesTwo)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_ONE, OnUpdateThemePanesOne)
@@ -141,6 +142,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_FXAA, OnUpdateThemeFxaa)
 	ON_COMMAND(ID_THEME_VXL_SHADING, OnThemeVxlShading)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SHADING, OnUpdateThemeVxlShading)
+	ON_COMMAND(ID_THEME_PARALLEL_EXTRACT, OnThemeParallelExtract)
+	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
 END_MESSAGE_MAP()
 
 
@@ -1544,6 +1547,20 @@ LRESULT CMainFrame::OnThemeRebuildMenu(WPARAM, LPARAM)
 	return 0;
 }
 
+// Posted from CXCCMixerView::OnPopupOpenWith after SHOpenWithDialog returns.
+// Inline reapply doesn't work — the picker keeps draining its own dismiss
+// paints from the queue *after* control returns to us, so an immediate
+// RedrawWindow gets stomped by stragglers from the picker's WM_DESTROY chain.
+// Posting defers the reapply past those, into the next idle of our message
+// loop, where the listview is finally settled and our paint sticks.
+LRESULT CMainFrame::OnPostPickerRetheme(WPARAM, LPARAM)
+{
+	apply_theme_to_children();
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	return 0;
+}
+
 void CMainFrame::OnUpdateThemeLight(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::get() == theme::mode_light);
@@ -1650,11 +1667,17 @@ void CMainFrame::set_pane_layout(bool two)
 		// HWND is still alive; the splitter just gives it zero space and the
 		// file-info column to the right takes the slack on RecalcLayout.
 		m_wndSplitter.SetColumnInfo(1, 0, 0);
+		// Lock columns so the user can't accidentally grab the now-invisible
+		// splitter handles (bars 201 and 202 sit at the same X when col 1 is
+		// 0px wide). Without this, a misclick when trying to expand the left
+		// listview would re-expand the middle pane.
+		m_wndSplitter.set_columns_locked(true);
 	}
 	else
 	{
 		int restore = m_saved_middle_pane_w > 0 ? m_saved_middle_pane_w : 400;
 		m_wndSplitter.SetColumnInfo(1, restore, 50);
+		m_wndSplitter.set_columns_locked(false);
 	}
 	m_wndSplitter.RecalcLayout();
 	// RecalcLayout resizes children but doesn't force them to repaint, so the
@@ -1730,6 +1753,13 @@ void CMainFrame::OnThemeVxlShading()
 }
 
 void CMainFrame::OnUpdateThemeVxlShading(CCmdUI* p) { p->SetCheck(theme::vxl_shading()); }
+
+void CMainFrame::OnThemeParallelExtract()
+{
+	theme::set_parallel_extract(!theme::parallel_extract());
+}
+
+void CMainFrame::OnUpdateThemeParallelExtract(CCmdUI* p) { p->SetCheck(theme::parallel_extract()); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction

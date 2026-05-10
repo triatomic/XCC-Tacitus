@@ -215,6 +215,8 @@ protected:
 	afx_msg void OnUpdatePopupBatchExtract(CCmdUI* pCmdUI);
 	afx_msg void OnPopupBatchExtractPreserve();
 	afx_msg void OnUpdatePopupBatchExtractPreserve(CCmdUI* pCmdUI);
+	afx_msg void OnPopupOpenWith();
+	afx_msg void OnUpdatePopupOpenWith(CCmdUI* pCmdUI);
 	void batch_extract(bool preserve);
 	//}}AFX_MSG
 	afx_msg void OnXButtonUp(UINT nFlags, UINT nButton, CPoint point);

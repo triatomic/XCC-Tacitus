@@ -44,6 +44,7 @@
 #define ID_VIEW_PALETTE_NEXT_SIBLING    33135
 #define ID_POPUP_BATCH_EXTRACT          33136
 #define ID_POPUP_BATCH_EXTRACT_PRESERVE 33137
+#define ID_POPUP_OPEN_WITH              33138
 #define IDD_XSTE                        134
 #define IDD_XSTE_EDIT                   135
 #define IDD_XSE                         136
@@ -1420,6 +1421,7 @@
 #define ID_THEME_VXL_SS_16                41020
 #define ID_THEME_FXAA                     41021
 #define ID_THEME_VXL_SHADING              41022
+#define ID_THEME_PARALLEL_EXTRACT         41023
 
 #define IDD_PAL_PATHS                     142
 #define IDC_PAL_PATHS_LIST                1130
@@ -1446,7 +1448,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
-#define _APS_NEXT_COMMAND_VALUE         33138
+#define _APS_NEXT_COMMAND_VALUE         33139
 #define _APS_NEXT_CONTROL_VALUE         1138
 #define _APS_NEXT_SYMED_VALUE           103
 #endif

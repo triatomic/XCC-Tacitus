@@ -187,6 +187,26 @@ private:
 	long long		m_size;
 	t_text_cache	m_text_cache;
 	bool			m_text_cache_valid;
+	// SHP/SHP_TS/SHP_Dune2 grid cache. Built lazily on the first OnDraw of
+	// each new file; reused while the same file is open. Lets scrolling skip
+	// the per-frame walk (cum_y[] + binary search to first visible) and the
+	// per-frame RLE decode (decoded[] is filled on first paint of each
+	// frame). Invalidated by post_open via m_grid_cache_token.
+	struct shp_grid_cache
+	{
+		int token = -1;	// matches m_open_token when valid
+		// cum_y[i] = vertical offset of frame i relative to the first frame's
+		// top. cum_y has c_images + 1 entries; cum_y[c_images] = total height,
+		// used by upper_bound to locate the first-visible frame.
+		std::vector<int> cum_y;
+		// Lazily-filled decoded frame bytes (paletted, cx*cy). Size 0 = not
+		// yet decoded; populated on first paint of that frame. Only used by
+		// the SHP_TS path (compressed frames need RLEZeroTSDecompress);
+		// SHP_Dune2 also benefits since LCWDecompress + decode2 is per-frame.
+		std::vector<Cvirtual_binary> decoded;
+	};
+	shp_grid_cache m_shp_grid;
+	int m_open_token = 0;	// bumped in post_open; cache token must match
 	int				m_x;
 	int				m_y;
 	int				m_y_inc;

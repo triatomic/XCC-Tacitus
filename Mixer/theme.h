@@ -7,10 +7,24 @@
 // Drop-in replacement for CSplitterWnd.
 class CThemedSplitterWnd : public CSplitterWnd
 {
+public:
+	// When true, HitTest() returns noHit for any column-splitter bar,
+	// effectively making the splitter non-draggable. Used by the One Pane
+	// layout: with middle col collapsed to 0px, bars 201 and 202 sit at the
+	// same X and both are easy to grab accidentally; disabling them entirely
+	// removes the trap. Row splitters (vSplitterBar*) still work, the only
+	// active row case in this app is none anyway.
+	void set_columns_locked(bool locked) { m_columns_locked = locked; }
+	bool columns_locked() const { return m_columns_locked; }
+
 protected:
+	int HitTest(CPoint pt) const override;
 	void OnDrawSplitter(CDC* pDC, ESplitType nType, const CRect& rect) override;
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	DECLARE_MESSAGE_MAP()
+
+private:
+	bool m_columns_locked = false;
 };
 
 // Header subclass that paints text with the theme color in dark mode.
@@ -90,6 +104,16 @@ namespace theme
 	// light. Adds depth/form to flat-colored voxel models.
 	bool vxl_shading();
 	void set_vxl_shading(bool v);
+
+	// Parallel batch extract: when on, right-click → Extract / Extract
+	// preserving structure reads each selected entry's bytes serially on the
+	// UI thread (the MIX file handle isn't thread-safe — Ccc_file shares the
+	// parent's HANDLE via Cmix_file, so concurrent seek/read would race),
+	// then writes the gathered Cvirtual_binary blobs to disk in parallel.
+	// Real wins on large extracts to a fast SSD; degrades to roughly serial
+	// speed on slow media because writes are I/O-bound.
+	bool parallel_extract();
+	void set_parallel_extract(bool v);
 
 	// When on, paletted Westwood images (SHP/PCX/CPS/WSA) treat palette index 0
 	// as transparent — the engine convention. Off = paint index 0 with whatever

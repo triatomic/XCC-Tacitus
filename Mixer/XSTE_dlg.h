@@ -54,6 +54,13 @@ private:
 	{
 		const Ccsf_file::t_map::value_type* i;
 		int cat_id;
+		// Cached UTF-8/ACP string forms of i->second.value and
+		// i->second.extra_value. Populated once in create_cat_map (in
+		// parallel) so the sort comparator and LVN_GETDISPINFO handler don't
+		// pay WideCharToMultiByte + heap-alloc per call. For a 5000-entry
+		// CSF, sort comparisons alone were doing ~130k conversions.
+		string converted_value;
+		string extra_value;
 	};
 
 	using t_cat_map = map<int, string>;

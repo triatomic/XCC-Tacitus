@@ -181,6 +181,11 @@ protected:
 	int m_saved_middle_pane_w = 0; // restored when going one→two
 public:
 	void set_pane_layout(bool two_panes);
+	// Walk every themed child window and re-apply dark-mode state. Public
+	// because the listview's "Open With..." path needs to call this after
+	// SHOpenWithDialog returns — the picker invalidates our process-wide
+	// theme cache and we need to put dark mode back together.
+	void apply_theme_to_children();
 
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
@@ -291,9 +296,9 @@ protected:
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	void apply_theme_to_children();
 	void rebuild_menu_owner_draw();
 	afx_msg LRESULT OnThemeRebuildMenu(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnPostPickerRetheme(WPARAM wp, LPARAM lp);
 	afx_msg void OnThemePanesOne();
 	afx_msg void OnThemePanesTwo();
 	afx_msg void OnUpdateThemePanesOne(CCmdUI* pCmdUI);
@@ -318,6 +323,8 @@ protected:
 	afx_msg void OnUpdateThemeFxaa(CCmdUI* pCmdUI);
 	afx_msg void OnThemeVxlShading();
 	afx_msg void OnUpdateThemeVxlShading(CCmdUI* pCmdUI);
+	afx_msg void OnThemeParallelExtract();
+	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
 
 	DECLARE_MESSAGE_MAP()
 };

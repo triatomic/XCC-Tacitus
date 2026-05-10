@@ -19,6 +19,9 @@
 #include <map_ts_ini_reader.h>
 #include <mp3_file.h>
 #include <mix_rg_file.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <pak_file.h>
 #include <pal_file.h>
 #include <pcx_decode.h>
@@ -1221,28 +1224,59 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Offset Size:", n(f.get_cb_ofs()));
 				m_y += m_y_inc;
 				load_color_table(get_default_palette(), true);
-				for (int i = 0; i < c_images; i++)
+				// Cumulative-Y + decoded-frame cache. Per-frame LCWDecompress
+				// + decode2 is expensive and was previously re-run on every
+				// paint; cache makes scroll repaints just BitBlt.
+				if (m_shp_grid.token != m_open_token)
 				{
+					m_shp_grid.token = m_open_token;
+					m_shp_grid.cum_y.assign(c_images + 1, 0);
+					m_shp_grid.decoded.assign(c_images, Cvirtual_binary());
+					int y_acc = 0;
+					for (int i = 0; i < c_images; i++)
+					{
+						m_shp_grid.cum_y[i] = y_acc;
+						y_acc += f.get_cy(i) + m_y_inc;
+					}
+					m_shp_grid.cum_y[c_images] = y_acc;
+				}
+				const int grid_y0 = m_y;
+				CRect clip;
+				pDC->GetClipBox(&clip);
+				const int clip_top_rel = clip.top - grid_y0;
+				const int clip_bot_rel = clip.bottom - grid_y0;
+				auto& cum = m_shp_grid.cum_y;
+				int first = static_cast<int>(std::upper_bound(cum.begin(), cum.end(), clip_top_rel) - cum.begin()) - 1;
+				if (first < 0) first = 0;
+				if (first > c_images) first = c_images;
+				m_y = grid_y0 + cum[first];
+				for (int i = first; i < c_images; i++)
+				{
+					if (cum[i] >= clip_bot_rel)
+						break;
 					const int cx = f.get_cx(i);
 					const int cy = f.get_cy(i);
 					int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
 					CRect r_test(offset, m_y, offset + cx * zoom_pre / 100, m_y + cy * zoom_pre / 100);
 					if (pDC->RectVisible(&r_test))
 					{
-						byte* image = new byte[cx * cy];
-						if (f.is_compressed(i))
+						if (m_shp_grid.decoded[i].size() != cx * cy)
 						{
-							byte* d = new byte[f.get_image_header(i)->size_out];
-							decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
-							delete[] d;
+							byte* image = m_shp_grid.decoded[i].write_start(cx * cy);
+							if (f.is_compressed(i))
+							{
+								byte* d = new byte[f.get_image_header(i)->size_out];
+								decode2(d, image, LCWDecompress(f.get_image(i), d), f.get_reference_palette(i));
+								delete[] d;
+							}
+							else
+								decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
 						}
-						else
-							decode2(f.get_image(i), image, f.get_image_header(i)->size_out, f.get_reference_palette(i));
-						draw_image8(image, cx, cy, pDC, offset);
-						delete[] image;
+						draw_image8(m_shp_grid.decoded[i].data(), cx, cy, pDC, offset);
 					}
 					m_y += cy + m_y_inc;
 				}
+				m_y = grid_y0 + cum[c_images];
 				break;
 			}
 		case ft_shp:
@@ -1258,13 +1292,29 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				m_y += m_y_inc;
 				load_color_table(get_default_palette(), true);
 				Cvirtual_image image = f.vimage();
-				const byte* r = image.image();
-				for (int i = 0; i < f.cf(); i++)
+				const byte* r0 = image.image();
+				const int cf = f.cf();
+				const int fcx = f.cx();
+				const int fcy = f.cy();
+				const int fstride = f.cb_image();
+				const int row_h = fcy + m_y_inc;
+				const int grid_y0 = m_y;
+				// Fixed-height frames: jump to first visible by division
+				// instead of walking every frame on each scroll repaint.
+				CRect clip;
+				pDC->GetClipBox(&clip);
+				int first = (clip.top - grid_y0) / row_h;
+				if (first < 0) first = 0;
+				if (first > cf) first = cf;
+				m_y = grid_y0 + first * row_h;
+				for (int i = first; i < cf; i++)
 				{
-					draw_image8(r, f.cx(), f.cy(), pDC, offset);
-					r += f.cb_image();
-					m_y += f.cy() + m_y_inc;
+					if (m_y >= clip.bottom)
+						break;
+					draw_image8(r0 + i * fstride, fcx, fcy, pDC, offset);
+					m_y += row_h;
 				}
+				m_y = grid_y0 + cf * row_h;
 				break;
 			}
 		case ft_shp_ts:
@@ -1280,41 +1330,98 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Unknown:", nh(8, zero));
 				m_y += m_y_inc;
 				load_color_table(get_default_palette(), true);
+#ifdef NDEBUG
+				// Release: build cumulative-Y cache once per file, then binary-
+				// search to the first visible frame and stop at the last. Skips
+				// the per-frame walk on every scroll repaint and caches the RLE
+				// decode per-frame so subsequent paints don't re-decompress.
+				// Debug build keeps the original serial walk because the
+				// per-frame radar-color band advances m_y in ways the cache
+				// geometry doesn't model — that's a debug-only blemish.
+				if (m_shp_grid.token != m_open_token)
+				{
+					m_shp_grid.token = m_open_token;
+					m_shp_grid.cum_y.assign(c_images + 1, 0);
+					m_shp_grid.decoded.assign(c_images, Cvirtual_binary());
+					int y_acc = 0;
+					for (int i = 0; i < c_images; i++)
+					{
+						m_shp_grid.cum_y[i] = y_acc;
+						const int fcy = f.get_cy(i);
+						const int fcx = f.get_cx(i);
+						if (fcx && fcy)
+							y_acc += fcy + m_y_inc;
+					}
+					m_shp_grid.cum_y[c_images] = y_acc;
+				}
+				const int grid_y0 = m_y;
+				CRect clip;
+				pDC->GetClipBox(&clip);
+				const int clip_top_rel = clip.top - grid_y0;
+				const int clip_bot_rel = clip.bottom - grid_y0;
+				auto& cum = m_shp_grid.cum_y;
+				int first = static_cast<int>(std::upper_bound(cum.begin(), cum.end(), clip_top_rel) - cum.begin()) - 1;
+				if (first < 0) first = 0;
+				if (first > c_images) first = c_images;
+				m_y = grid_y0 + cum[first];
+				for (int i = first; i < c_images; i++)
+				{
+					if (cum[i] >= clip_bot_rel)
+						break;
+					const int fcx = f.get_cx(i);
+					const int fcy = f.get_cy(i);
+					if (fcx && fcy)
+					{
+						int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
+						CRect r_test(offset, m_y, offset + fcx * zoom_pre / 100, m_y + fcy * zoom_pre / 100);
+						if (pDC->RectVisible(&r_test))
+						{
+							if (f.is_compressed(i))
+							{
+								if (m_shp_grid.decoded[i].size() != fcx * fcy)
+									RLEZeroTSDecompress(f.get_image(i), m_shp_grid.decoded[i].write_start(fcx * fcy), fcx, fcy);
+								draw_image8(m_shp_grid.decoded[i].data(), fcx, fcy, pDC, offset);
+							}
+							else
+								draw_image8(f.get_image(i), fcx, fcy, pDC, offset);
+						}
+						m_y += fcy + m_y_inc;
+					}
+				}
+				m_y = grid_y0 + cum[c_images];
+#else
 				for (int i = 0; i < c_images; i++)
 				{
-#ifndef NDEBUG	//this doesn't display right and i don't know if it's useful information at all
 					draw_info("Radar Color:", "R:" + nwzl(3, f.get_image_header(i)->red) + " G:" + nwzl(3, f.get_image_header(i)->green) + " B:" + nwzl(3, f.get_image_header(i)->blue) + " A:" + nwzl(3, f.get_image_header(i)->alpha));
 					CBrush box;
 					CBrush color;
 					box.CreateSolidBrush(RGB(0, 0, 0));
 					color.CreateSolidBrush(RGB(f.get_image_header(i)->red, f.get_image_header(i)->green, f.get_image_header(i)->blue));
-					//Draw box that will fill the background edges, needed for light colors
 					pDC->FillRect(CRect(CPoint(94, m_y - 12), CSize(26, m_y_inc * 2 / 3 + 2)), &box);
-					//Draw the actual color
 					pDC->FillRect(CRect(CPoint(95, m_y - 11), CSize(24, m_y_inc * 2 / 3)), &color);
 					draw_info("Frame Flags:", nh(8, f.get_image_header(i)->flags));
 					draw_info("Unknown:", nh(8, f.get_image_header(i)->zero));
-#endif
-					const int cx = f.get_cx(i);
-					const int cy = f.get_cy(i);
-					if (cx && cy)
+					const int fcx = f.get_cx(i);
+					const int fcy = f.get_cy(i);
+					if (fcx && fcy)
 					{
 						int zoom_pre = (m_zoomable_file && m_zoom_pct > 0) ? m_zoom_pct : 100;
-						CRect r_test(offset, m_y, offset + cx * zoom_pre / 100, m_y + cy * zoom_pre / 100);
+						CRect r_test(offset, m_y, offset + fcx * zoom_pre / 100, m_y + fcy * zoom_pre / 100);
 						if (pDC->RectVisible(&r_test))
 						{
 							if (f.is_compressed(i))
 							{
 								Cvirtual_binary image;
-								RLEZeroTSDecompress(f.get_image(i), image.write_start(cx * cy), cx, cy);
-								draw_image8(image.data(), cx, cy, pDC, offset);
+								RLEZeroTSDecompress(f.get_image(i), image.write_start(fcx * fcy), fcx, fcy);
+								draw_image8(image.data(), fcx, fcy, pDC, offset);
 							}
 							else
-								draw_image8(f.get_image(i), cx, cy, pDC, offset);
+								draw_image8(f.get_image(i), fcx, fcy, pDC, offset);
 						}
-						m_y += cy + m_y_inc;
+						m_y += fcy + m_y_inc;
 					}
 				}
+#endif
 				break;
 			}
 		case ft_tga:
@@ -1550,121 +1657,145 @@ void CXCCFileView::OnDraw(CDC* pDC)
 					draw_info("Y max:", _gcvt(section_tailer.y_max_scale, 10, fb));
 					draw_info("Z max:", _gcvt(section_tailer.z_max_scale, 10, fb));
 					draw_info("Normal Type:", n(section_tailer.unknown));
-					byte* image = new byte[c_pixels];
-					byte* image_s = new byte[c_pixels];
-					char* image_z = new char[c_pixels];
 					m_y += m_y_inc;
+					// VXL grid: 64 independent voxel rasterizations (8 yaw × 8 pitch).
+					// Each cell does a full per-section voxel splat into its own
+					// image / image_s / image_z buffers — no shared state across
+					// cells, so this is the dominant cost and a clean parallel-for
+					// candidate. We split it into:
+					//   Phase 1 (parallel): rasterize all 64 cells. Mode 2 also
+					//     normalizes z and builds its per-cell gray palette here.
+					//   Phase 2 (serial UI thread): walk the cells and call
+					//     draw_image8 + load_color_table. GDI work must stay on
+					//     the UI thread because pDC and the member DIB scratch
+					//     (mh_dib / mp_dib in draw_image8) aren't thread-safe.
+					struct vxl_grid_cell {
+						std::vector<byte> image;
+						std::vector<byte> image_s;
+						std::vector<char> image_z;
+						t_palette mode2_palette{};	// only populated when vxl_mode == 2
+					};
+					std::vector<vxl_grid_cell> cells(64);
+					for (auto& c : cells)
+					{
+						c.image.assign(c_pixels, 0);
+						c.image_s.assign(c_pixels, 0);
+						c.image_z.assign(c_pixels, CHAR_MIN);
+					}
+					#pragma omp parallel for schedule(static)
+					for (int cell_idx = 0; cell_idx < 64; cell_idx++)
+					{
+						const int yr = cell_idx / 8;
+						const int xr = cell_idx % 8;
+						vxl_grid_cell& cc = cells[cell_idx];
+						byte* image = cc.image.data();
+						byte* image_s = cc.image_s.data();
+						char* image_z = cc.image_z.data();
+						int j = 0;
+						for (int y = 0; y < cy; y++)
+						{
+							for (int x = 0; x < cx; x++)
+							{
+								const byte* r = f.get_span_data(i, j);
+								if (r)
+								{
+									int z = 0;
+									while (z < cz)
+									{
+										z += *r++;
+										int c = *r++;
+										while (c--)
+										{
+											t_vector s_pixel;
+											s_pixel.x = x - center_x;
+											s_pixel.y = y - center_y;
+											s_pixel.z = z - center_z;
+											t_vector d_pixel = rotate_y(rotate_x(s_pixel, xr * std::numbers::pi / 4), yr * std::numbers::pi / 4);
+											d_pixel.x += l;
+											d_pixel.y += l;
+											d_pixel.z += center_z;
+											int ofs = static_cast<int>(d_pixel.x) + cl * static_cast<int>(d_pixel.y);
+											if (d_pixel.z > image_z[ofs])
+											{
+												image[ofs] = *r++;
+												image_s[ofs] = *r++;
+												image_z[ofs] = d_pixel.z;
+											}
+											else
+												r += 2;
+											z++;
+										}
+										r++;
+									}
+								}
+								j++;
+							}
+						}
+						if (vxl_mode == 2)
+						{
+							// Per-cell z-range normalization + gray palette.
+							int min_z = INT_MAX;
+							int max_z = INT_MIN;
+							for (int o = 1; o < c_pixels; o++)
+							{
+								int v = image_z[o];
+								if (v == CHAR_MIN) continue;
+								if (v < min_z) min_z = v;
+								if (v > max_z) max_z = v;
+							}
+							for (int o = 0; o < c_pixels; o++)
+							{
+								if (image_z[o] == CHAR_MIN)
+									image_z[o] = -1;
+								else
+									image_z[o] -= min_z;
+							}
+							max_z -= min_z;
+							for (int p = 0; p < max_z; p++)
+								cc.mode2_palette[p].r = cc.mode2_palette[p].g = cc.mode2_palette[p].b = p * 255 / max_z;
+							cc.mode2_palette[0xff].r = 0;
+							cc.mode2_palette[0xff].g = 0;
+							cc.mode2_palette[0xff].b = 0xff;
+						}
+					}
+					// Mode 1 uses one section-wide gray palette; load it once.
+					if (vxl_mode == 1)
+					{
+						t_palette gray_palette;
+						if (section_tailer.unknown == 2)
+						{
+							for (int gi = 0; gi < 256; gi++)
+								gray_palette[gi].r = gray_palette[gi].g = gray_palette[gi].b = gi * 255 / 35;
+						}
+						else
+						{
+							for (int gi = 0; gi < 256; gi++)
+								gray_palette[gi].r = gray_palette[gi].g = gray_palette[gi].b = gi;
+						}
+						load_color_table(gray_palette, false);
+					}
+					// Phase 2: serial draw on the UI thread.
 					for (int yr = 0; yr < 8; yr++)
 					{
 						for (int xr = 0; xr < 8; xr++)
 						{
+							vxl_grid_cell& cc = cells[yr * 8 + xr];
+							switch (vxl_mode)
 							{
-								memset(image, 0, c_pixels);
-								memset(image_s, 0, c_pixels);
-								memset(image_z, CHAR_MIN, c_pixels);
-								int j = 0;
-								for (int y = 0; y < cy; y++)
-								{
-									for (int x = 0; x < cx; x++)
-									{
-										const byte* r = f.get_span_data(i, j);
-										if (r)
-										{
-											int z = 0;
-											while (z < cz)
-											{
-												z += *r++;
-												int c = *r++;
-												while (c--)
-												{
-													t_vector s_pixel;
-													s_pixel.x = x - center_x;
-													s_pixel.y = y - center_y;
-													s_pixel.z = z - center_z;
-													t_vector d_pixel = rotate_y(rotate_x(s_pixel, xr * std::numbers::pi / 4), yr * std::numbers::pi / 4);
-													d_pixel.x += l;
-													d_pixel.y += l;
-													d_pixel.z += center_z;
-													int ofs = static_cast<int>(d_pixel.x) + cl * static_cast<int>(d_pixel.y);
-													if (d_pixel.z > image_z[ofs])
-													{
-														image[ofs] = *r++;
-														image_s[ofs] = *r++;
-														image_z[ofs] = d_pixel.z;
-													}
-													else
-														r += 2;
-													z++;
-												}
-												r++;
-											}
-										}
-										j++;
-									}
-								}
-								switch (vxl_mode)
-								{
-								case 0:
-									draw_image8(image, cl, cl, pDC, xr * (cl + m_y_inc) + offset);
-									break;
-								case 1:
-									{
-										t_palette gray_palette;
-										if (section_tailer.unknown == 2)
-										{
-											for (int i = 0; i < 256; i++)
-												gray_palette[i].r = gray_palette[i].g = gray_palette[i].b = i * 255 / 35;
-										}
-										else
-										{
-											for (int i = 0; i < 256; i++)
-												gray_palette[i].r = gray_palette[i].g = gray_palette[i].b = i;
-										}
-										load_color_table(gray_palette, false);
-										draw_image8(image_s, cl, cl, pDC, xr * (cl + m_y_inc) + offset);
-									}
-									break;
-								case 2:
-									{
-										int min_z = INT_MAX;
-										int max_z = INT_MIN;
-										int o;
-										for (o = 1; o < c_pixels; o++)
-										{
-											int v = image_z[o];
-											if (v == CHAR_MIN)
-												continue;
-											if (v < min_z)
-												min_z = v;
-											if (v > max_z)
-												max_z = v;
-										}
-										for (o = 0; o < c_pixels; o++)
-										{
-											if (image_z[o] == CHAR_MIN)
-												image_z[o] = -1;
-											else
-												image_z[o] -= min_z;
-										}
-										max_z -= min_z;
-										t_palette gray_palette;
-										for (int p = 0; p < max_z; p++)
-											gray_palette[p].r = gray_palette[p].g = gray_palette[p].b = p * 255 / max_z;
-										gray_palette[0xff].r = 0;
-										gray_palette[0xff].g = 0;
-										gray_palette[0xff].b = 0xff;
-										load_color_table(gray_palette, false);
-										draw_image8(reinterpret_cast<const byte*>(image_z), cl, cl, pDC, xr * (cl + m_y_inc) + offset);
-										break;
-									}
-								}
+							case 0:
+								draw_image8(cc.image.data(), cl, cl, pDC, xr * (cl + m_y_inc) + offset);
+								break;
+							case 1:
+								draw_image8(cc.image_s.data(), cl, cl, pDC, xr * (cl + m_y_inc) + offset);
+								break;
+							case 2:
+								load_color_table(cc.mode2_palette, false);
+								draw_image8(reinterpret_cast<const byte*>(cc.image_z.data()), cl, cl, pDC, xr * (cl + m_y_inc) + offset);
+								break;
 							}
 						}
 						m_y += cl + m_y_inc;
 					}
-					delete[] image_z;
-					delete[] image_s;
-					delete[] image;
 				}
 				break;
 			}
@@ -1894,6 +2025,11 @@ void CXCCFileView::post_open(Ccc_file& f)
 		f.read(m_data.write_start(cb_data), cb_data);
 		f.close();
 		m_text_cache_valid = false;
+		// Invalidate per-file grid caches. The shp_grid cache compares its
+		// token against m_open_token; bumping here forces a rebuild on the
+		// next paint. Don't clear vectors — they'll be reassigned on rebuild
+		// and the old allocations get reused if same/larger size.
+		m_open_token++;
 		m_is_open = true;
 		m_zoom_pct = 100;
 		m_zoomable_file =
@@ -2546,57 +2682,77 @@ void CXCCFileView::player_draw(CDC* pDC)
 		const float light_x = -0.40825f;
 		const float light_y = -0.40825f;
 		const float light_z =  0.81650f;
-		const float ambient = 0.35f;	// floor: faces fully turned away from light still get this much
-		const float diffuse = 1.0f;	// shading range above ambient (max = ambient + diffuse = 1.20)
+		const float ambient = 0.55f;	// floor: faces fully turned away from light still get this much
+		const float diffuse = 0.85f;	// shading range above ambient (max = ambient + diffuse = 1.20)
 		if (shading)
 			vxl_shade.assign(c_pixels, 128);	// 128 = neutral 1.0 (ambient + diffuse * 0.5 default)
-		for (const auto& v : m_vxl_cloud)
+		// Parallelize the splat by partitioning *output rows*: each thread
+		// owns a contiguous row band [y_lo, y_hi) of the supersample
+		// framebuffer and iterates the entire voxel cloud, writing only when
+		// the projected voxel footprint falls in its band. No write hazard on
+		// d / z_buf / vxl_shade because bands don't overlap. Cost: rotation
+		// math runs T times per voxel (T = thread count), but most voxels
+		// reject early via the band-bounds check before hitting the per-pixel
+		// inner loop, and the inner ss*ss pixel writes dominate at SS=4..16
+		// anyway. Voxel cloud is read-only, so no copies needed.
+		const int n_voxels = static_cast<int>(m_vxl_cloud.size());
+		const t_vxl_voxel* cloud = m_vxl_cloud.data();
+		#pragma omp parallel
 		{
-			double rx = v.x * cosY - v.y * sinY;
-			double ry = v.x * sinY + v.y * cosY;
-			double rz = v.z;
-			double py = ry * cosP - rz * sinP;
-			double pz = ry * sinP + rz * cosP;
-			// At supersample resolution, each voxel covers a ss-by-ss footprint.
-			// A single-pixel splat would leave 75% of the silhouette as holes
-			// (the "uncovered = background" pixels), so write the full footprint.
-			int sx0 = static_cast<int>(rx * ss) + half_ss;
-			int sy0 = -static_cast<int>(py * ss) + half_ss;
-			short depth = static_cast<short>(pz);
-			// Camera-space normal: same yaw/pitch transform as position. We
-			// reuse the screen-space convention where camera +Z faces user.
-			unsigned char shade_byte = 128;
-			if (shading)
+			int n_threads = 1;
+			int tid = 0;
+			#ifdef _OPENMP
+			n_threads = omp_get_num_threads();
+			tid = omp_get_thread_num();
+			#endif
+			// Even row-count split — last band absorbs remainder.
+			int y_lo = (vxl_ss_cy * tid) / n_threads;
+			int y_hi = (vxl_ss_cy * (tid + 1)) / n_threads;
+			for (int vi = 0; vi < n_voxels; vi++)
 			{
-				float nrx = static_cast<float>(v.nx * cosY - v.ny * sinY);
-				float nry = static_cast<float>(v.nx * sinY + v.ny * cosY);
-				float nrz = static_cast<float>(v.nz);
-				float nry_p = static_cast<float>(nry * cosP - nrz * sinP);
-				float nrz_p = static_cast<float>(nry * sinP + nrz * cosP);
-				// Screen Y is flipped (we negate py earlier), so flip the
-				// normal Y for the dot product to match.
-				float ndotl = nrx * light_x + (-nry_p) * light_y + nrz_p * light_z;
-				if (ndotl < 0.0f) ndotl = 0.0f;
-				float shade = ambient + diffuse * ndotl;
-				int sb = static_cast<int>(shade * 128.0f + 0.5f);
-				if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
-				shade_byte = static_cast<unsigned char>(sb);
-			}
-			for (int dy = 0; dy < ss; dy++)
-			{
-				int sy_pix = sy0 + dy;
-				if (sy_pix < 0 || sy_pix >= vxl_ss_cy) continue;
-				for (int dx = 0; dx < ss; dx++)
+				const t_vxl_voxel& v = cloud[vi];
+				double rx = v.x * cosY - v.y * sinY;
+				double ry = v.x * sinY + v.y * cosY;
+				double rz = v.z;
+				double py = ry * cosP - rz * sinP;
+				double pz = ry * sinP + rz * cosP;
+				int sx0 = static_cast<int>(rx * ss) + half_ss;
+				int sy0 = -static_cast<int>(py * ss) + half_ss;
+				// Early-out: voxel footprint is entirely outside this thread's
+				// row band. Saves the shading/normal math and the inner loop.
+				if (sy0 + ss <= y_lo || sy0 >= y_hi) continue;
+				short depth = static_cast<short>(pz);
+				unsigned char shade_byte = 128;
+				if (shading)
 				{
-					int sx_pix = sx0 + dx;
-					if (sx_pix < 0 || sx_pix >= vxl_ss_cx) continue;
-					int ofs = sx_pix + vxl_ss_cx * sy_pix;
-					if (depth > z_buf[ofs])
+					float nrx = static_cast<float>(v.nx * cosY - v.ny * sinY);
+					float nry = static_cast<float>(v.nx * sinY + v.ny * cosY);
+					float nrz = static_cast<float>(v.nz);
+					float nry_p = static_cast<float>(nry * cosP - nrz * sinP);
+					float nrz_p = static_cast<float>(nry * sinP + nrz * cosP);
+					float ndotl = nrx * light_x + (-nry_p) * light_y + nrz_p * light_z;
+					if (ndotl < 0.0f) ndotl = 0.0f;
+					float shade = ambient + diffuse * ndotl;
+					int sb = static_cast<int>(shade * 128.0f + 0.5f);
+					if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
+					shade_byte = static_cast<unsigned char>(sb);
+				}
+				for (int dy = 0; dy < ss; dy++)
+				{
+					int sy_pix = sy0 + dy;
+					if (sy_pix < y_lo || sy_pix >= y_hi) continue;	// also clamps to canvas via band bounds
+					for (int dx = 0; dx < ss; dx++)
 					{
-						z_buf[ofs] = depth;
-						d[ofs] = v.color;
-						if (shading)
-							vxl_shade[ofs] = shade_byte;
+						int sx_pix = sx0 + dx;
+						if (sx_pix < 0 || sx_pix >= vxl_ss_cx) continue;
+						int ofs = sx_pix + vxl_ss_cx * sy_pix;
+						if (depth > z_buf[ofs])
+						{
+							z_buf[ofs] = depth;
+							d[ofs] = v.color;
+							if (shading)
+								vxl_shade[ofs] = shade_byte;
+						}
 					}
 				}
 			}
@@ -2736,6 +2892,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				sshad = m_player_frames[shadow_idx].data();
 		}
 		const int n = cx_s * cy_s;
+		#pragma omp parallel for schedule(static)
 		for (int i = 0; i < n; i++)
 		{
 			byte idx = s[i];
@@ -2806,6 +2963,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 		const DWORD line = 0x00FFFFFF;
 		// Sprite-content check via the paletted source buffer: 0 = uncovered
 		// (background) for both SHP/WSA frames and the VXL nearest splat.
+		#pragma omp parallel for schedule(static)
 		for (int py = 0; py < cy_s; py++)
 		{
 			for (int px = 0; px < cx_s; px++)
