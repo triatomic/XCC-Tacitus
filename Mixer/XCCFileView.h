@@ -72,6 +72,8 @@ protected:
 	afx_msg void OnPlayerBg();
 	afx_msg void OnPlayerSide(UINT id);
 	afx_msg void OnPlayerSideCustom();
+	afx_msg void OnVxlSide(UINT id);
+	afx_msg void OnVxlSideCustom();
 	afx_msg void OnPlayerGridSel();
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
@@ -139,9 +141,17 @@ public:
 	COLORREF m_player_side_custom_color = RGB(0xff, 0xff, 0xff);
 	int m_player_grid_mode = 0;     // 0 = none, 1 = TS (48px), 2 = RA2 (60px)
 
+	// VXL-only parallel of the SHP side-color swatches. Kept separate from the
+	// SHP set so toggling house color on a VXL doesn't leak state into a SHP
+	// preview and vice versa. Same retint convention (palette indices 16..31).
+	CButton m_vxl_side[8];
+	CButton m_vxl_side_custom;
+	int m_vxl_side_idx = -1;
+	COLORREF m_vxl_side_custom_color = RGB(0xff, 0xff, 0xff);
+
 	// VXL interactive 3D viewer state. When the file is a .vxl, player mode
 	// becomes a 3dsmax-style orbit viewer instead of an animation player.
-	struct t_vxl_voxel { double x, y, z; unsigned char color; };
+	struct t_vxl_voxel { double x, y, z; unsigned char color; float nx, ny, nz; };
 	vector<t_vxl_voxel> m_vxl_cloud;
 	int m_vxl_half = 0;
 	double m_vxl_yaw = 0.0;
@@ -151,20 +161,8 @@ public:
 	double m_vxl_drag_yaw0 = 0.0;
 	double m_vxl_drag_pitch0 = 0.0;
 	bool is_vxl_view() const { return m_player_mode && m_ft == ft_vxl; }
-	int player_band_h() const { return is_vxl_view() ? 32 : 64; }
+	int player_band_h() const { return 64; }
 
-	// VXL smooth-splat cache: the rasterized BGRA framebuffer is invariant in
-	// yaw/pitch/canvas-size/SHP-transparency, so we can reuse it across paints
-	// (slider scrubs, repaints from focus changes, etc.). Invalidated by
-	// player_enter, drag updates, and the SHP-transparency toggle.
-	std::vector<DWORD> m_vxl_splat_cache;
-	double m_vxl_splat_yaw = 1e9;
-	double m_vxl_splat_pitch = 1e9;
-	int m_vxl_splat_cx = 0;
-	int m_vxl_splat_cy = 0;
-	bool m_vxl_splat_tr = false;
-	bool m_vxl_splat_cb = true;  // checkerboard-on flag at fill time
-	void invalidate_vxl_splat() { m_vxl_splat_yaw = 1e9; }
 private:
 	COLORREF  m_colour = RGB(40, 40, 40);
 	CRect			clientRect;
