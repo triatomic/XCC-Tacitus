@@ -1,7 +1,6 @@
 #pragma once
 
 #define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <ShObjIdl_core.h>
 #include <atlstr.h>
 

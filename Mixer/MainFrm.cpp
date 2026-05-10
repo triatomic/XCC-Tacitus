@@ -12,6 +12,7 @@
 #include "SearchInPaneDlg.h"
 #include "PalPathsDlg.h"
 #include "SelectPaletteDlg.h"
+#include "VxlLightingDlg.h"
 #include "string_conversion.h"
 #include "theme.h"
 #include "theme_ts_ini_reader.h"
@@ -140,6 +141,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_16, OnUpdateThemeVxlSs16)
 	ON_COMMAND(ID_THEME_VXL_SHADING, OnThemeVxlShading)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SHADING, OnUpdateThemeVxlShading)
+	ON_COMMAND(ID_THEME_VXL_LIGHTING, OnThemeVxlLighting)
 	ON_COMMAND(ID_THEME_PARALLEL_EXTRACT, OnThemeParallelExtract)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
 	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
@@ -1754,6 +1756,27 @@ void CMainFrame::OnThemeVxlShading()
 
 void CMainFrame::OnUpdateThemeVxlShading(CCmdUI* p) { p->SetCheck(theme::vxl_shading()); }
 
+void CMainFrame::OnThemeVxlLighting()
+{
+	if (!m_vxl_lighting_dlg)
+	{
+		m_vxl_lighting_dlg = std::make_unique<CVxlLightingDlg>(this);
+		if (!m_vxl_lighting_dlg->Create(IDD_VXL_LIGHTING, this))
+		{
+			m_vxl_lighting_dlg.reset();
+			return;
+		}
+	}
+	m_vxl_lighting_dlg->ShowWindow(SW_SHOW);
+	m_vxl_lighting_dlg->SetForegroundWindow();
+}
+
+void CMainFrame::invalidate_file_info_pane()
+{
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate(FALSE);
+}
+
 void CMainFrame::OnThemeParallelExtract()
 {
 	theme::set_parallel_extract(!theme::parallel_extract());
@@ -1766,7 +1789,7 @@ void CMainFrame::OnThemeLimitVxlCpu()
 	theme::set_limit_vxl_cpu(!theme::limit_vxl_cpu());
 }
 
-void CMainFrame::OnUpdateThemeLimitVxlCpu(CCmdUI* p) { p->SetCheck(theme::limit_vxl_cpu()); }
+void CMainFrame::OnUpdateThemeLimitVxlCpu(CCmdUI* p) { p->SetCheck(theme::limit_vxl_cpu()); p->Enable(FALSE); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction

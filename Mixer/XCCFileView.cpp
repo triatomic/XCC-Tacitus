@@ -1010,6 +1010,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				draw_info("Sections:", n(f.get_c_sections()));
 				break;
 			}
+		case ft_bmp:
 		case ft_jpeg:
 		case ft_png:
 			{
@@ -2039,7 +2040,7 @@ void CXCCFileView::post_open(Ccc_file& f)
 		m_cy = 0;
 		m_ft = f.get_file_type(false);
 		m_size = f.get_size();
-		int cb_max_data = (m_ft == ft_dds || m_ft == ft_jpeg || m_ft == ft_map_td || m_ft == ft_map_ra
+		int cb_max_data = (m_ft == ft_bmp || m_ft == ft_dds || m_ft == ft_jpeg || m_ft == ft_map_td || m_ft == ft_map_ra
 			|| m_ft == ft_map_ts || m_ft == ft_mix_rg || m_ft == ft_pcx || m_ft == ft_png || m_ft == ft_shp
 			|| m_ft == ft_shp_ts || m_ft == ft_tga || m_ft == ft_vxl || m_ft == ft_wsa_dune2
 			|| m_ft == ft_wsa || m_ft == ft_xif) ? m_size :
@@ -2832,6 +2833,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			return;
 		const int ss = static_cast<int>(theme::vxl_supersample());
 		const bool shading = theme::vxl_shading();
+		const int lighting_version = theme::vxl_lighting_version();
 		vxl_ss_cx = m_player_cx * ss;
 		vxl_ss_cy = m_player_cy * ss;
 		const bool cache_hit =
@@ -2840,6 +2842,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.pitch == m_vxl_pitch &&
 			m_vxl_splat.ss == ss &&
 			m_vxl_splat.shading == shading &&
+			m_vxl_splat.lighting_version == lighting_version &&
 			m_vxl_splat.cx_s == vxl_ss_cx &&
 			m_vxl_splat.cy_s == vxl_ss_cy &&
 			m_vxl_splat.buf.size() == static_cast<size_t>(vxl_ss_cx) * vxl_ss_cy;
@@ -2856,14 +2859,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vector<short> z_buf(c_pixels, SHRT_MIN);
 			// Camera-relative directional light. The viewer is camera-axis aligned
 			// (post-rotation rx,py,pz axes), so a fixed direction in this space
-			// effectively orbits with the user. Pick "upper-left-front" (-x, -y, +z
-			// in screen space → light comes from the upper-left, facing the
-			// camera). We dot this with each voxel's camera-space normal.
-			const float light_x = -0.40825f;
-			const float light_y = -0.40825f;
-			const float light_z =  0.81650f;
-			const float ambient = 0.55f;	// floor: faces fully turned away from light still get this much
-			const float diffuse = 0.85f;	// shading range above ambient (max = ambient + diffuse = 1.20)
+			// effectively orbits with the user. We dot this with each voxel's
+			// camera-space normal. Direction + ambient/diffuse are user-
+			// configurable via the VXL Lighting dialog (theme:: accessors);
+			// changing any of them bumps theme::vxl_lighting_version() which
+			// is part of the splat cache key and forces a rebuild.
+			float light_x, light_y, light_z;
+			theme::vxl_light_direction(light_x, light_y, light_z);
+			const float ambient = theme::vxl_light_ambient();
+			const float diffuse = theme::vxl_light_diffuse();
 			if (shading)
 				m_vxl_splat.shade.assign(c_pixels, 128);	// 128 = neutral 1.0
 			else
@@ -2939,6 +2943,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.pitch = m_vxl_pitch;
 			m_vxl_splat.ss = ss;
 			m_vxl_splat.shading = shading;
+			m_vxl_splat.lighting_version = lighting_version;
 			m_vxl_splat.cx_s = vxl_ss_cx;
 			m_vxl_splat.cy_s = vxl_ss_cy;
 		}
@@ -3123,6 +3128,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				vc.splat_pitch == m_vxl_splat.pitch &&
 				vc.splat_ss == m_vxl_splat.ss &&
 				vc.splat_shading == m_vxl_splat.shading &&
+				vc.splat_lighting_version == m_vxl_splat.lighting_version &&
 				vc.side == side &&
 				vc.custom_color == custom_color &&
 				vc.bg_on == show_bg &&
@@ -3255,6 +3261,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vc.splat_pitch = m_vxl_splat.pitch;
 			vc.splat_ss = m_vxl_splat.ss;
 			vc.splat_shading = m_vxl_splat.shading;
+			vc.splat_lighting_version = m_vxl_splat.lighting_version;
 			vc.side = m_vxl_side_idx;
 			vc.custom_color = m_vxl_side_custom_color;
 			vc.bg_on = m_player_bg_on;

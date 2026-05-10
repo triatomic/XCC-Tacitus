@@ -80,29 +80,42 @@ int Cvirtual_image::load(const Cvirtual_binary& s)
 	{
 		IStream* is = SHCreateMemStream(s.data(), s.size());
 		Gdiplus::Bitmap bmp(is);
-		is->Release();
 		if (bmp.GetLastStatus() != Ok)
+		{
+			is->Release();
 			return 1;
-		PixelFormat pf = bmp.GetPixelFormat();
-		if (bmp.GetPixelFormat() & PixelFormatIndexed)
+		}
+		// Always decode through 32bpp ARGB to avoid GDI+ stride/format quirks
+		// in paletted lock paths (which produced speckle artifacts on certain
+		// BMPs, e.g., launchermd.bmp). Convert down to 24bpp RGB for our buffer.
+		int w = bmp.GetWidth();
+		int h = bmp.GetHeight();
+		load(NULL, w, h, 3, NULL);
+		Gdiplus::Rect rect(0, 0, w, h);
+		BitmapData d;
+		if (bmp.LockBits(&rect, ImageLockModeRead, PixelFormat32bppARGB, &d) == Ok)
 		{
-			load(NULL, bmp.GetWidth(), bmp.GetHeight(), 1, NULL);
-			BitmapData d;
-			d.Stride = bmp.GetWidth();
-			d.Scan0 = image_edit();
-			bmp.LockBits(NULL, ImageLockModeRead | ImageLockModeUserInputBuf, PixelFormat8bppIndexed, &d);
+			byte* dst = image_edit();
+			const byte* src = reinterpret_cast<const byte*>(d.Scan0);
+			int stride = d.Stride;
+			for (int y = 0; y < h; y++)
+			{
+				const byte* r = src + y * stride;
+				byte* w_dst = dst + y * w * 3;
+				for (int x = 0; x < w; x++)
+				{
+					// Source: BGRA in memory (little-endian ARGB DWORD).
+					// Dest: t_palette_entry r,g,b order.
+					w_dst[0] = r[2]; // R
+					w_dst[1] = r[1]; // G
+					w_dst[2] = r[0]; // B
+					w_dst += 3;
+					r += 4;
+				}
+			}
 			bmp.UnlockBits(&d);
 		}
-		else
-		{
-			load(NULL, bmp.GetWidth(), bmp.GetHeight(), 3, NULL);
-			BitmapData d;
-			d.Stride = bmp.GetWidth() * 3;
-			d.Scan0 = image_edit();
-			bmp.LockBits(NULL, ImageLockModeRead | ImageLockModeUserInputBuf, PixelFormat24bppRGB, &d);
-			bmp.UnlockBits(&d);
-			swap_rb();
-		}
+		is->Release();
 	}
 	return 0;
 }

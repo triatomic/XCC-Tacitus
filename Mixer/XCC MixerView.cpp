@@ -2169,7 +2169,7 @@ int CXCCMixerView::copy_as_shp_ts(int i, Cfname fname) const
 			create_rp(s_palette, p, rp, game_ra);
 		else
 			create_rp(s_palette, p, rp);
-		apply_rp(s.data_edit(), cx * cy * c_images >> convert_shadow, rp);
+		apply_rp(s.data_edit(), cx * cy * c_images >> (int)convert_shadow, rp);
 	}
 	if (GetMainFrame()->fix_shadows() && ~c_images & 1)
 	{

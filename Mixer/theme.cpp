@@ -21,6 +21,19 @@ namespace theme
 		size_format g_size_fmt = size_auto;
 		vxl_ss g_vxl_ss = vxl_ss_4;
 		bool g_vxl_shading = false;
+		// Defaults below match the original hand-tuned constants in
+		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
+		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
+		// 0.81650 vs sqrt(0.40825^2*2)). Ambient/diffuse are unchanged.
+		const float k_default_az = 225.0f;
+		const float k_default_el = 54.7356f;
+		const float k_default_ambient = 0.55f;
+		const float k_default_diffuse = 0.85f;
+		float g_vxl_light_az = k_default_az;
+		float g_vxl_light_el = k_default_el;
+		float g_vxl_light_ambient = k_default_ambient;
+		float g_vxl_light_diffuse = k_default_diffuse;
+		int g_vxl_lighting_version = 0;
 		bool g_limit_vxl_cpu = false;
 		bool g_parallel_extract = true;
 		bool g_shp_transparency = false;
@@ -98,6 +111,20 @@ namespace theme
 			ss = vxl_ss_4;
 		g_vxl_ss = static_cast<vxl_ss>(ss);
 		g_vxl_shading = AfxGetApp()->GetProfileInt("Theme", "vxl_shading", 0) != 0;
+		// Lighting parameters: stored as int * 1000 to preserve precision via
+		// the int-only WriteProfileInt API. Out-of-range values fall back to
+		// defaults so corrupted/manually-edited registry entries don't render
+		// black.
+		auto load_f = [](const char* key, float def, float lo, float hi) -> float {
+			int iv = AfxGetApp()->GetProfileInt("Theme", key, static_cast<int>(def * 1000.0f));
+			float fv = iv / 1000.0f;
+			if (fv < lo || fv > hi) fv = def;
+			return fv;
+		};
+		g_vxl_light_az = load_f("vxl_light_az", k_default_az, 0.0f, 360.0f);
+		g_vxl_light_el = load_f("vxl_light_el", k_default_el, -90.0f, 90.0f);
+		g_vxl_light_ambient = load_f("vxl_light_ambient", k_default_ambient, 0.0f, 1.0f);
+		g_vxl_light_diffuse = load_f("vxl_light_diffuse", k_default_diffuse, 0.0f, 1.0f);
 		g_limit_vxl_cpu = AfxGetApp()->GetProfileInt("Theme", "limit_vxl_cpu", 0) != 0;
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
 		create_brushes();
@@ -115,6 +142,10 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_az", static_cast<int>(g_vxl_light_az * 1000.0f));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_diffuse", static_cast<int>(g_vxl_light_diffuse * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "limit_vxl_cpu", g_limit_vxl_cpu ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
 	}
@@ -170,6 +201,71 @@ namespace theme
 			return;
 		g_vxl_shading = v;
 		save();
+	}
+
+	float vxl_light_azimuth()   { return g_vxl_light_az; }
+	float vxl_light_elevation() { return g_vxl_light_el; }
+	float vxl_light_ambient()   { return g_vxl_light_ambient; }
+	float vxl_light_diffuse()   { return g_vxl_light_diffuse; }
+	int   vxl_lighting_version(){ return g_vxl_lighting_version; }
+
+	void set_vxl_light_azimuth(float v)
+	{
+		if (v < 0.0f) v = 0.0f;
+		if (v > 360.0f) v = 360.0f;
+		if (g_vxl_light_az == v) return;
+		g_vxl_light_az = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+	void set_vxl_light_elevation(float v)
+	{
+		if (v < -90.0f) v = -90.0f;
+		if (v > 90.0f) v = 90.0f;
+		if (g_vxl_light_el == v) return;
+		g_vxl_light_el = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+	void set_vxl_light_ambient(float v)
+	{
+		if (v < 0.0f) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		if (g_vxl_light_ambient == v) return;
+		g_vxl_light_ambient = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+	void set_vxl_light_diffuse(float v)
+	{
+		if (v < 0.0f) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		if (g_vxl_light_diffuse == v) return;
+		g_vxl_light_diffuse = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+	void reset_vxl_lighting()
+	{
+		g_vxl_light_az = k_default_az;
+		g_vxl_light_el = k_default_el;
+		g_vxl_light_ambient = k_default_ambient;
+		g_vxl_light_diffuse = k_default_diffuse;
+		g_vxl_lighting_version++;
+		save();
+	}
+	void vxl_light_direction(float& x, float& y, float& z)
+	{
+		const float pi = 3.14159265358979323846f;
+		float az_rad = g_vxl_light_az * pi / 180.0f;
+		float el_rad = g_vxl_light_el * pi / 180.0f;
+		float ce = std::cos(el_rad);
+		// Convention: az=0 → +X, az=90° → +Y; elevation lifts toward +Z.
+		// Default az=225°, el=54.7356° → x=-0.40825, y=-0.40825, z=+0.81650
+		// (matches the original hand-tuned constants).
+		x = ce * std::cos(az_rad);
+		y = ce * std::sin(az_rad);
+		z = std::sin(el_rad);
 	}
 
 	bool limit_vxl_cpu() { return g_limit_vxl_cpu; }
@@ -609,7 +705,17 @@ namespace theme
 		::GetClassNameA(h, cls, sizeof(cls));
 		const bool is_combo = _stricmp(cls, "ComboBox") == 0
 			|| _stricmp(cls, "ComboLBox") == 0;
-		if (is_combo)
+		// Group-box BUTTONs paint their frame + label via uxtheme, which
+		// hardcodes black text regardless of WM_CTLCOLORSTATIC. Strip the
+		// theme so classic painting honors SetTextColor in dark mode.
+		bool is_groupbox = false;
+		if (_stricmp(cls, "BUTTON") == 0)
+		{
+			LONG_PTR style = ::GetWindowLongPtrW(h, GWL_STYLE);
+			if ((style & 0xF) == BS_GROUPBOX)
+				is_groupbox = true;
+		}
+		if (is_combo || is_groupbox)
 		{
 			::SetWindowTheme(h, NULL, NULL);
 		}
@@ -723,6 +829,112 @@ namespace theme
 			: ::DefWindowProcW(h, msg, wp, lp);
 	}
 
+	// Group-box BUTTONs (BS_GROUPBOX) paint their own border + caption via
+	// either uxtheme (DarkMode_Explorer hardcodes dark-on-dark) or classic
+	// painting (uses COLOR_BTNTEXT, ignores SetTextColor from parent's
+	// WM_CTLCOLORSTATIC). Neither cooperates with dark mode, so subclass and
+	// owner-paint the frame + caption ourselves.
+	static void paint_dark_groupbox(HWND h)
+	{
+		PAINTSTRUCT ps;
+		HDC hdc = ::BeginPaint(h, &ps);
+		if (!hdc)
+			return;
+		RECT rc;
+		::GetClientRect(h, &rc);
+
+		HFONT hf = reinterpret_cast<HFONT>(::SendMessageW(h, WM_GETFONT, 0, 0));
+		HGDIOBJ old_font = hf ? ::SelectObject(hdc, hf) : NULL;
+
+		// Measure caption text to position the frame and the caption strip.
+		wchar_t buf[256] = {};
+		::GetWindowTextW(h, buf, _countof(buf));
+		SIZE sz = {};
+		::GetTextExtentPoint32W(hdc, buf, lstrlenW(buf), &sz);
+
+		// Frame top sits at vertical middle of caption text. The interior
+		// (where children live) is intentionally NOT filled — children paint
+		// themselves on top via WM_PAINT and we'd just be clobbering them.
+		RECT frame = rc;
+		frame.top += sz.cy / 2;
+
+		// Paint top edge as two segments (left of caption, right of caption)
+		// so the caption interrupts the line, like a real group box.
+		HPEN pen = ::CreatePen(PS_SOLID, 1, border());
+		HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+		const int cap_left = rc.left + 9;
+		const int cap_right = cap_left + sz.cx + 4;
+		// Top edge segments
+		::MoveToEx(hdc, frame.left, frame.top, NULL);
+		::LineTo(hdc, cap_left, frame.top);
+		::MoveToEx(hdc, cap_right, frame.top, NULL);
+		::LineTo(hdc, frame.right, frame.top);
+		// Left edge
+		::MoveToEx(hdc, frame.left, frame.top, NULL);
+		::LineTo(hdc, frame.left, frame.bottom - 1);
+		// Right edge
+		::MoveToEx(hdc, frame.right - 1, frame.top, NULL);
+		::LineTo(hdc, frame.right - 1, frame.bottom - 1);
+		// Bottom edge
+		::MoveToEx(hdc, frame.left, frame.bottom - 1, NULL);
+		::LineTo(hdc, frame.right, frame.bottom - 1);
+		::SelectObject(hdc, old_pen);
+		::DeleteObject(pen);
+
+		// Caption text in light color (no background fill — the parent dialog
+		// already painted bg behind us via WM_ERASEBKGND).
+		if (buf[0])
+		{
+			::SetTextColor(hdc, text());
+			::SetBkMode(hdc, TRANSPARENT);
+			RECT tr;
+			tr.left = cap_left + 2;
+			tr.top = rc.top;
+			tr.right = cap_right - 2;
+			tr.bottom = tr.top + sz.cy;
+			::DrawTextW(hdc, buf, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+		}
+
+		if (old_font)
+			::SelectObject(hdc, old_font);
+		::EndPaint(h, &ps);
+	}
+
+	static LRESULT CALLBACK dark_groupbox_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.dark_groupbox_orig_proc";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		if (is_dark() && msg == WM_PAINT)
+		{
+			paint_dark_groupbox(h);
+			return 0;
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			::RemovePropW(h, L"xcc.dark_groupbox_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return orig
+			? ::CallWindowProcW(orig, h, msg, wp, lp)
+			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	static void install_dark_groupbox_subclass(HWND h)
+	{
+		if (!h)
+			return;
+		static const wchar_t* k_subclassed = L"xcc.dark_groupbox_subclass";
+		static const wchar_t* k_orig_proc = L"xcc.dark_groupbox_orig_proc";
+		if (::GetPropW(h, k_subclassed))
+			return;
+		LONG_PTR orig = ::GetWindowLongPtrW(h, GWLP_WNDPROC);
+		::SetPropW(h, k_orig_proc, reinterpret_cast<HANDLE>(orig));
+		::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(dark_groupbox_proc));
+		::SetPropW(h, k_subclassed, reinterpret_cast<HANDLE>(1));
+		::InvalidateRect(h, NULL, TRUE);
+	}
+
 	void apply_listview(HWND h_listview)
 	{
 		if (!h_listview)
@@ -832,6 +1044,14 @@ namespace theme
 		}
 		else
 			apply_window(h);
+		// Group-box BUTTONs need a subclass to owner-draw their caption in
+		// dark mode (uxtheme / classic both ignore SetTextColor for them).
+		if (_stricmp(cls, "BUTTON") == 0)
+		{
+			LONG_PTR style = ::GetWindowLongPtrW(h, GWL_STYLE);
+			if ((style & 0xF) == BS_GROUPBOX)
+				install_dark_groupbox_subclass(h);
+		}
 		// Force redraw so any cached non-client decoration repaints with the
 		// new theme.
 		::InvalidateRect(h, NULL, TRUE);
