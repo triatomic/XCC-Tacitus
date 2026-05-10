@@ -247,6 +247,7 @@ private:
 		double pitch = 0.0;
 		int ss = 0;
 		bool shading = false;
+		int lighting_version = -1;	// theme::vxl_lighting_version() at build time
 		int cx_s = 0;
 		int cy_s = 0;
 		Cvirtual_binary buf;	// paletted supersample framebuffer (cx_s*cy_s bytes)
@@ -268,6 +269,7 @@ private:
 		double splat_pitch = 0.0;
 		int splat_ss = 0;
 		bool splat_shading = false;
+		int splat_lighting_version = -1;
 		int side = -2;	// -1 = no remap; -2 = "never matched" sentinel
 		COLORREF custom_color = 0;
 		bool bg_on = false;

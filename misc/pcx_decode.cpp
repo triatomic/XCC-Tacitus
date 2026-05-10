@@ -32,7 +32,7 @@ void pcx_decode(const byte* s, byte* d, const t_pcx_header& header)
 	{
 		const byte* r = t;
 		w = d;
-		for (int y = 0; y < cy; y++) 
+		for (int y = 0; y < cy; y++)
 		{
 			memcpy(w, r, cx);
 			r += cb_line;

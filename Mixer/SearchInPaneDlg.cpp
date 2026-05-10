@@ -4,7 +4,6 @@
 #include "string_conversion.h"
 #include "theme.h"
 #include <algorithm>
-#include <regex>
 
 // Mirror of CXCCMixerView's free helper; redeclared so we don't have to
 // expose it in a public header.
@@ -15,20 +14,17 @@ CSearchInPaneDlg::CSearchInPaneDlg(CWnd* pParent)
 {
 	m_reg_key = "search_in_pane_dlg";
 	m_filename = AfxGetApp()->GetProfileString(m_reg_key, "file_name");
-	m_use_regex = false;
 }
 
 void CSearchInPaneDlg::DoDataExchange(CDataExchange* pDX)
 {
 	ETSLayoutDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST, m_list);
-	DDX_Control(pDX, IDC_REGEX_TOGGLE, m_regex_btn);
 	DDX_Text(pDX, IDC_FILENAME, m_filename);
 }
 
 BEGIN_MESSAGE_MAP(CSearchInPaneDlg, ETSLayoutDialog)
 	ON_BN_CLICKED(IDOK, OnFind)
-	ON_BN_CLICKED(IDC_REGEX_TOGGLE, OnRegexToggle)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	ON_NOTIFY(LVN_COLUMNCLICK, IDC_LIST, OnColumnclickList)
 	ON_WM_DESTROY()
@@ -54,7 +50,6 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_FILENAME_STATIC, NORESIZE)
 			<< item(IDC_FILENAME, GREEDY)
-			<< item(IDC_REGEX_TOGGLE, NORESIZE)
 			)
 		<< item(IDC_LIST, GREEDY)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
@@ -66,32 +61,14 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 	m_list.InsertColumn(0, "Name");
 	m_list.InsertColumn(1, "Size");
 	m_list.set_size(0);
-	m_regex_btn.SetCheck(m_use_regex ? BST_CHECKED : BST_UNCHECKED);
 	theme::apply_dialog(GetSafeHwnd());
 	return true;
-}
-
-void CSearchInPaneDlg::OnRegexToggle()
-{
-	m_use_regex = m_regex_btn.GetCheck() == BST_CHECKED;
 }
 
 bool CSearchInPaneDlg::match_one(const string& name, const string& filter)
 {
 	if (filter.empty())
 		return true;
-	if (m_use_regex)
-	{
-		try
-		{
-			std::regex re(filter, std::regex::ECMAScript | std::regex::icase);
-			return std::regex_search(name, re);
-		}
-		catch (const std::regex_error&)
-		{
-			return false;
-		}
-	}
 	return fname_filter(name, filter);
 }
 

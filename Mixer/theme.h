@@ -98,6 +98,31 @@ namespace theme
 	bool vxl_shading();
 	void set_vxl_shading(bool v);
 
+	// VXL lighting parameters. The shader is a simple Lambertian directional
+	// light in camera space. Direction is stored as azimuth (0..360°, around
+	// the screen Z axis from +X) and elevation (-90..+90°, tilt above the XY
+	// plane). Ambient is the floor brightness for surfaces facing fully away
+	// from the light; Diffuse is the additive range above ambient. Final
+	// brightness range is [ambient, ambient + diffuse].
+	//
+	// Defaults: az=225°, el=54.7° → light_x=-0.40825, light_y=-0.40825,
+	// light_z=0.81650 (the original hand-tuned upper-left-front direction).
+	// ambient=0.55, diffuse=0.85.
+	float vxl_light_azimuth();         // degrees, 0..360
+	float vxl_light_elevation();       // degrees, -90..90
+	float vxl_light_ambient();         // 0..1
+	float vxl_light_diffuse();         // 0..1
+	void set_vxl_light_azimuth(float v);
+	void set_vxl_light_elevation(float v);
+	void set_vxl_light_ambient(float v);
+	void set_vxl_light_diffuse(float v);
+	void reset_vxl_lighting();
+	// Bumped on every lighting setter; used as a cheap cache key by the VXL
+	// splat cache so changing lighting invalidates without explicit flushes.
+	int vxl_lighting_version();
+	// Resolve azimuth/elevation into a unit direction vector in camera space.
+	void vxl_light_direction(float& x, float& y, float& z);
+
 	// Limit VXL CPU: when on, the VXL splat OpenMP region runs at half the
 	// hardware thread count (min 1). Lets the user trade splat-rebuild latency
 	// for lower idle-orbit core wake-up + heat without losing parallelism

@@ -25,7 +25,6 @@ protected:
 	afx_msg void OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDestroy();
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
-	afx_msg void OnRegexToggle();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 
@@ -44,8 +43,6 @@ private:
 	CXCCMixerView* m_pane = nullptr;
 	vector<t_match> m_matches;
 	CString m_reg_key;
-	bool m_use_regex = false;
-	CButton m_regex_btn;
 	int m_sort_column = 0;     // 0 = Name, 1 = Size
 	bool m_sort_descending = false;
 };

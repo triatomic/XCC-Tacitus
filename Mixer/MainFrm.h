@@ -4,6 +4,7 @@
 #include "XCC MixerView.h"
 
 #include <ddraw.h>
+#include <memory>
 #include <mmsystem.h>
 #include <dsound.h>
 #include "cc_structures.h"
@@ -11,6 +12,8 @@
 #include "pal_file.h"
 #include "theme.h"
 #include "xm_types.h"
+
+class CVxlLightingDlg;
 
 struct t_pal_map_list_entry
 {
@@ -179,6 +182,7 @@ protected:
 	CString m_reg_key = "MainFrame";
 	bool m_two_panes = true;
 	int m_saved_middle_pane_w = 0; // restored when going one→two
+	std::unique_ptr<CVxlLightingDlg> m_vxl_lighting_dlg;
 public:
 	void set_pane_layout(bool two_panes);
 	// Walk every themed child window and re-apply dark-mode state. Public
@@ -186,6 +190,9 @@ public:
 	// SHOpenWithDialog returns — the picker invalidates our process-wide
 	// theme cache and we need to put dark mode back together.
 	void apply_theme_to_children();
+	// Trigger a repaint of the right-hand file-info pane. Used by the VXL
+	// Lighting dialog to refresh the splat after sliders change.
+	void invalidate_file_info_pane();
 
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
@@ -321,6 +328,7 @@ protected:
 	afx_msg void OnUpdateThemeVxlSs16(CCmdUI* pCmdUI);
 	afx_msg void OnThemeVxlShading();
 	afx_msg void OnUpdateThemeVxlShading(CCmdUI* pCmdUI);
+	afx_msg void OnThemeVxlLighting();
 	afx_msg void OnThemeParallelExtract();
 	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLimitVxlCpu();

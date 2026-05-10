@@ -13,7 +13,6 @@
 #define IDD_RESIZE                      131
 #define IDD_SEARCH_FILE                 132
 #define IDD_SEARCH_IN_PANE              141
-#define IDC_REGEX_TOGGLE                1100
 #define IDC_PLAYER_PLAY                 1101
 #define IDC_PLAYER_GRID                 1102
 #define IDC_PLAYER_SLIDER               1103
@@ -1448,6 +1447,21 @@
 #define IDC_AUDIO_SEEK                    1149
 #define IDC_AUDIO_TIME                    1150
 #define IDC_AUDIO_FILENAME                1151
+#define IDD_VXL_LIGHTING                  144
+#define IDC_VXL_LIGHT_AZ_SLIDER           1152
+#define IDC_VXL_LIGHT_AZ_LABEL            1153
+#define IDC_VXL_LIGHT_AZ_VALUE            1154
+#define IDC_VXL_LIGHT_EL_SLIDER           1155
+#define IDC_VXL_LIGHT_EL_LABEL            1156
+#define IDC_VXL_LIGHT_EL_VALUE            1157
+#define IDC_VXL_LIGHT_AMBIENT_SLIDER      1158
+#define IDC_VXL_LIGHT_AMBIENT_LABEL       1159
+#define IDC_VXL_LIGHT_AMBIENT_VALUE       1160
+#define IDC_VXL_LIGHT_DIFFUSE_SLIDER      1161
+#define IDC_VXL_LIGHT_DIFFUSE_LABEL       1162
+#define IDC_VXL_LIGHT_DIFFUSE_VALUE       1163
+#define IDC_VXL_LIGHT_RESET               1164
+#define ID_THEME_VXL_LIGHTING             41025
 
 // Next default values for new objects
 // 
