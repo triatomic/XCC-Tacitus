@@ -24,6 +24,26 @@ public:
 	// forces a full repaint. Call from CMainFrame::apply_theme_to_children
 	// when the user toggles light <-> dark.
 	void reapply_player_theme();
+	// Bump the player BGRA cache version so the next paint reconverts each
+	// frame. Called from MainFrm when theme settings that affect SHP/WSA
+	// rendering change (alpha color, checkerboard toggle, shp transparency).
+	// Bump cache version + immediately re-prefill if in SHP/WSA player mode
+	// so the next animation tick is a hit instead of a miss-burst.
+	void invalidate_player_bgra_cache()
+	{
+		m_player_bgra_version++;
+		if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
+	}
+	// Convert a single SHP/WSA paletted frame to BGRA into dst (cx*cy entries),
+	// applying the current side color, BG, shadow-pair, and palette state.
+	// Used both by player_draw (per-paint, on cache miss) and the player_enter
+	// prefill so the first playthrough is already cache-hit.
+	void player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const;
+	// Run player_convert_frame_to_bgra over all frames in parallel and stash
+	// the results in m_player_bgra. Called at the end of player_enter so the
+	// timer-driven repaints during the first animation loop don't trigger
+	// per-frame conversion bursts.
+	void player_prefill_bgra_cache();
 	bool can_auto_select();
 	void auto_select();
 	void close_f();
@@ -207,6 +227,78 @@ private:
 	};
 	shp_grid_cache m_shp_grid;
 	int m_open_token = 0;	// bumped in post_open; cache token must match
+
+	// VXL splat cache. The point-splat into the supersample paletted framebuffer
+	// is camera-only (depends on yaw/pitch/ss/shading + the file), so it can be
+	// reused across paints when nothing has changed. Per-paint work then drops
+	// to: palette->BGRA pass, optional grid overlay, scale + blit. This is what
+	// makes idle viewing (no orbit) cheap; without it the OpenMP splat region
+	// fires on every WM_PAINT regardless of whether anything moved.
+	//
+	// Key = (token, yaw, pitch, ss, shading). All components are exact: yaw and
+	// pitch are doubles compared bit-for-bit since drag writes them and a paint
+	// reads the same values. Anything else (side color, BG toggle, palette,
+	// zoom, pan, viewport) doesn't affect the splat output and is applied
+	// downstream.
+	struct vxl_splat_cache
+	{
+		int token = -1;
+		double yaw = 0.0;
+		double pitch = 0.0;
+		int ss = 0;
+		bool shading = false;
+		int cx_s = 0;
+		int cy_s = 0;
+		Cvirtual_binary buf;	// paletted supersample framebuffer (cx_s*cy_s bytes)
+		std::vector<unsigned char> shade;	// per-pixel shade factor; empty when shading off
+	};
+	vxl_splat_cache m_vxl_splat;
+
+	// VXL BGRA cache. The splat output (m_vxl_splat) is the paletted
+	// supersample buffer; this caches the composited BGRA result of running
+	// the palette/side-color/bg/shading loop over it. Idle viewing of a still
+	// VXL drops to memcpy + StretchBlt; orbiting still rebuilds (because the
+	// underlying splat changed). Side color / BG / grid / checker toggles
+	// just bump the version int and the next paint rebuilds — only one
+	// buffer's worth of work, so no prefill needed unlike the SHP cache.
+	struct vxl_bgra_cache
+	{
+		int splat_token = -1;
+		double splat_yaw = 0.0;
+		double splat_pitch = 0.0;
+		int splat_ss = 0;
+		bool splat_shading = false;
+		int side = -2;	// -1 = no remap; -2 = "never matched" sentinel
+		COLORREF custom_color = 0;
+		bool bg_on = false;
+		int grid_mode = 0;
+		COLORREF ck_a = 0;
+		COLORREF ck_b = 0;
+		int cx_s = 0;
+		int cy_s = 0;
+		std::vector<DWORD> bgra;
+	};
+	vxl_bgra_cache m_vxl_bgra;
+
+	// SHP/WSA player BGRA cache. Per-paint palette->BGRA conversion (with
+	// side-color remap, shadow blend, BG checker, shading) is the dominant
+	// cost during animation playback — at 15-30 fps a 100x100 frame's loop
+	// repeats every tick along with a full CreateDIBSection call. The
+	// converted bytes only change when something user-visible changes, so we
+	// cache them lazily per frame and invalidate by bumping a version int.
+	//
+	// version mismatch on frames[i] => rebuild that frame's BGRA from
+	// m_player_frames[i]. Animation tick runs the cheap path: if cached
+	// version matches, just memcpy into the per-paint DIB and StretchBlt.
+	// Bumped by: player_enter, post_open, side/bg/shadow toggle, palette
+	// change, alpha checker color change.
+	struct shp_bgra_cache_entry
+	{
+		int version = -1;
+		std::vector<DWORD> bgra;	// cx_s * cy_s entries
+	};
+	std::vector<shp_bgra_cache_entry> m_player_bgra;
+	int m_player_bgra_version = 0;
 	int				m_x;
 	int				m_y;
 	int				m_y_inc;

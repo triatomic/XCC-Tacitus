@@ -319,12 +319,12 @@ protected:
 	afx_msg void OnUpdateThemeVxlSs4(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeVxlSs8(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeVxlSs16(CCmdUI* pCmdUI);
-	afx_msg void OnThemeFxaa();
-	afx_msg void OnUpdateThemeFxaa(CCmdUI* pCmdUI);
 	afx_msg void OnThemeVxlShading();
 	afx_msg void OnUpdateThemeVxlShading(CCmdUI* pCmdUI);
 	afx_msg void OnThemeParallelExtract();
 	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
+	afx_msg void OnThemeLimitVxlCpu();
+	afx_msg void OnUpdateThemeLimitVxlCpu(CCmdUI* pCmdUI);
 
 	DECLARE_MESSAGE_MAP()
 };

@@ -92,18 +92,20 @@ namespace theme
 	vxl_ss vxl_supersample();
 	void set_vxl_supersample(vxl_ss v);
 
-	// FXAA: post-process edge AA. Run once on the BGRA framebuffer before
-	// the final blit/stretch. Smooths visible step edges (voxel staircases,
-	// 1px aliased silhouettes) by blurring along high-luma-gradient edges.
-	bool fxaa();
-	void set_fxaa(bool v);
-	// In-place FXAA pass on a row-major BGRA buffer of size cx*cy.
-	void apply_fxaa(DWORD* pixels, int cx, int cy);
 
 	// VXL directional shading: lights voxels by a camera-relative directional
 	// light. Adds depth/form to flat-colored voxel models.
 	bool vxl_shading();
 	void set_vxl_shading(bool v);
+
+	// Limit VXL CPU: when on, the VXL splat OpenMP region runs at half the
+	// hardware thread count (min 1). Lets the user trade splat-rebuild latency
+	// for lower idle-orbit core wake-up + heat without losing parallelism
+	// entirely. The splat itself is cached across paints (vxl_splat_cache in
+	// CXCCFileView), so this only affects the cost of cache misses (drag,
+	// ss/shading toggle, file change).
+	bool limit_vxl_cpu();
+	void set_limit_vxl_cpu(bool v);
 
 	// Parallel batch extract: when on, right-click → Extract / Extract
 	// preserving structure reads each selected entry's bytes serially on the

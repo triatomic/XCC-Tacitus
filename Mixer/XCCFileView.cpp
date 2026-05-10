@@ -122,6 +122,12 @@ void CXCCFileView::OnLButtonUp(UINT nFlags, CPoint point)
 	{
 		m_vxl_dragging = false;
 		ReleaseCapture();
+		// Re-render with the user's chosen interpolation now that orbit
+		// stopped (drag-time used nearest for cheap StretchBlt).
+		CRect cr; GetClientRect(&cr);
+		cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
 		return;
 	}
 	CScrollView::OnLButtonUp(nFlags, point);
@@ -155,6 +161,11 @@ void CXCCFileView::OnRButtonUp(UINT nFlags, CPoint point)
 	{
 		m_player_panning = false;
 		ReleaseCapture();
+		// Same as orbit: bring back the full-quality interpolation.
+		CRect cr; GetClientRect(&cr);
+		cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
 		return;
 	}
 	CScrollView::OnRButtonUp(nFlags, point);
@@ -241,6 +252,11 @@ void CXCCFileView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (m_player_mode && nChar == VK_RIGHT)
 	{
 		player_set_frame(m_player_frame + 1);
+		return;
+	}
+	if (m_player_mode && nChar == VK_SPACE && !is_vxl_view())
+	{
+		OnPlayerPlay();
 		return;
 	}
 	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -687,6 +703,13 @@ void CXCCFileView::load_color_table(const t_palette palette, bool convert_palett
 		color_table[i].g = p[i].g;
 		color_table[i].b = p[i].b;
 	}
+	// Palette change invalidates the player BGRA cache: every cached frame
+	// was built with the previous color table. Re-prefill if currently in
+	// SHP/WSA player mode so the next animation tick is a cache hit (this
+	// path is also called during non-player file opens, where the prefill
+	// is a no-op because m_player_mode is false).
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 }
 
 static string t2s(const string& v)
@@ -2068,6 +2091,8 @@ int CXCCFileView::player_total_frames() const
 void CXCCFileView::player_decode_frames()
 {
 	m_player_frames.clear();
+	m_player_bgra.clear();
+	m_player_bgra_version++;
 	m_player_cx = 0;
 	m_player_cy = 0;
 	m_player_cf = 0;
@@ -2343,7 +2368,11 @@ void CXCCFileView::player_enter()
 		return;
 	m_player_mode = true;
 	m_player_frame = 0;
-	m_player_playing = true;
+	// Don't auto-start playback. The animation begins when the user clicks
+	// Play (or hits Space, which the Play button picks up via its mnemonic).
+	// Avoids the "open a SHP, fans rev for the first-playthrough cache fill,
+	// user didn't even ask for it" surprise.
+	m_player_playing = false;
 	m_player_zoom_pct = 0;
 	m_player_pan_x = m_player_pan_y = 0;
 	m_player_panning = false;
@@ -2478,10 +2507,18 @@ void CXCCFileView::player_enter()
 	m_player_iso_grid.SetCurSel(m_player_grid_mode);
 	player_layout_controls();
 	player_update_label();
+	// Reflect the not-playing default on the button label so the user sees
+	// "Play" (and clicking it starts playback).
+	if (!vxl && m_player_controls_created)
+		m_player_play.SetWindowText("Play");
+	// Pre-fill the BGRA cache for every SHP/WSA frame up-front. The cost is
+	// the same as the first playthrough used to be, but it's compressed into
+	// one moment (under the user's intent of "I'm entering the player") and
+	// after this point the timer-driven repaints are pure memcpy + StretchBlt
+	// — no fan-rev on first play. VXL is skipped: its source `s` depends on
+	// camera, not frame index, and is cached separately at the splat level.
 	if (!vxl)
-		SetTimer(1, 1000 / std::max(1, m_player_fps), NULL);
-	else
-		m_player_playing = false;
+		player_prefill_bgra_cache();
 	SetScrollSizes(MM_TEXT, CSize(1, 1));
 	Invalidate();
 }
@@ -2632,6 +2669,132 @@ void CXCCFileView::player_update_label()
 	m_player_label.SetWindowText(s.c_str());
 }
 
+void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
+{
+	const int n = m_player_cx * m_player_cy;
+	if (n <= 0 || frame_idx < 0 ||
+		frame_idx >= static_cast<int>(m_player_frames.size()))
+		return;
+	const byte* s = m_player_frames[frame_idx].data();
+	const int cx_s = m_player_cx;
+	const bool show_bg = m_player_bg_on;
+	const int side = m_player_side_idx;
+	const COLORREF custom_color = m_player_side_custom_color;
+	const COLORREF ck_a = theme::checker_a();
+	const COLORREF ck_b = theme::checker_b();
+	const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
+	const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
+	float remap_r = 0, remap_g = 0, remap_b = 0;
+	if (side >= 0 && side < 8)
+	{
+		remap_r = GetRValue(k_side_colors[side]);
+		remap_g = GetGValue(k_side_colors[side]);
+		remap_b = GetBValue(k_side_colors[side]);
+	}
+	else if (side == 8)
+	{
+		remap_r = GetRValue(custom_color);
+		remap_g = GetGValue(custom_color);
+		remap_b = GetBValue(custom_color);
+	}
+	const bool shadow_on =
+		m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0;
+	const byte* sshad = nullptr;
+	if (shadow_on)
+	{
+		int shadow_idx = frame_idx + m_player_cf / 2;
+		if (shadow_idx >= 0 && shadow_idx < static_cast<int>(m_player_frames.size()))
+			sshad = m_player_frames[shadow_idx].data();
+	}
+	for (int i = 0; i < n; i++)
+	{
+		byte idx = s[i];
+		DWORD bgra;
+		if (idx == 0)
+		{
+			if (show_bg)
+				bgra = m_color_table[0];
+			else
+			{
+				int x = i % cx_s, y = i / cx_s;
+				bgra = (((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d;
+			}
+		}
+		else
+		{
+			bgra = m_color_table[idx];
+			if (side >= 0 && idx >= 16 && idx <= 31)
+			{
+				float b = static_cast<float>(bgra & 0xff);
+				float g = static_cast<float>((bgra >> 8) & 0xff);
+				float r = static_cast<float>((bgra >> 16) & 0xff);
+				float bright = std::max(r, std::max(g, b)) / 255.0f * 1.25f;
+				int rr = static_cast<int>(remap_r * bright + 0.5f);
+				int gg = static_cast<int>(remap_g * bright + 0.5f);
+				int bb = static_cast<int>(remap_b * bright + 0.5f);
+				if (rr > 255) rr = 255; if (gg > 255) gg = 255; if (bb > 255) bb = 255;
+				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
+			}
+		}
+		if (sshad && sshad[i] != 0)
+		{
+			float fa = 120.0f / 255.0f;
+			float r = static_cast<float>((bgra >> 16) & 0xff) * (1.0f - fa);
+			float g = static_cast<float>((bgra >> 8) & 0xff) * (1.0f - fa);
+			float b = static_cast<float>(bgra & 0xff) * (1.0f - fa);
+			int rr = static_cast<int>(r + 0.5f), gg = static_cast<int>(g + 0.5f), bb = static_cast<int>(b + 0.5f);
+			bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
+		}
+		dst[i] = bgra;
+	}
+	// Grid overlay baked into the cached buffer so per-paint cost stays at
+	// memcpy. Painted over background pixels only (idx == 0) — sprite
+	// pixels stay intact.
+	if (m_player_grid_mode > 0)
+	{
+		const int cy_s = m_player_cy;
+		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
+		const int gcx = cx_s / 2;
+		const int gcy = cy_s;
+		const DWORD line = 0x00FFFFFF;
+		for (int py = 0; py < cy_s; py++)
+		{
+			for (int px = 0; px < cx_s; px++)
+			{
+				int i = px + cx_s * py;
+				if (s[i] != 0) continue;
+				int dx = px - gcx;
+				int dy = py - gcy;
+				int u = dx + 2 * dy;
+				int v = 2 * dy - dx;
+				int au = u % tileW; if (au < 0) au += tileW;
+				int av = v % tileW; if (av < 0) av += tileW;
+				if (au < 2 || av < 2 || au > tileW - 2 || av > tileW - 2)
+					dst[i] = line;
+			}
+		}
+	}
+}
+
+void CXCCFileView::player_prefill_bgra_cache()
+{
+	const int nf = static_cast<int>(m_player_frames.size());
+	const int n = m_player_cx * m_player_cy;
+	if (nf <= 0 || n <= 0)
+		return;
+	m_player_bgra.assign(nf, shp_bgra_cache_entry{});
+	// Each frame writes its own buffer — independent, parallelizable across
+	// frames. omp gates on total work to avoid forking for tiny SHPs.
+	#pragma omp parallel for schedule(static) if(static_cast<long long>(nf) * n >= 65536)
+	for (int f = 0; f < nf; f++)
+	{
+		auto& ce = m_player_bgra[f];
+		ce.bgra.assign(n, 0);
+		player_convert_frame_to_bgra(f, ce.bgra.data());
+		ce.version = m_player_bgra_version;
+	}
+}
+
 void CXCCFileView::player_draw(CDC* pDC)
 {
 	CRect cr;
@@ -2644,70 +2807,88 @@ void CXCCFileView::player_draw(CDC* pDC)
 	if (m_player_cx <= 0 || m_player_cy <= 0)
 		return;
 
-	// VXL: point-splat the cached point cloud into an 8bpp framebuffer at 2x
+	// VXL: point-splat the cached point cloud into an 8bpp framebuffer at SSx
 	// canvas resolution. The chosen interpolation mode (theme::interp()) then
 	// downsamples that supersample buffer to the destination viewport via the
 	// shared theme::stretch_image path — same way SHP/WSA frames are scaled.
 	// This makes Bilinear/Bicubic/Lanczos actually do real silhouette AA on
 	// VXL, rather than the previous Gaussian-splat path that ignored the user
 	// choice. SHP/WSA path below stays unchanged.
-	Cvirtual_binary vxl_buf;
+	//
+	// The splat itself is cached in m_vxl_splat across paints because it
+	// depends only on (file, yaw, pitch, ss, shading). Idle viewing or any
+	// repaint that doesn't change the camera reuses the cached buffer; the
+	// OpenMP region only fires on cache miss (drag, ss/shading toggle, file
+	// change). Side color / BG / palette / zoom / pan are applied downstream
+	// per paint and don't invalidate the cache.
 	const byte* s = nullptr;
 	int vxl_ss_cx = 0, vxl_ss_cy = 0;
 	// Shading factor per pixel (0..255 = 0..2.0 at half=128). Only populated
 	// for VXL when theme::vxl_shading() is on; SHP/WSA leaves it empty.
-	std::vector<unsigned char> vxl_shade;
+	const std::vector<unsigned char>* vxl_shade_p = nullptr;
 	if (is_vxl_view())
 	{
 		if (m_vxl_cloud.empty())
 			return;
 		const int ss = static_cast<int>(theme::vxl_supersample());
+		const bool shading = theme::vxl_shading();
 		vxl_ss_cx = m_player_cx * ss;
 		vxl_ss_cy = m_player_cy * ss;
-		const int half_ss = m_vxl_half * ss;
-		const int c_pixels = vxl_ss_cx * vxl_ss_cy;
-		const double cosY = std::cos(m_vxl_yaw);
-		const double sinY = std::sin(m_vxl_yaw);
-		const double cosP = std::cos(m_vxl_pitch);
-		const double sinP = std::sin(m_vxl_pitch);
-		byte* d = vxl_buf.write_start(c_pixels);
-		memset(d, 0, c_pixels);
-		vector<short> z_buf(c_pixels, SHRT_MIN);
-		// Camera-relative directional light. The viewer is camera-axis aligned
-		// (post-rotation rx,py,pz axes), so a fixed direction in this space
-		// effectively orbits with the user. Pick "upper-left-front" (-x, -y, +z
-		// in screen space → light comes from the upper-left, facing the
-		// camera). We dot this with each voxel's camera-space normal.
-		const bool shading = theme::vxl_shading();
-		const float light_x = -0.40825f;
-		const float light_y = -0.40825f;
-		const float light_z =  0.81650f;
-		const float ambient = 0.55f;	// floor: faces fully turned away from light still get this much
-		const float diffuse = 0.85f;	// shading range above ambient (max = ambient + diffuse = 1.20)
-		if (shading)
-			vxl_shade.assign(c_pixels, 128);	// 128 = neutral 1.0 (ambient + diffuse * 0.5 default)
-		// Parallelize the splat by partitioning *output rows*: each thread
-		// owns a contiguous row band [y_lo, y_hi) of the supersample
-		// framebuffer and iterates the entire voxel cloud, writing only when
-		// the projected voxel footprint falls in its band. No write hazard on
-		// d / z_buf / vxl_shade because bands don't overlap. Cost: rotation
-		// math runs T times per voxel (T = thread count), but most voxels
-		// reject early via the band-bounds check before hitting the per-pixel
-		// inner loop, and the inner ss*ss pixel writes dominate at SS=4..16
-		// anyway. Voxel cloud is read-only, so no copies needed.
-		const int n_voxels = static_cast<int>(m_vxl_cloud.size());
-		const t_vxl_voxel* cloud = m_vxl_cloud.data();
-		#pragma omp parallel
+		const bool cache_hit =
+			m_vxl_splat.token == m_open_token &&
+			m_vxl_splat.yaw == m_vxl_yaw &&
+			m_vxl_splat.pitch == m_vxl_pitch &&
+			m_vxl_splat.ss == ss &&
+			m_vxl_splat.shading == shading &&
+			m_vxl_splat.cx_s == vxl_ss_cx &&
+			m_vxl_splat.cy_s == vxl_ss_cy &&
+			m_vxl_splat.buf.size() == static_cast<size_t>(vxl_ss_cx) * vxl_ss_cy;
+		if (!cache_hit)
 		{
-			int n_threads = 1;
-			int tid = 0;
-			#ifdef _OPENMP
-			n_threads = omp_get_num_threads();
-			tid = omp_get_thread_num();
-			#endif
-			// Even row-count split — last band absorbs remainder.
-			int y_lo = (vxl_ss_cy * tid) / n_threads;
-			int y_hi = (vxl_ss_cy * (tid + 1)) / n_threads;
+			const int half_ss = m_vxl_half * ss;
+			const int c_pixels = vxl_ss_cx * vxl_ss_cy;
+			const double cosY = std::cos(m_vxl_yaw);
+			const double sinY = std::sin(m_vxl_yaw);
+			const double cosP = std::cos(m_vxl_pitch);
+			const double sinP = std::sin(m_vxl_pitch);
+			byte* d = m_vxl_splat.buf.write_start(c_pixels);
+			memset(d, 0, c_pixels);
+			vector<short> z_buf(c_pixels, SHRT_MIN);
+			// Camera-relative directional light. The viewer is camera-axis aligned
+			// (post-rotation rx,py,pz axes), so a fixed direction in this space
+			// effectively orbits with the user. Pick "upper-left-front" (-x, -y, +z
+			// in screen space → light comes from the upper-left, facing the
+			// camera). We dot this with each voxel's camera-space normal.
+			const float light_x = -0.40825f;
+			const float light_y = -0.40825f;
+			const float light_z =  0.81650f;
+			const float ambient = 0.55f;	// floor: faces fully turned away from light still get this much
+			const float diffuse = 0.85f;	// shading range above ambient (max = ambient + diffuse = 1.20)
+			if (shading)
+				m_vxl_splat.shade.assign(c_pixels, 128);	// 128 = neutral 1.0
+			else
+				m_vxl_splat.shade.clear();
+			// Parallelize the splat by partitioning *output rows*: each thread
+			// owns a contiguous row band [y_lo, y_hi) of the supersample
+			// framebuffer and iterates the entire voxel cloud, writing only when
+			// the projected voxel footprint falls in its band. No write hazard on
+			// d / z_buf / shade because bands don't overlap. Cost: rotation
+			// math runs T times per voxel (T = thread count), but most voxels
+			// reject early via the band-bounds check before hitting the per-pixel
+			// inner loop, and the inner ss*ss pixel writes dominate at SS=4..16
+			// anyway. Voxel cloud is read-only, so no copies needed.
+			const int n_voxels = static_cast<int>(m_vxl_cloud.size());
+			const t_vxl_voxel* cloud = m_vxl_cloud.data();
+			unsigned char* shade_buf = shading ? m_vxl_splat.shade.data() : nullptr;
+			// Splat is intentionally serial. The previous output-row-banded
+			// OpenMP version made every thread iterate the whole voxel cloud
+			// and run the rotation math for each voxel, then reject ones
+			// outside its band. Since the rotation math (8 muls + 6 adds) is
+			// the hot path — not the ss*ss inner write — that multiplied CPU
+			// cost by the thread count for no useful work, pegging all cores
+			// while orbiting a small voxel model. Serial is cheap enough:
+			// ~5-10k voxels per VXL, so a rebuild is well under a millisecond
+			// and easily keeps up with high-polling-rate orbit drags.
 			for (int vi = 0; vi < n_voxels; vi++)
 			{
 				const t_vxl_voxel& v = cloud[vi];
@@ -2718,9 +2899,6 @@ void CXCCFileView::player_draw(CDC* pDC)
 				double pz = ry * sinP + rz * cosP;
 				int sx0 = static_cast<int>(rx * ss) + half_ss;
 				int sy0 = -static_cast<int>(py * ss) + half_ss;
-				// Early-out: voxel footprint is entirely outside this thread's
-				// row band. Saves the shading/normal math and the inner loop.
-				if (sy0 + ss <= y_lo || sy0 >= y_hi) continue;
 				short depth = static_cast<short>(pz);
 				unsigned char shade_byte = 128;
 				if (shading)
@@ -2740,7 +2918,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				for (int dy = 0; dy < ss; dy++)
 				{
 					int sy_pix = sy0 + dy;
-					if (sy_pix < y_lo || sy_pix >= y_hi) continue;	// also clamps to canvas via band bounds
+					if (sy_pix < 0 || sy_pix >= vxl_ss_cy) continue;
 					for (int dx = 0; dx < ss; dx++)
 					{
 						int sx_pix = sx0 + dx;
@@ -2750,14 +2928,22 @@ void CXCCFileView::player_draw(CDC* pDC)
 						{
 							z_buf[ofs] = depth;
 							d[ofs] = v.color;
-							if (shading)
-								vxl_shade[ofs] = shade_byte;
+							if (shade_buf)
+								shade_buf[ofs] = shade_byte;
 						}
 					}
 				}
 			}
+			m_vxl_splat.token = m_open_token;
+			m_vxl_splat.yaw = m_vxl_yaw;
+			m_vxl_splat.pitch = m_vxl_pitch;
+			m_vxl_splat.ss = ss;
+			m_vxl_splat.shading = shading;
+			m_vxl_splat.cx_s = vxl_ss_cx;
+			m_vxl_splat.cy_s = vxl_ss_cy;
 		}
-		s = vxl_buf.data();
+		s = m_vxl_splat.buf.data();
+		vxl_shade_p = &m_vxl_splat.shade;
 	}
 	else
 	{
@@ -2853,12 +3039,25 @@ void CXCCFileView::player_draw(CDC* pDC)
 		h_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&p_dib), 0, 0);
 	}
 	HGDIOBJ old = mem_dc.SelectObject(h_dib);
+	// Cache-hit flags — lifted out of the conversion scope so the grid
+	// overlay + cache-snapshot blocks below can read them.
+	bool shp_cache_hit = false;
+	bool vxl_cache_hit = false;
 	{
 		// Paletted SHP/WSA/VXL path with three optional ASE-style modifiers:
 		//   - BG off: index 0 paints as alpha-checker (transparent preview).
 		//   - Side-color remap: indices 16..31 retinted via brightness * preset.
 		//   - Shadow pair: when on and cf is even, blend frame[f + cf/2] black
 		//     at 120/255 alpha over the body frame (engine convention).
+		//
+		// SHP/WSA fast path: the converted BGRA bytes for a given frame are
+		// stable until something user-visible changes (palette, side color,
+		// shadow toggle, BG toggle, alpha checker). So we cache per frame
+		// keyed on m_player_bgra_version. Animation tick on a cached frame
+		// drops to a memcpy + StretchBlt — the timer-driven fan-spin from
+		// re-running the per-pixel loop 15-30 times per second goes away.
+		// VXL still runs the loop every paint because shading scales the
+		// VXL splat output (which already has its own splat-level cache).
 		const bool show_bg = m_player_bg_on;
 		// SHP and VXL each have their own side-color state. Pick the active
 		// one for the current view so the retint applies independently per
@@ -2891,8 +3090,64 @@ void CXCCFileView::player_draw(CDC* pDC)
 			if (shadow_idx >= 0 && shadow_idx < static_cast<int>(m_player_frames.size()))
 				sshad = m_player_frames[shadow_idx].data();
 		}
+		const unsigned char* shade_buf = (vxl_shade_p && !vxl_shade_p->empty()) ? vxl_shade_p->data() : nullptr;
 		const int n = cx_s * cy_s;
-		#pragma omp parallel for schedule(static)
+		// Cache lookup for SHP/WSA. VXL skips this path; it has its own
+		// single-buffer BGRA cache below keyed on splat identity + side state.
+		if (!vxl)
+		{
+			const int nf = static_cast<int>(m_player_frames.size());
+			if (static_cast<int>(m_player_bgra.size()) != nf)
+				m_player_bgra.assign(nf, shp_bgra_cache_entry{});
+			if (m_player_frame >= 0 && m_player_frame < nf)
+			{
+				auto& ce = m_player_bgra[m_player_frame];
+				if (ce.version == m_player_bgra_version &&
+					static_cast<int>(ce.bgra.size()) == n)
+				{
+					memcpy(p_dib, ce.bgra.data(), static_cast<size_t>(n) * 4);
+					shp_cache_hit = true;
+				}
+			}
+		}
+		// VXL: single-buffer BGRA cache. Idle viewing of a still voxel model
+		// drops to memcpy + StretchBlt; orbiting still rebuilds because the
+		// underlying splat key changes. The cache key includes everything
+		// that affects the composited bytes (splat identity, side color,
+		// bg, grid, alpha checker).
+		if (vxl)
+		{
+			auto& vc = m_vxl_bgra;
+			if (vc.splat_token == m_vxl_splat.token &&
+				vc.splat_yaw == m_vxl_splat.yaw &&
+				vc.splat_pitch == m_vxl_splat.pitch &&
+				vc.splat_ss == m_vxl_splat.ss &&
+				vc.splat_shading == m_vxl_splat.shading &&
+				vc.side == side &&
+				vc.custom_color == custom_color &&
+				vc.bg_on == show_bg &&
+				vc.grid_mode == m_player_grid_mode &&
+				vc.ck_a == ck_a &&
+				vc.ck_b == ck_b &&
+				vc.cx_s == cx_s &&
+				vc.cy_s == cy_s &&
+				static_cast<int>(vc.bgra.size()) == n)
+			{
+				memcpy(p_dib, vc.bgra.data(), static_cast<size_t>(n) * 4);
+				vxl_cache_hit = true;
+			}
+		}
+		// Cache-miss conversion. Two flavors:
+		//   SHP/WSA → reuse player_convert_frame_to_bgra so the cached bytes
+		//             match what the prefill produces (grid baked in).
+		//   VXL     → inline loop here because it composites the shading
+		//             buffer that the SHP helper doesn't know about.
+		if (!shp_cache_hit && !vxl_cache_hit)
+		{
+		if (vxl)
+		{
+		// Serial. Buffer is the supersample canvas (~240x240 for typical
+		// VXLs); fork/join overhead exceeds the loop work at this size.
 		for (int i = 0; i < n; i++)
 		{
 			byte idx = s[i];
@@ -2923,23 +3178,13 @@ void CXCCFileView::player_draw(CDC* pDC)
 					bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
 				}
 			}
-			// Shadow overlay: black tint at 47% alpha over the body pixel.
-			if (sshad && sshad[i] != 0)
-			{
-				float fa = 120.0f / 255.0f;
-				float r = static_cast<float>((bgra >> 16) & 0xff) * (1.0f - fa);
-				float g = static_cast<float>((bgra >> 8) & 0xff) * (1.0f - fa);
-				float b = static_cast<float>(bgra & 0xff) * (1.0f - fa);
-				int rr = static_cast<int>(r + 0.5f), gg = static_cast<int>(g + 0.5f), bb = static_cast<int>(b + 0.5f);
-				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
-			}
 			// VXL directional shading: scale the voxel color by the per-pixel
 			// shade factor that the splat wrote (128 = neutral 1.0). Skips
 			// background pixels (idx == 0) so the bg color / alpha-checker stay
 			// at full intensity.
-			if (!vxl_shade.empty() && idx != 0)
+			if (shade_buf && idx != 0)
 			{
-				int sb = vxl_shade[i];
+				int sb = shade_buf[i];
 				int rr = static_cast<int>(((bgra >> 16) & 0xff) * sb / 128);
 				int gg = static_cast<int>(((bgra >> 8)  & 0xff) * sb / 128);
 				int bb = static_cast<int>((bgra         & 0xff) * sb / 128);
@@ -2950,20 +3195,26 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 			p_dib[i] = bgra;
 		}
+		}
+		else
+		{
+			player_convert_frame_to_bgra(m_player_frame, p_dib);
+		}
+		}
 	}
 	// Game Grid overlay (isometric guide, ASE convention). Drawn into the
 	// source DIB before scaling so the lines participate in the chosen
-	// interpolation. Works for SHP (skips sprite pixels via index 0) and
-	// VXL (skips covered pixels via the BGRA buffer's non-bg color).
-	if (m_player_grid_mode > 0)
+	// interpolation. SHP path gets the grid baked into its cached BGRA via
+	// player_convert_frame_to_bgra; this per-paint pass is VXL-only and only
+	// runs when the VXL cache missed (otherwise the cached bytes already
+	// contain the grid).
+	if (is_vxl_view() && !vxl_cache_hit && m_player_grid_mode > 0)
 	{
 		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
 		const int gcx = cx_s / 2;
 		const int gcy = cy_s;
 		const DWORD line = 0x00FFFFFF;
-		// Sprite-content check via the paletted source buffer: 0 = uncovered
-		// (background) for both SHP/WSA frames and the VXL nearest splat.
-		#pragma omp parallel for schedule(static)
+		// Serial; same sizing reasoning as the BGRA loop above.
 		for (int py = 0; py < cy_s; py++)
 		{
 			for (int px = 0; px < cx_s; px++)
@@ -2981,12 +3232,40 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 		}
 	}
-	// FXAA: post-process the source DIB before stretch_image. Run on the
-	// supersample buffer so a single edge pass smooths voxel staircases
-	// before the downscale, rather than hunting for them in the smaller
-	// destination where they've already been mixed by the resampler.
-	if (theme::fxaa())
-		theme::apply_fxaa(p_dib, cx_s, cy_s);
+	// Snapshot the per-paint output into the relevant cache. Done after the
+	// grid overlay so the cached bytes are exactly what we'd blit. SHP
+	// snapshot uses the helper's output directly; either way the cache hit
+	// path memcpy's an identical buffer next time.
+	if (m_is_open && m_player_mode)
+	{
+		const int n = cx_s * cy_s;
+		const bool vxl_view = is_vxl_view();
+		if (!vxl_view && !shp_cache_hit && m_player_frame >= 0 &&
+			m_player_frame < static_cast<int>(m_player_bgra.size()))
+		{
+			auto& ce = m_player_bgra[m_player_frame];
+			ce.bgra.assign(p_dib, p_dib + n);
+			ce.version = m_player_bgra_version;
+		}
+		if (vxl_view && !vxl_cache_hit)
+		{
+			auto& vc = m_vxl_bgra;
+			vc.splat_token = m_vxl_splat.token;
+			vc.splat_yaw = m_vxl_splat.yaw;
+			vc.splat_pitch = m_vxl_splat.pitch;
+			vc.splat_ss = m_vxl_splat.ss;
+			vc.splat_shading = m_vxl_splat.shading;
+			vc.side = m_vxl_side_idx;
+			vc.custom_color = m_vxl_side_custom_color;
+			vc.bg_on = m_player_bg_on;
+			vc.grid_mode = m_player_grid_mode;
+			vc.ck_a = theme::checker_a();
+			vc.ck_b = theme::checker_b();
+			vc.cx_s = cx_s;
+			vc.cy_s = cy_s;
+			vc.bgra.assign(p_dib, p_dib + n);
+		}
+	}
 	// Clip the blit to the image area so a Ctrl+wheel-zoomed sprite that's
 	// larger than the available canvas doesn't paint over the player control
 	// band beneath it. Without this, an oversize SHP/WSA bleeds through and
@@ -2998,7 +3277,18 @@ void CXCCFileView::player_draw(CDC* pDC)
 	// run as a real downscale and produce silhouette AA. Nearest gives sharp
 	// blocky voxels (each voxel covers 2x2 in the supersample buffer, so the
 	// downscale to 1x naturally lands on pixel boundaries).
-	theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
+	// Force nearest while orbiting a VXL or panning. Bilinear/Bicubic/Lanczos
+	// parallel regions otherwise fire on every WM_MOUSEMOVE — at 1000Hz mouse
+	// polling, that's 1000 fork/joins per second of drag, pegging cores.
+	// Eyes can't resolve Lanczos quality mid-motion at 60fps anyway, and the
+	// VXL splat already does silhouette AA via supersampling, so dropping to
+	// GDI StretchBlt during the drag is visually nearly identical and orders
+	// of magnitude cheaper. The user's chosen mode is restored on release.
+	const bool dragging = m_vxl_dragging || m_player_panning;
+	if (dragging)
+		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s, theme::interp_nearest);
+	else
+		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
 	pDC->RestoreDC(-1);
 	mem_dc.SelectObject(old);
 	DeleteObject(h_dib);
@@ -3250,6 +3540,8 @@ void CXCCFileView::OnPlayerShadows()
 {
 	if (!m_player_controls_created) return;
 	m_player_shadows_on = m_player_shadows.GetCheck() == BST_CHECKED;
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	// Pair-mode reduces navigable range to cf/2; clamp current frame.
 	if (m_player_shadows_on)
 	{
@@ -3272,6 +3564,8 @@ void CXCCFileView::OnPlayerBg()
 {
 	if (!m_player_controls_created) return;
 	m_player_bg_on = m_player_bg.GetCheck() == BST_CHECKED;
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);
@@ -3283,6 +3577,8 @@ void CXCCFileView::OnPlayerSide(UINT id)
 	if (i < 0 || i > 7) return;
 	// Toggle: clicking the active swatch clears.
 	m_player_side_idx = (m_player_side_idx == i) ? -1 : i;
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	for (int k = 0; k < 8; k++)
 		m_player_side[k].Invalidate();
 	m_player_side_custom.Invalidate();
@@ -3298,6 +3594,8 @@ void CXCCFileView::OnPlayerSideCustom()
 	if (m_player_side_idx == 8)
 	{
 		m_player_side_idx = -1;
+		m_player_bgra_version++;
+		if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 		for (int k = 0; k < 8; k++)
 			m_player_side[k].Invalidate();
 		m_player_side_custom.Invalidate();
@@ -3311,6 +3609,8 @@ void CXCCFileView::OnPlayerSideCustom()
 		return;
 	m_player_side_custom_color = dlg.GetColor();
 	m_player_side_idx = 8;
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	for (int k = 0; k < 8; k++)
 		m_player_side[k].Invalidate();
 	m_player_side_custom.Invalidate();
@@ -3364,6 +3664,11 @@ void CXCCFileView::OnPlayerGridSel()
 	int sel = m_player_iso_grid.GetCurSel();
 	if (sel == CB_ERR) sel = 0;
 	m_player_grid_mode = sel;
+	// Grid lines are baked into the cached BGRA bytes (per-paint cost is then
+	// memcpy + StretchBlt). Bump version + re-prefill so the next animation
+	// tick is a hit. VXL gets its grid drawn per-paint (no SHP cache there).
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);
