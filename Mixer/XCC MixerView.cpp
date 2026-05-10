@@ -5,6 +5,7 @@
 #include "XCCFileView.h"
 #include "XCC MixerDoc.h"
 #include "XCC MixerView.h"
+#include "AudioPlayerDlg.h"
 #include "resource.h"
 #include "XSTE_dlg.h"
 #include <aud_decode.h>
@@ -3497,6 +3498,17 @@ void CXCCMixerView::extract_open_audio_pak(const string& bag, const string& idx)
 void CXCCMixerView::open_item(int id)
 {
 	const t_index_entry& index = find_ref(m_index, id);
+	// Audio files always play via XCC's built-in player on double-click,
+	// regardless of the external-programs setting — the user explicitly
+	// wants XCC's player and not Windows Media Player or similar. Pressing
+	// Space while focused on the same item toggles pause via the
+	// PreTranslateMessage path, which calls the same play_audio_id below.
+	if (index.ft == ft_aud || index.ft == ft_ogg ||
+		index.ft == ft_voc || index.ft == ft_wav)
+	{
+		play_audio_id(id);
+		return;
+	}
 	// External-programs mode: leaf files (anything that's not a MIX/dir
 	// container) get either shell-opened in place (filesystem source) or
 	// extracted to %TEMP%\xcc_mixer\ and shell-opened (MIX source). MIX
@@ -3531,10 +3543,11 @@ void CXCCMixerView::open_item(int id)
 	case ft_ogg:
 	case ft_voc:
 	case ft_wav:
-		// Audio play/pause moved off double-click; bound to Space now
-		// (see PreTranslateMessage). Double-click on audio falls through
-		// without action so external-programs mode and built-in mode have
-		// matching semantics for the same gesture.
+		// Unreachable: audio is intercepted at the top of open_item and
+		// routed to play_audio_id (XCC's built-in player). Kept as an
+		// explicit no-op so a stray double-click doesn't fall through to
+		// the default ShellExecute branch in case the early-return guard
+		// is ever changed.
 		break;
 	case ft_dir:
 		{
@@ -3687,8 +3700,9 @@ void CXCCMixerView::open_item(int id)
 }
 
 // Play/toggle the audio file with id `id` via xap_play. Bound to Space in
-// PreTranslateMessage. Same xap_play call the old double-click flow used —
-// pressing Space again on the same file pauses it.
+// PreTranslateMessage and double-click in open_item. xap_play handles the
+// "same-file = stop" toggle natively; xap_get_progress / xap_is_paused let
+// the player dialog reflect transport state without us tracking it here.
 void CXCCMixerView::play_audio_id(int id)
 {
 	if (!GetMainFrame()->get_ds())
@@ -3698,8 +3712,47 @@ void CXCCMixerView::play_audio_id(int id)
 		return;
 	CWaitCursor wait;
 	Ccc_file f(true);
-	if (!open_f_id(f, id))
-		xap_play(GetMainFrame()->get_ds(), f.vdata(), index.name);
+	if (open_f_id(f, id))
+		return;
+	// xap_play treats "same currently-playing file" as a stop-toggle.
+	// Sample the global xapFilePlaying *before* the call so we can detect
+	// that case without racing the worker thread that sets xapFilePlaying
+	// asynchronously after the new playback starts.
+	const std::string prev_playing = xapFilePlaying;
+	xap_play(GetMainFrame()->get_ds(), f.vdata(), index.name);
+	const bool was_toggle_stop = (prev_playing == index.name);
+	if (was_toggle_stop)
+	{
+		// Stopped the same file — hide the dialog so it doesn't linger.
+		if (m_audio_dlg && m_audio_dlg->GetSafeHwnd())
+			m_audio_dlg->ShowWindow(SW_HIDE);
+	}
+	else
+	{
+		// Either fresh play or switching files: show the mini-player and
+		// re-bind the filename + duration. Duration may briefly read -1 if
+		// the worker thread hasn't published it yet; the dialog's poll
+		// timer picks it up on the next tick.
+		if (CAudioPlayerDlg* dlg = ensure_audio_dlg())
+			dlg->on_playback_started(index.name);
+	}
+}
+
+CAudioPlayerDlg* CXCCMixerView::ensure_audio_dlg()
+{
+	if (!m_audio_dlg)
+	{
+		m_audio_dlg = std::make_unique<CAudioPlayerDlg>(GetMainFrame());
+		// Modeless: Create() returns immediately. Parent is the main frame
+		// rather than this listview so the dialog floats over the whole
+		// app and survives if the file list is re-populated.
+		if (!m_audio_dlg->Create(IDD_AUDIO_PLAYER, GetMainFrame()))
+		{
+			m_audio_dlg.reset();
+			return nullptr;
+		}
+	}
+	return m_audio_dlg.get();
 }
 
 BOOL CXCCMixerView::PreTranslateMessage(MSG* pMsg)

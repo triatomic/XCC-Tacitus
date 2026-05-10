@@ -138,12 +138,12 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_4, OnUpdateThemeVxlSs4)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_8, OnUpdateThemeVxlSs8)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_16, OnUpdateThemeVxlSs16)
-	ON_COMMAND(ID_THEME_FXAA, OnThemeFxaa)
-	ON_UPDATE_COMMAND_UI(ID_THEME_FXAA, OnUpdateThemeFxaa)
 	ON_COMMAND(ID_THEME_VXL_SHADING, OnThemeVxlShading)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SHADING, OnUpdateThemeVxlShading)
 	ON_COMMAND(ID_THEME_PARALLEL_EXTRACT, OnThemeParallelExtract)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
+	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
+	ON_UPDATE_COMMAND_UI(ID_THEME_LIMIT_VXL_CPU, OnUpdateThemeLimitVxlCpu)
 END_MESSAGE_MAP()
 
 
@@ -1594,14 +1594,20 @@ void CMainFrame::OnThemeAlphaColor()
 	// Repaint the file-info pane so any currently-shown image with alpha
 	// re-composites against the new checker color.
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+	{
+		m_file_info_pane->invalidate_player_bgra_cache();
 		m_file_info_pane->Invalidate();
+	}
 }
 
 void CMainFrame::OnThemeShpTransparency()
 {
 	theme::set_shp_transparency(!theme::shp_transparency());
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+	{
+		m_file_info_pane->invalidate_player_bgra_cache();
 		m_file_info_pane->Invalidate();
+	}
 }
 
 void CMainFrame::OnUpdateThemeShpTransparency(CCmdUI* p)
@@ -1613,7 +1619,10 @@ void CMainFrame::OnThemeUseCheckerboard()
 {
 	theme::set_use_checkerboard(!theme::use_checkerboard());
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+	{
+		m_file_info_pane->invalidate_player_bgra_cache();
 		m_file_info_pane->Invalidate();
+	}
 }
 
 void CMainFrame::OnUpdateThemeUseCheckerboard(CCmdUI* p)
@@ -1736,15 +1745,6 @@ void CMainFrame::OnUpdateThemeVxlSs4(CCmdUI* p)   { p->SetCheck(theme::vxl_super
 void CMainFrame::OnUpdateThemeVxlSs8(CCmdUI* p)   { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_8); }
 void CMainFrame::OnUpdateThemeVxlSs16(CCmdUI* p)  { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_16); }
 
-void CMainFrame::OnThemeFxaa()
-{
-	theme::set_fxaa(!theme::fxaa());
-	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
-		m_file_info_pane->Invalidate(FALSE);
-}
-
-void CMainFrame::OnUpdateThemeFxaa(CCmdUI* p) { p->SetCheck(theme::fxaa()); }
-
 void CMainFrame::OnThemeVxlShading()
 {
 	theme::set_vxl_shading(!theme::vxl_shading());
@@ -1760,6 +1760,13 @@ void CMainFrame::OnThemeParallelExtract()
 }
 
 void CMainFrame::OnUpdateThemeParallelExtract(CCmdUI* p) { p->SetCheck(theme::parallel_extract()); }
+
+void CMainFrame::OnThemeLimitVxlCpu()
+{
+	theme::set_limit_vxl_cpu(!theme::limit_vxl_cpu());
+}
+
+void CMainFrame::OnUpdateThemeLimitVxlCpu(CCmdUI* p) { p->SetCheck(theme::limit_vxl_cpu()); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction

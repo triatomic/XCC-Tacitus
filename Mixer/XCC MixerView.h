@@ -111,6 +111,10 @@ public:
 protected:
 	void extract_open_audio_pak(const string& bag, const string& idx) const;
 	void play_audio_id(int id);
+	// Lazily create the modeless audio player dialog. Returns a pointer
+	// owned by the view's destructor; do not delete.
+	class CAudioPlayerDlg* ensure_audio_dlg();
+	std::unique_ptr<class CAudioPlayerDlg> m_audio_dlg;
 
 public:
 	BOOL PreTranslateMessage(MSG* pMsg) override;

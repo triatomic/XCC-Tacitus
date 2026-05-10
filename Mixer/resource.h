@@ -1419,9 +1419,9 @@
 #define ID_THEME_VXL_SS_4                 41018
 #define ID_THEME_VXL_SS_8                 41019
 #define ID_THEME_VXL_SS_16                41020
-#define ID_THEME_FXAA                     41021
 #define ID_THEME_VXL_SHADING              41022
 #define ID_THEME_PARALLEL_EXTRACT         41023
+#define ID_THEME_LIMIT_VXL_CPU            41024
 
 #define IDD_PAL_PATHS                     142
 #define IDC_PAL_PATHS_LIST                1130
@@ -1441,6 +1441,13 @@
 #define IDC_VXL_SIDE6                     1144
 #define IDC_VXL_SIDE7                     1145
 #define IDC_VXL_SIDE_CUSTOM               1146
+
+#define IDD_AUDIO_PLAYER                  143
+#define IDC_AUDIO_PLAY_PAUSE              1147
+#define IDC_AUDIO_STOP                    1148
+#define IDC_AUDIO_SEEK                    1149
+#define IDC_AUDIO_TIME                    1150
+#define IDC_AUDIO_FILENAME                1151
 
 // Next default values for new objects
 // 

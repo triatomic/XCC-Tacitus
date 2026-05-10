@@ -25,6 +25,20 @@
 LPDIRECTSOUNDBUFFER dsb;
 static std::mutex g_dsb_mutex;
 static std::atomic<bool> g_stop_requested{false};
+// Pause: worker keeps the buffer alive but the buffer itself is Stop()'d at
+// a known byte offset. Resume re-Plays from that offset. Distinct from
+// stop_requested so the worker loop doesn't tear down on pause.
+static std::atomic<bool> g_pause_requested{false};
+// Total bytes in the active buffer; published by the worker after the buffer
+// is created so the main thread can compute progress + clamp seeks. 0 = idle.
+static std::atomic<DWORD> g_buf_bytes{0};
+// Bytes per second of the active stream, for converting position <-> time.
+static std::atomic<DWORD> g_bytes_per_sec{0};
+// Block alignment of the active stream (1 for 8-bit mono, 2 for 16-bit mono
+// / 8-bit stereo, 4 for 16-bit stereo). Used by xap_seek to clamp seek
+// targets onto sample boundaries — landing mid-sample on a 16-bit stream
+// produces a tick from the byte-swapped half-sample at the seek point.
+static std::atomic<DWORD> g_block_align{1};
 // Coarse cooldown so successive xap_play calls (e.g. from a held key, or a
 // fast user mashing Space) can't race the worker thread.
 static std::chrono::steady_clock::time_point g_xap_last_call;
@@ -136,6 +150,10 @@ static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 		std::lock_guard<std::mutex> lock(g_dsb_mutex);
 		dsb = local_dsb;
 		g_stop_requested.store(false);
+		g_pause_requested.store(false);
+		g_buf_bytes.store(cb_audio);
+		g_bytes_per_sec.store(wfdesc.nAvgBytesPerSec);
+		g_block_align.store(wfdesc.nBlockAlign ? wfdesc.nBlockAlign : 1);
 	}
 	void* p1;
 	DWORD s1;
@@ -218,13 +236,23 @@ static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 		else
 		{
 			DWORD status;
-			// Honor a stop signal from xap_play in addition to the natural
-			// end of playback. Reads to local_dsb here are safe because
-			// the buffer is owned by this thread for its full lifetime.
-			while (dsr = local_dsb->GetStatus(&status), DS_OK == dsr
-				&& (status & DSBSTATUS_PLAYING)
-				&& !g_stop_requested.load())
+			// Loop exits on stop_requested OR natural end of playback.
+			// Pause is invisible to the loop: when paused, the buffer's
+			// PLAYING bit is clear but pause_requested is set, so we keep
+			// spinning until either the user resumes (back to PLAYING) or
+			// stops/seeks. Reads to local_dsb here are safe because the
+			// buffer is owned by this thread for its full lifetime.
+			for (;;)
 			{
+				if (g_stop_requested.load())
+					break;
+				dsr = local_dsb->GetStatus(&status);
+				if (dsr != DS_OK)
+					break;
+				const bool playing = (status & DSBSTATUS_PLAYING) != 0;
+				const bool paused = g_pause_requested.load();
+				if (!playing && !paused)
+					break;	// natural end of playback
 				Sleep(50);
 			}
 		}
@@ -235,7 +263,13 @@ static int xap_play2(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 	{
 		std::lock_guard<std::mutex> lock(g_dsb_mutex);
 		if (dsb == local_dsb)
+		{
 			dsb = NULL;
+			g_buf_bytes.store(0);
+			g_bytes_per_sec.store(0);
+			g_block_align.store(1);
+			g_pause_requested.store(false);
+		}
 	}
 	if (local_dsb)
 	{
@@ -301,4 +335,96 @@ void xap_play(LPDIRECTSOUND ds, Cvirtual_binary s, string currentFile)
 		{
 			xap_play2(ds, s, currentFile);
 		}).detach();
+}
+
+void xap_pause()
+{
+	std::lock_guard<std::mutex> lock(g_dsb_mutex);
+	if (!dsb || g_pause_requested.load())
+		return;
+	g_pause_requested.store(true);
+	dsb->Stop();	// remembers internal play cursor; resume re-Plays from it
+}
+
+void xap_resume()
+{
+	std::lock_guard<std::mutex> lock(g_dsb_mutex);
+	if (!dsb || !g_pause_requested.load())
+		return;
+	g_pause_requested.store(false);
+	dsb->Play(0, 0, 0);	// resumes from saved cursor
+}
+
+bool xap_is_paused()
+{
+	return g_pause_requested.load();
+}
+
+double xap_get_progress()
+{
+	std::lock_guard<std::mutex> lock(g_dsb_mutex);
+	if (!dsb)
+		return -1.0;
+	const DWORD total = g_buf_bytes.load();
+	if (total == 0)
+		return -1.0;
+	DWORD play_cursor = 0;
+	DWORD write_cursor = 0;
+	if (dsb->GetCurrentPosition(&play_cursor, &write_cursor) != DS_OK)
+		return -1.0;
+	if (play_cursor >= total)
+		return 1.0;
+	return static_cast<double>(play_cursor) / static_cast<double>(total);
+}
+
+double xap_get_duration()
+{
+	const DWORD total = g_buf_bytes.load();
+	const DWORD bps = g_bytes_per_sec.load();
+	if (total == 0 || bps == 0)
+		return -1.0;
+	return static_cast<double>(total) / static_cast<double>(bps);
+}
+
+void xap_seek(double progress)
+{
+	if (progress < 0.0) progress = 0.0;
+	if (progress > 1.0) progress = 1.0;
+	std::lock_guard<std::mutex> lock(g_dsb_mutex);
+	if (!dsb)
+		return;
+	const DWORD total = g_buf_bytes.load();
+	if (total == 0)
+		return;
+	// Round to a true sample boundary using the format's nBlockAlign. For
+	// 8-bit mono that's 1 (no-op); for 16-bit stereo that's 4. Landing
+	// mid-sample produces a swapped-byte tick at the seek point that
+	// reads as audible distortion. The 4-byte alignment we used before
+	// was wrong for 8-bit mono streams (Westwood VOC/AUD).
+	const DWORD align = g_block_align.load();
+	DWORD bytes = static_cast<DWORD>(progress * total);
+	if (align > 1) bytes -= bytes % align;
+	if (bytes + align > total) bytes = total > align ? total - align : 0;
+	// Stop before repositioning. SetCurrentPosition is documented as safe
+	// while playing, but on some drivers the hardware mixer pops as it
+	// adjusts the read pointer. Stop->SetPos->Play (only if we were
+	// playing, not paused) avoids the glitch.
+	DWORD status = 0;
+	dsb->GetStatus(&status);
+	const bool was_playing = (status & DSBSTATUS_PLAYING) != 0;
+	if (was_playing)
+		dsb->Stop();
+	dsb->SetCurrentPosition(bytes);
+	if (was_playing && !g_pause_requested.load())
+		dsb->Play(0, 0, 0);
+}
+
+void xap_stop()
+{
+	std::lock_guard<std::mutex> lock(g_dsb_mutex);
+	if (!dsb)
+		return;
+	g_stop_requested.store(true);
+	g_pause_requested.store(false);	// don't keep worker alive on a stop
+	dsb->Stop();
 }
