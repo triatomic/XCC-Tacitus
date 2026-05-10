@@ -84,6 +84,8 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_PLAYER_BG, OnPlayerBg)
 	ON_CONTROL_RANGE(BN_CLICKED, IDC_PLAYER_SIDE0, IDC_PLAYER_SIDE7, OnPlayerSide)
 	ON_BN_CLICKED(IDC_PLAYER_SIDE_CUSTOM, OnPlayerSideCustom)
+	ON_CONTROL_RANGE(BN_CLICKED, IDC_VXL_SIDE0, IDC_VXL_SIDE7, OnVxlSide)
+	ON_BN_CLICKED(IDC_VXL_SIDE_CUSTOM, OnVxlSideCustom)
 	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
 	ON_WM_DRAWITEM()
 	ON_WM_CTLCOLOR()
@@ -730,7 +732,7 @@ void CXCCFileView::draw_info(string n, string d)
 }
 
 
-void CXCCFileView::OnDisable(CCmdUI* pCmdUI) 
+void CXCCFileView::OnDisable(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(false);
 }
@@ -926,7 +928,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_RGB)
 					draw_info("Pixel Format: ", n(ddsd.ddpfPixelFormat.dwRGBBitCount) +
 						" bits (" + nwzl(4, 1000 * get_size(ddsd.ddpfPixelFormat.dwRGBAlphaBitMask) + 100 * get_size(ddsd.ddpfPixelFormat.dwRBitMask) + 10
-							* get_size(ddsd.ddpfPixelFormat.dwGBitMask) + get_size(ddsd.ddpfPixelFormat.dwBBitMask)) + ')');		
+							* get_size(ddsd.ddpfPixelFormat.dwGBitMask) + get_size(ddsd.ddpfPixelFormat.dwBBitMask)) + ')');
 				if (ddsd.ddpfPixelFormat.dwFlags & DDPF_FOURCC)
 				{
 					Cvirtual_image image = f.vimage();
@@ -1659,7 +1661,7 @@ void CXCCFileView::OnDraw(CDC* pDC)
 							}
 						}
 						m_y += cl + m_y_inc;
-					}					
+					}
 					delete[] image_z;
 					delete[] image_s;
 					delete[] image;
@@ -1888,7 +1890,7 @@ void CXCCFileView::post_open(Ccc_file& f)
 			|| m_ft == ft_shp_ts || m_ft == ft_tga || m_ft == ft_vxl || m_ft == ft_wsa_dune2
 			|| m_ft == ft_wsa || m_ft == ft_xif) ? m_size :
 			(m_ft == ft_csf ? 64 << 8 : 256 << 10);
-		int cb_data = m_size > cb_max_data ? cb_max_data : m_size;	
+		int cb_data = m_size > cb_max_data ? cb_max_data : m_size;
 		f.read(m_data.write_start(cb_data), cb_data);
 		f.close();
 		m_text_cache_valid = false;
@@ -2098,6 +2100,16 @@ void CXCCFileView::player_decode_frames()
 			double sx = (st.x_max_scale - st.x_min_scale) / std::max(1, cx);
 			double sy = (st.y_max_scale - st.y_min_scale) / std::max(1, cy);
 			double sz = (st.z_max_scale - st.z_min_scale) / std::max(1, cz);
+			// Section-local occupancy grid for neighbor-based normal derivation.
+			// Each voxel's normal points away from its empty neighbor cells (sum
+			// of empty-side unit vectors). Store color sentinel 0 = empty so a
+			// single byte per cell suffices; 1 = occupied.
+			std::vector<unsigned char> occ(static_cast<size_t>(cx) * cy * cz, 0);
+			auto occ_idx = [cx, cy](int x, int y, int z) { return x + cx * (y + cy * z); };
+			// Pass 1: parse spans into a parallel scratch list of (lx,ly,lz,color)
+			// and populate the occupancy grid.
+			struct local_voxel { int lx, ly, lz; unsigned char color; };
+			std::vector<local_voxel> locals;
 			int j = 0;
 			for (int y = 0; y < cy; y++)
 			{
@@ -2113,22 +2125,59 @@ void CXCCFileView::player_decode_frames()
 						int c = *r++;
 						while (c--)
 						{
-							double lx = (x + 0.5 - cx / 2.0) * sx;
-							// Flip file Y so the model's front faces the camera at
-							// yaw=0 (matches Vengi's VXL viewer convention).
-							double ly = (cy - y - 0.5 - cy / 2.0) * sy;
-							double lz = (z + 0.5 - cz / 2.0) * sz;
-							double wx = st.transform[0][0] * lx + st.transform[0][1] * ly + st.transform[0][2] * lz + st.transform[0][3];
-							double wy = st.transform[1][0] * lx + st.transform[1][1] * ly + st.transform[1][2] * lz + st.transform[1][3];
-							double wz = st.transform[2][0] * lx + st.transform[2][1] * ly + st.transform[2][2] * lz + st.transform[2][3];
-							t_vxl_voxel v{ wx, wy, wz, *r };
-							m_vxl_cloud.push_back(v);
+							locals.push_back({ x, y, z, *r });
+							if (x >= 0 && x < cx && y >= 0 && y < cy && z >= 0 && z < cz)
+								occ[occ_idx(x, y, z)] = 1;
 							r += 2;
 							z++;
 						}
 						r++;
 					}
 				}
+			}
+			// Pass 2: emit world-space voxels with neighbor-derived normals.
+			// Local-space normal is the sum of unit vectors pointing toward each
+			// empty 6-neighbor; this picks out the lit-able cube faces. Y is
+			// flipped to match the position flip below. Then rotate by the 3x3
+			// rotation submatrix of st.transform (translation column doesn't
+			// apply to directions). Renormalize, with a fallback +Z if the voxel
+			// is fully surrounded (no visible faces).
+			m_vxl_cloud.reserve(m_vxl_cloud.size() + locals.size());
+			for (const auto& lv : locals)
+			{
+				const int x = lv.lx, y = lv.ly, z = lv.lz;
+				double lx = (x + 0.5 - cx / 2.0) * sx;
+				// Flip file Y so the model's front faces the camera at
+				// yaw=0 (matches Vengi's VXL viewer convention).
+				double ly = (cy - y - 0.5 - cy / 2.0) * sy;
+				double lz = (z + 0.5 - cz / 2.0) * sz;
+				double wx = st.transform[0][0] * lx + st.transform[0][1] * ly + st.transform[0][2] * lz + st.transform[0][3];
+				double wy = st.transform[1][0] * lx + st.transform[1][1] * ly + st.transform[1][2] * lz + st.transform[1][3];
+				double wz = st.transform[2][0] * lx + st.transform[2][1] * ly + st.transform[2][2] * lz + st.transform[2][3];
+				// Local-space normal from empty-neighbor sides.
+				float lnx = 0.0f, lny = 0.0f, lnz = 0.0f;
+				auto empty = [&](int xx, int yy, int zz) {
+					if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
+						return true;
+					return occ[occ_idx(xx, yy, zz)] == 0;
+				};
+				if (empty(x - 1, y, z)) lnx -= 1.0f;
+				if (empty(x + 1, y, z)) lnx += 1.0f;
+				if (empty(x, y - 1, z)) lny += 1.0f; // Y is flipped on emit
+				if (empty(x, y + 1, z)) lny -= 1.0f;
+				if (empty(x, y, z - 1)) lnz -= 1.0f;
+				if (empty(x, y, z + 1)) lnz += 1.0f;
+				if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
+					lnz = 1.0f;
+				// Rotate by 3x3 submatrix of section transform (directions only).
+				float wnx = static_cast<float>(st.transform[0][0]) * lnx + static_cast<float>(st.transform[0][1]) * lny + static_cast<float>(st.transform[0][2]) * lnz;
+				float wny = static_cast<float>(st.transform[1][0]) * lnx + static_cast<float>(st.transform[1][1]) * lny + static_cast<float>(st.transform[1][2]) * lnz;
+				float wnz = static_cast<float>(st.transform[2][0]) * lnx + static_cast<float>(st.transform[2][1]) * lny + static_cast<float>(st.transform[2][2]) * lnz;
+				float nlen = std::sqrt(wnx * wnx + wny * wny + wnz * wnz);
+				if (nlen > 1e-6f) { wnx /= nlen; wny /= nlen; wnz /= nlen; }
+				else              { wnx = 0; wny = 0; wnz = 1; }
+				t_vxl_voxel v{ wx, wy, wz, lv.color, wnx, wny, wnz };
+				m_vxl_cloud.push_back(v);
 			}
 		}
 
@@ -2165,7 +2214,6 @@ void CXCCFileView::player_enter()
 	if (m_ft == ft_vxl)
 	{
 		m_vxl_yaw = 0.0;
-		invalidate_vxl_splat();
 		m_vxl_pitch = 30.0 * 3.14159265358979323846 / 180.0;
 		m_vxl_dragging = false;
 	}
@@ -2239,6 +2287,16 @@ void CXCCFileView::player_enter()
 			theme::apply_window(m_player_side[i].GetSafeHwnd());
 		theme::apply_window(m_player_side_custom.GetSafeHwnd());
 
+		// VXL parallel set of side-color swatches. Same look + behavior as the
+		// SHP set; kept distinct so VXL state doesn't leak into SHP previews.
+		for (int i = 0; i < 8; i++)
+		{
+			m_vxl_side[i].Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_VXL_SIDE0 + i);
+			theme::apply_window(m_vxl_side[i].GetSafeHwnd());
+		}
+		m_vxl_side_custom.Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_VXL_SIDE_CUSTOM);
+		theme::apply_window(m_vxl_side_custom.GetSafeHwnd());
+
 		m_player_controls_created = true;
 	}
 	const bool vxl = (m_ft == ft_vxl);
@@ -2265,11 +2323,19 @@ void CXCCFileView::player_enter()
 	m_player_shadows.EnableWindow(can_shadows ? TRUE : FALSE);
 	if (!can_shadows) m_player_shadows_on = false;
 	m_player_shadows.SetCheck(m_player_shadows_on ? BST_CHECKED : BST_UNCHECKED);
-	m_player_bg.ShowWindow(shp_show);
+	// BG toggle applies to both SHP and VXL — palette index 0 = "no voxel" /
+	// "transparent" pixel in either case, so the show-bg-vs-checker switch is
+	// meaningful for both.
+	m_player_bg.ShowWindow(SW_SHOW);
 	m_player_bg.SetCheck(m_player_bg_on ? BST_CHECKED : BST_UNCHECKED);
 	for (int i = 0; i < 8; i++)
 		m_player_side[i].ShowWindow(shp_show);
 	m_player_side_custom.ShowWindow(shp_show);
+	// VXL parallel: opposite gating — only shown when viewing a VXL.
+	const int vxl_show = vxl ? SW_SHOW : SW_HIDE;
+	for (int i = 0; i < 8; i++)
+		m_vxl_side[i].ShowWindow(vxl_show);
+	m_vxl_side_custom.ShowWindow(vxl_show);
 	// Game Grid combobox shows for both SHP and VXL — the overlay applies in
 	// either case (already drawn for VXL via the post-stretch path below).
 	m_player_iso_grid.ShowWindow(SW_SHOW);
@@ -2308,6 +2374,9 @@ void CXCCFileView::player_exit()
 		for (int i = 0; i < 8; i++)
 			m_player_side[i].ShowWindow(SW_HIDE);
 		m_player_side_custom.ShowWindow(SW_HIDE);
+		for (int i = 0; i < 8; i++)
+			m_vxl_side[i].ShowWindow(SW_HIDE);
+		m_vxl_side_custom.ShowWindow(SW_HIDE);
 		m_player_iso_grid.ShowWindow(SW_HIDE);
 	}
 	m_player_frames.clear();
@@ -2386,6 +2455,17 @@ void CXCCFileView::player_layout_controls()
 		// Slider/label/FPS positions above are computed but never shown.
 		int gx = pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
 		m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
+		// Upper row: BG toggle + 9 VXL side-color swatches.
+		int y2 = y - H - pad;
+		int x2 = pad;
+		m_player_bg.MoveWindow(x2, y2, 36, H); x2 += 36 + pad;
+		const int swatch = H;
+		for (int i = 0; i < 8; i++)
+		{
+			m_vxl_side[i].MoveWindow(x2, y2, swatch, H);
+			x2 += swatch + 2;
+		}
+		m_vxl_side_custom.MoveWindow(x2, y2, swatch, H);
 		return;
 	}
 	// Upper row (SHP family only): Shadows, BG, 8 side-color swatches.
@@ -2428,180 +2508,100 @@ void CXCCFileView::player_draw(CDC* pDC)
 	if (m_player_cx <= 0 || m_player_cy <= 0)
 		return;
 
-	// VXL: rasterize the cached point cloud into a fresh framebuffer at the
-	// current yaw/pitch. When the interpolation mode is Nearest we point-
-	// splat into an 8bpp paletted buffer (sharp voxels). Otherwise we EWA-
-	// style splat into a 32bpp BGRA buffer with weighted color accumulation
-	// — this gives true anti-aliased voxel edges. The chosen path is
-	// signalled by which of vxl_buf8 / vxl_buf32 ends up populated.
+	// VXL: point-splat the cached point cloud into an 8bpp framebuffer at 2x
+	// canvas resolution. The chosen interpolation mode (theme::interp()) then
+	// downsamples that supersample buffer to the destination viewport via the
+	// shared theme::stretch_image path — same way SHP/WSA frames are scaled.
+	// This makes Bilinear/Bicubic/Lanczos actually do real silhouette AA on
+	// VXL, rather than the previous Gaussian-splat path that ignored the user
+	// choice. SHP/WSA path below stays unchanged.
 	Cvirtual_binary vxl_buf;
 	const byte* s = nullptr;
-	const DWORD* s32 = nullptr;
-	const bool vxl_smooth = is_vxl_view() && (theme::interp() != theme::interp_nearest);
+	int vxl_ss_cx = 0, vxl_ss_cy = 0;
+	// Shading factor per pixel (0..255 = 0..2.0 at half=128). Only populated
+	// for VXL when theme::vxl_shading() is on; SHP/WSA leaves it empty.
+	std::vector<unsigned char> vxl_shade;
 	if (is_vxl_view())
 	{
 		if (m_vxl_cloud.empty())
 			return;
-		const int c_pixels = m_player_cx * m_player_cy;
+		const int ss = static_cast<int>(theme::vxl_supersample());
+		vxl_ss_cx = m_player_cx * ss;
+		vxl_ss_cy = m_player_cy * ss;
+		const int half_ss = m_vxl_half * ss;
+		const int c_pixels = vxl_ss_cx * vxl_ss_cy;
 		const double cosY = std::cos(m_vxl_yaw);
 		const double sinY = std::sin(m_vxl_yaw);
 		const double cosP = std::cos(m_vxl_pitch);
 		const double sinP = std::sin(m_vxl_pitch);
-
-		if (!vxl_smooth)
+		byte* d = vxl_buf.write_start(c_pixels);
+		memset(d, 0, c_pixels);
+		vector<short> z_buf(c_pixels, SHRT_MIN);
+		// Camera-relative directional light. The viewer is camera-axis aligned
+		// (post-rotation rx,py,pz axes), so a fixed direction in this space
+		// effectively orbits with the user. Pick "upper-left-front" (-x, -y, +z
+		// in screen space → light comes from the upper-left, facing the
+		// camera). We dot this with each voxel's camera-space normal.
+		const bool shading = theme::vxl_shading();
+		const float light_x = -0.40825f;
+		const float light_y = -0.40825f;
+		const float light_z =  0.81650f;
+		const float ambient = 0.35f;	// floor: faces fully turned away from light still get this much
+		const float diffuse = 1.0f;	// shading range above ambient (max = ambient + diffuse = 1.20)
+		if (shading)
+			vxl_shade.assign(c_pixels, 128);	// 128 = neutral 1.0 (ambient + diffuse * 0.5 default)
+		for (const auto& v : m_vxl_cloud)
 		{
-			// Point splat into 8bpp framebuffer + per-pixel z-buffer.
-			byte* d = vxl_buf.write_start(c_pixels);
-			memset(d, 0, c_pixels);
-			vector<short> z_buf(c_pixels, SHRT_MIN);
-			for (const auto& v : m_vxl_cloud)
+			double rx = v.x * cosY - v.y * sinY;
+			double ry = v.x * sinY + v.y * cosY;
+			double rz = v.z;
+			double py = ry * cosP - rz * sinP;
+			double pz = ry * sinP + rz * cosP;
+			// At supersample resolution, each voxel covers a ss-by-ss footprint.
+			// A single-pixel splat would leave 75% of the silhouette as holes
+			// (the "uncovered = background" pixels), so write the full footprint.
+			int sx0 = static_cast<int>(rx * ss) + half_ss;
+			int sy0 = -static_cast<int>(py * ss) + half_ss;
+			short depth = static_cast<short>(pz);
+			// Camera-space normal: same yaw/pitch transform as position. We
+			// reuse the screen-space convention where camera +Z faces user.
+			unsigned char shade_byte = 128;
+			if (shading)
 			{
-				double rx = v.x * cosY - v.y * sinY;
-				double ry = v.x * sinY + v.y * cosY;
-				double rz = v.z;
-				double py = ry * cosP - rz * sinP;
-				double pz = ry * sinP + rz * cosP;
-				int sx_pix = static_cast<int>(rx) + m_vxl_half;
-				int sy_pix = -static_cast<int>(py) + m_vxl_half;
-				if (sx_pix < 0 || sx_pix >= m_player_cx || sy_pix < 0 || sy_pix >= m_player_cy)
-					continue;
-				int ofs = sx_pix + m_player_cx * sy_pix;
-				short depth = static_cast<short>(pz);
-				if (depth > z_buf[ofs])
-				{
-					z_buf[ofs] = depth;
-					d[ofs] = v.color;
-				}
+				float nrx = static_cast<float>(v.nx * cosY - v.ny * sinY);
+				float nry = static_cast<float>(v.nx * sinY + v.ny * cosY);
+				float nrz = static_cast<float>(v.nz);
+				float nry_p = static_cast<float>(nry * cosP - nrz * sinP);
+				float nrz_p = static_cast<float>(nry * sinP + nrz * cosP);
+				// Screen Y is flipped (we negate py earlier), so flip the
+				// normal Y for the dot product to match.
+				float ndotl = nrx * light_x + (-nry_p) * light_y + nrz_p * light_z;
+				if (ndotl < 0.0f) ndotl = 0.0f;
+				float shade = ambient + diffuse * ndotl;
+				int sb = static_cast<int>(shade * 128.0f + 0.5f);
+				if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
+				shade_byte = static_cast<unsigned char>(sb);
 			}
-			s = vxl_buf.data();
-		}
-		else
-		{
-			// Cached: skip the entire splat if yaw/pitch/canvas/transparency
-			// haven't changed since last paint (slider scrubs, focus changes).
-			const bool tr = theme::shp_transparency();
-			const bool cb = theme::use_checkerboard();
-			const bool cache_hit = m_vxl_splat_cache.size() == static_cast<size_t>(c_pixels)
-				&& m_vxl_splat_yaw == m_vxl_yaw
-				&& m_vxl_splat_pitch == m_vxl_pitch
-				&& m_vxl_splat_cx == m_player_cx
-				&& m_vxl_splat_cy == m_player_cy
-				&& m_vxl_splat_tr == tr
-				&& m_vxl_splat_cb == cb;
-			if (cache_hit)
-				s32 = m_vxl_splat_cache.data();
-			else {
-			// 2D Gaussian splat into BGRA accumulator. Each voxel writes a
-			// small footprint (radius ~1.2 px) weighted by exp(-d^2/2*sigma^2).
-			// Z-buffer is per-pixel: a fragment contributes only if its depth
-			// is within an epsilon of the deepest pixel seen (so closer voxels
-			// fully occlude farther ones, but co-planar voxels blend at edges).
-			//
-			// Background follows the SHP transparency toggle: off = paint
-			// uncovered pixels with the palette's index-0 color (matches the
-			// Nearest path, which goes through draw_image8 + palette lookup);
-			// on = paint the alpha checkerboard. Without this, the smooth path
-			// would always show black where no voxel hit, diverging from
-			// Nearest as the user toggled interpolation modes.
-			m_vxl_splat_cache.assign(c_pixels, 0u);
+			for (int dy = 0; dy < ss; dy++)
 			{
-				const COLORREF ck_a = theme::checker_a();
-				const COLORREF ck_b = theme::checker_b();
-				const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
-				const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
-				const DWORD bg_solid = m_color_table[0];
-				for (int y = 0; y < m_player_cy; y++)
-					for (int x = 0; x < m_player_cx; x++)
-						m_vxl_splat_cache[x + m_player_cx * y] = tr
-							? ((((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d)
-							: bg_solid;
-			}
-			DWORD* dst32 = m_vxl_splat_cache.data();
-			std::vector<float> accW(c_pixels, 0.0f);
-			std::vector<float> accB(c_pixels, 0.0f);
-			std::vector<float> accG(c_pixels, 0.0f);
-			std::vector<float> accR(c_pixels, 0.0f);
-			// Float z-buffer at sub-pixel precision. The previous short
-			// quantization made coplanar voxels of a single flat surface
-			// round to slightly different depths under oblique rotation,
-			// which combined with the z-eps "near-coplanar blend" branch
-			// caused back-face colors to bleed into front-face pixels.
-			std::vector<float> z_buf(c_pixels, -FLT_MAX);
-			const float sigma = 0.7f;
-			const float two_sigma2 = 2.0f * sigma * sigma;
-			const int kr = 1; // splat radius in pixels (3x3 footprint)
-			for (const auto& v : m_vxl_cloud)
-			{
-				double rx = v.x * cosY - v.y * sinY;
-				double ry = v.x * sinY + v.y * cosY;
-				double rz = v.z;
-				double py = ry * cosP - rz * sinP;
-				double pz = ry * sinP + rz * cosP;
-				const double fx = rx + m_vxl_half;
-				const double fy = -py + m_vxl_half;
-				const int cx = static_cast<int>(std::floor(fx));
-				const int cy = static_cast<int>(std::floor(fy));
-				const float depth = static_cast<float>(pz);
-				DWORD bgra = m_color_table[v.color];
-				const float B = static_cast<float>(bgra & 0xff);
-				const float G = static_cast<float>((bgra >> 8) & 0xff);
-				const float R = static_cast<float>((bgra >> 16) & 0xff);
-				for (int dy = -kr; dy <= kr; dy++)
+				int sy_pix = sy0 + dy;
+				if (sy_pix < 0 || sy_pix >= vxl_ss_cy) continue;
+				for (int dx = 0; dx < ss; dx++)
 				{
-					int py_pix = cy + dy;
-					if (py_pix < 0 || py_pix >= m_player_cy) continue;
-					for (int dx = -kr; dx <= kr; dx++)
+					int sx_pix = sx0 + dx;
+					if (sx_pix < 0 || sx_pix >= vxl_ss_cx) continue;
+					int ofs = sx_pix + vxl_ss_cx * sy_pix;
+					if (depth > z_buf[ofs])
 					{
-						int px_pix = cx + dx;
-						if (px_pix < 0 || px_pix >= m_player_cx) continue;
-						float ddx = static_cast<float>(px_pix + 0.5 - fx);
-						float ddy = static_cast<float>(py_pix + 0.5 - fy);
-						float d2 = ddx * ddx + ddy * ddy;
-						float w = std::exp(-d2 / two_sigma2);
-						if (w < 0.01f) continue;
-						int ofs = px_pix + m_player_cx * py_pix;
-						// Strict z-test (no eps blending): closer fragment
-						// supersedes; equal-depth (only same-surface coplanar
-						// voxels at float precision) accumulates. The Gaussian
-						// footprint then anti-aliases the silhouette, which is
-						// the only place we actually want blending.
-						if (depth < z_buf[ofs])
-							continue;
-						if (depth > z_buf[ofs])
-						{
-							accW[ofs] = 0; accB[ofs] = 0; accG[ofs] = 0; accR[ofs] = 0;
-							z_buf[ofs] = depth;
-						}
-						accW[ofs] += w;
-						accB[ofs] += w * B;
-						accG[ofs] += w * G;
-						accR[ofs] += w * R;
+						z_buf[ofs] = depth;
+						d[ofs] = v.color;
+						if (shading)
+							vxl_shade[ofs] = shade_byte;
 					}
 				}
 			}
-			for (int i = 0; i < c_pixels; i++)
-			{
-				if (accW[i] <= 0.0f)
-					continue;
-				float inv = 1.0f / accW[i];
-				int b = static_cast<int>(accB[i] * inv + 0.5f);
-				int g = static_cast<int>(accG[i] * inv + 0.5f);
-				int r = static_cast<int>(accR[i] * inv + 0.5f);
-				if (b > 255) b = 255;
-				if (g > 255) g = 255;
-				if (r > 255) r = 255;
-				dst32[i] = static_cast<DWORD>(b) | (static_cast<DWORD>(g) << 8) | (static_cast<DWORD>(r) << 16);
-			}
-			// Stamp cache key.
-			m_vxl_splat_yaw = m_vxl_yaw;
-			m_vxl_splat_pitch = m_vxl_pitch;
-			m_vxl_splat_cx = m_player_cx;
-			m_vxl_splat_cy = m_player_cy;
-			m_vxl_splat_tr = tr;
-			m_vxl_splat_cb = cb;
-			s32 = m_vxl_splat_cache.data();
-			} // end of cache-miss block
 		}
+		s = vxl_buf.data();
 	}
 	else
 	{
@@ -2609,8 +2609,17 @@ void CXCCFileView::player_draw(CDC* pDC)
 			return;
 		s = m_player_frames[m_player_frame].data();
 	}
-	int cx_s = m_player_cx;
-	int cy_s = m_player_cy;
+	// Source buffer size (what gets passed to theme::stretch_image as the
+	// source DIB). VXL renders at supersample resolution; SHP/WSA at native.
+	int cx_s = is_vxl_view() ? vxl_ss_cx : m_player_cx;
+	int cy_s = is_vxl_view() ? vxl_ss_cy : m_player_cy;
+	// Logical canvas size for layout / zoom / fit math. For VXL this stays at
+	// m_player_cx/cy regardless of supersample factor — otherwise enabling a
+	// higher SS would shrink the auto-fit and shift the Ctrl+wheel zoom
+	// baseline. The supersample buffer is always downscaled by the same
+	// logical ratio at the blit, so the on-screen size only depends on s_pct.
+	int cx_logical = m_player_cx;
+	int cy_logical = m_player_cy;
 	int s_pct;
 	if (m_player_zoom_pct > 0)
 	{
@@ -2623,14 +2632,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 	}
 	else
 	{
-		int sx = avail_w * 100 / cx_s;
-		int sy = avail_h * 100 / cy_s;
+		int sx = avail_w * 100 / cx_logical;
+		int sy = avail_h * 100 / cy_logical;
 		s_pct = std::min(sx, sy);
 		if (s_pct < 1) s_pct = 1;
 		if (s_pct > 1600) s_pct = 1600;
 	}
-	int cx_d = cx_s * s_pct / 100;
-	int cy_d = cy_s * s_pct / 100;
+	int cx_d = cx_logical * s_pct / 100;
+	int cy_d = cy_logical * s_pct / 100;
 	int x_d = (avail_w - cx_d) / 2;
 	int y_d = (avail_h - cy_d) / 2;
 	// Apply right-drag pan when the image is larger than the viewport. Pan
@@ -2688,19 +2697,19 @@ void CXCCFileView::player_draw(CDC* pDC)
 		h_dib = CreateDIBSection(*pDC, &bmi, DIB_RGB_COLORS, reinterpret_cast<void**>(&p_dib), 0, 0);
 	}
 	HGDIOBJ old = mem_dc.SelectObject(h_dib);
-	if (s32)
 	{
-		memcpy(p_dib, s32, static_cast<size_t>(cx_s) * cy_s * 4);
-	}
-	else
-	{
-		// Paletted SHP/WSA path with three optional ASE-style modifiers:
+		// Paletted SHP/WSA/VXL path with three optional ASE-style modifiers:
 		//   - BG off: index 0 paints as alpha-checker (transparent preview).
 		//   - Side-color remap: indices 16..31 retinted via brightness * preset.
 		//   - Shadow pair: when on and cf is even, blend frame[f + cf/2] black
 		//     at 120/255 alpha over the body frame (engine convention).
 		const bool show_bg = m_player_bg_on;
-		const int side = m_player_side_idx;
+		// SHP and VXL each have their own side-color state. Pick the active
+		// one for the current view so the retint applies independently per
+		// kind of asset.
+		const bool vxl = is_vxl_view();
+		const int side = vxl ? m_vxl_side_idx : m_player_side_idx;
+		const COLORREF custom_color = vxl ? m_vxl_side_custom_color : m_player_side_custom_color;
 		const COLORREF ck_a = theme::checker_a();
 		const COLORREF ck_b = theme::checker_b();
 		const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
@@ -2714,9 +2723,9 @@ void CXCCFileView::player_draw(CDC* pDC)
 		}
 		else if (side == 8)
 		{
-			remap_r = GetRValue(m_player_side_custom_color);
-			remap_g = GetGValue(m_player_side_custom_color);
-			remap_b = GetBValue(m_player_side_custom_color);
+			remap_r = GetRValue(custom_color);
+			remap_g = GetGValue(custom_color);
+			remap_b = GetBValue(custom_color);
 		}
 		const bool shadow_on = m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0;
 		const byte* sshad = nullptr;
@@ -2767,6 +2776,21 @@ void CXCCFileView::player_draw(CDC* pDC)
 				int rr = static_cast<int>(r + 0.5f), gg = static_cast<int>(g + 0.5f), bb = static_cast<int>(b + 0.5f);
 				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
 			}
+			// VXL directional shading: scale the voxel color by the per-pixel
+			// shade factor that the splat wrote (128 = neutral 1.0). Skips
+			// background pixels (idx == 0) so the bg color / alpha-checker stay
+			// at full intensity.
+			if (!vxl_shade.empty() && idx != 0)
+			{
+				int sb = vxl_shade[i];
+				int rr = static_cast<int>(((bgra >> 16) & 0xff) * sb / 128);
+				int gg = static_cast<int>(((bgra >> 8)  & 0xff) * sb / 128);
+				int bb = static_cast<int>((bgra         & 0xff) * sb / 128);
+				if (rr > 255) rr = 255;
+				if (gg > 255) gg = 255;
+				if (bb > 255) bb = 255;
+				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
+			}
 			p_dib[i] = bgra;
 		}
 	}
@@ -2780,27 +2804,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 		const int gcx = cx_s / 2;
 		const int gcy = cy_s;
 		const DWORD line = 0x00FFFFFF;
-		// For VXL we need to know what counts as a "background" pixel — the
-		// splat path initializes the buffer to either palette[0] or the
-		// alpha-checker, both of which are present in s32 untouched.
-		// Easiest sprite-content check that works for both: compare against
-		// the top-left pixel of the rendered DIB (always a background pixel
-		// for centered models). If the model fills the canvas we just skip
-		// the grid for that pixel.
-		const DWORD bg_probe = p_dib[0];
+		// Sprite-content check via the paletted source buffer: 0 = uncovered
+		// (background) for both SHP/WSA frames and the VXL nearest splat.
 		for (int py = 0; py < cy_s; py++)
 		{
 			for (int px = 0; px < cx_s; px++)
 			{
 				int i = px + cx_s * py;
-				if (s)
-				{
-					if (s[i] != 0) continue; // SHP: sprite pixel — keep
-				}
-				else
-				{
-					if (p_dib[i] != bg_probe) continue; // VXL: covered — keep
-				}
+				if (s[i] != 0) continue; // sprite pixel — keep
 				int dx = px - gcx;
 				int dy = py - gcy;
 				int u = dx + 2 * dy;
@@ -2812,20 +2823,24 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 		}
 	}
+	// FXAA: post-process the source DIB before stretch_image. Run on the
+	// supersample buffer so a single edge pass smooths voxel staircases
+	// before the downscale, rather than hunting for them in the smaller
+	// destination where they've already been mixed by the resampler.
+	if (theme::fxaa())
+		theme::apply_fxaa(p_dib, cx_s, cy_s);
 	// Clip the blit to the image area so a Ctrl+wheel-zoomed sprite that's
 	// larger than the available canvas doesn't paint over the player control
 	// band beneath it. Without this, an oversize SHP/WSA bleeds through and
 	// the buttons end up textured by the sprite's pixels.
 	pDC->SaveDC();
 	pDC->IntersectClipRect(0, 0, avail_w, avail_h);
-	// VXL: skip the 2D image interpolator. The splat path (point-or-Gaussian,
-	// chosen earlier from theme::interp()) IS the AA — applying Bilinear/Bicubic/
-	// Lanczos on top of an already-rasterized voxel splat blurs silhouettes and
-	// adds ringing. SHP/WSA paths still use the configured interpolation.
-	if (is_vxl_view())
-		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s, theme::interp_nearest);
-	else
-		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
+	// SHP/WSA: scale at the user's chosen interpolation. VXL: same — but the
+	// source buffer is already supersampled (2x), so Bilinear/Bicubic/Lanczos
+	// run as a real downscale and produce silhouette AA. Nearest gives sharp
+	// blocky voxels (each voxel covers 2x2 in the supersample buffer, so the
+	// downscale to 1x naturally lands on pixel boundaries).
+	theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
 	pDC->RestoreDC(-1);
 	mem_dc.SelectObject(old);
 	DeleteObject(h_dib);
@@ -2969,6 +2984,17 @@ void CXCCFileView::reapply_player_theme()
 			theme::apply_window(h);
 			::InvalidateRect(h, NULL, TRUE);
 		}
+	for (int i = 0; i < 8; i++)
+		if (HWND h = m_vxl_side[i].GetSafeHwnd())
+		{
+			theme::apply_window(h);
+			::InvalidateRect(h, NULL, TRUE);
+		}
+	if (HWND h = m_vxl_side_custom.GetSafeHwnd())
+	{
+		theme::apply_window(h);
+		::InvalidateRect(h, NULL, TRUE);
+	}
 	// Comboboxes are composed: closed-state edit/button (themed by apply_window
 	// on the combobox HWND) + dropped-down listbox (separate HWND). Pull the
 	// listbox out via CB_GETCOMBOBOXINFO and theme it explicitly so the
@@ -3021,7 +3047,9 @@ void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)
 	}
 	const bool is_preset = dis && nIDCtl >= IDC_PLAYER_SIDE0 && nIDCtl <= IDC_PLAYER_SIDE7;
 	const bool is_custom = dis && nIDCtl == IDC_PLAYER_SIDE_CUSTOM;
-	if (!is_preset && !is_custom)
+	const bool is_vxl_preset = dis && nIDCtl >= IDC_VXL_SIDE0 && nIDCtl <= IDC_VXL_SIDE7;
+	const bool is_vxl_custom = dis && nIDCtl == IDC_VXL_SIDE_CUSTOM;
+	if (!is_preset && !is_custom && !is_vxl_preset && !is_vxl_custom)
 	{
 		CScrollView::OnDrawItem(nIDCtl, dis);
 		return;
@@ -3030,29 +3058,25 @@ void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)
 	RECT r = dis->rcItem;
 	int slot;          // active-state index this swatch corresponds to
 	COLORREF fill;
-	if (is_preset)
-	{
-		slot = nIDCtl - IDC_PLAYER_SIDE0;
-		fill = k_side_colors[slot];
-	}
-	else
-	{
-		slot = 8;
-		fill = m_player_side_custom_color;
-	}
+	const bool vxl_set = (is_vxl_preset || is_vxl_custom);
+	const int active_idx = vxl_set ? m_vxl_side_idx : m_player_side_idx;
+	const COLORREF custom_color = vxl_set ? m_vxl_side_custom_color : m_player_side_custom_color;
+	if (is_preset)        { slot = nIDCtl - IDC_PLAYER_SIDE0; fill = k_side_colors[slot]; }
+	else if (is_vxl_preset) { slot = nIDCtl - IDC_VXL_SIDE0;  fill = k_side_colors[slot]; }
+	else                  { slot = 8;                         fill = custom_color; }
 	// Solid color fill.
 	HBRUSH brush = ::CreateSolidBrush(fill);
 	::FillRect(hdc, &r, brush);
 	::DeleteObject(brush);
 	// "+" hint on the unselected custom swatch so it's discoverable.
-	if (is_custom && m_player_side_idx != 8)
+	if ((is_custom || is_vxl_custom) && active_idx != 8)
 	{
 		::SetBkMode(hdc, TRANSPARENT);
 		::SetTextColor(hdc, RGB(255, 255, 255));
 		::DrawTextA(hdc, "+", 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 	}
 	// Active outline if this swatch is currently selected.
-	if (m_player_side_idx == slot)
+	if (active_idx == slot)
 	{
 		HPEN pen = ::CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
 		HGDIOBJ old = ::SelectObject(hdc, pen);
@@ -3132,6 +3156,45 @@ void CXCCFileView::OnPlayerSideCustom()
 	for (int k = 0; k < 8; k++)
 		m_player_side[k].Invalidate();
 	m_player_side_custom.Invalidate();
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnVxlSide(UINT id)
+{
+	int i = static_cast<int>(id) - IDC_VXL_SIDE0;
+	if (i < 0 || i > 7) return;
+	m_vxl_side_idx = (m_vxl_side_idx == i) ? -1 : i;
+	for (int k = 0; k < 8; k++)
+		m_vxl_side[k].Invalidate();
+	m_vxl_side_custom.Invalidate();
+	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+	if (cr.bottom < cr.top) cr.bottom = cr.top;
+	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnVxlSideCustom()
+{
+	if (m_vxl_side_idx == 8)
+	{
+		m_vxl_side_idx = -1;
+		for (int k = 0; k < 8; k++)
+			m_vxl_side[k].Invalidate();
+		m_vxl_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		return;
+	}
+	CColorDialog dlg(m_vxl_side_custom_color, CC_FULLOPEN | CC_RGBINIT, this);
+	if (dlg.DoModal() != IDOK)
+		return;
+	m_vxl_side_custom_color = dlg.GetColor();
+	m_vxl_side_idx = 8;
+	for (int k = 0; k < 8; k++)
+		m_vxl_side[k].Invalidate();
+	m_vxl_side_custom.Invalidate();
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);

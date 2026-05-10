@@ -63,6 +63,34 @@ namespace theme
 	// "no size" (returns empty string).
 	std::string format_size(long long bytes);
 
+	// VXL supersampling: render the voxel splat at NxN canvas resolution then
+	// let the chosen interpolation downscale it. Off = native 1x (cheapest,
+	// no real silhouette AA); 2/4/8 = progressively cleaner edges at higher
+	// memory and per-paint cost.
+	enum vxl_ss
+	{
+		vxl_ss_off = 1,
+		vxl_ss_2 = 2,
+		vxl_ss_4 = 4,
+		vxl_ss_8 = 8,
+		vxl_ss_16 = 16,
+	};
+	vxl_ss vxl_supersample();
+	void set_vxl_supersample(vxl_ss v);
+
+	// FXAA: post-process edge AA. Run once on the BGRA framebuffer before
+	// the final blit/stretch. Smooths visible step edges (voxel staircases,
+	// 1px aliased silhouettes) by blurring along high-luma-gradient edges.
+	bool fxaa();
+	void set_fxaa(bool v);
+	// In-place FXAA pass on a row-major BGRA buffer of size cx*cy.
+	void apply_fxaa(DWORD* pixels, int cx, int cy);
+
+	// VXL directional shading: lights voxels by a camera-relative directional
+	// light. Adds depth/form to flat-colored voxel models.
+	bool vxl_shading();
+	void set_vxl_shading(bool v);
+
 	// When on, paletted Westwood images (SHP/PCX/CPS/WSA) treat palette index 0
 	// as transparent — the engine convention. Off = paint index 0 with whatever
 	// color the palette says, like older XCC builds.

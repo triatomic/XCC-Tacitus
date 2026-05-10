@@ -303,6 +303,21 @@ protected:
 	afx_msg void OnThemeSizeFormatBytes();
 	afx_msg void OnUpdateThemeSizeFormatAuto(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeSizeFormatBytes(CCmdUI* pCmdUI);
+	void apply_vxl_ss(theme::vxl_ss v);
+	afx_msg void OnThemeVxlSsOff();
+	afx_msg void OnThemeVxlSs2();
+	afx_msg void OnThemeVxlSs4();
+	afx_msg void OnThemeVxlSs8();
+	afx_msg void OnThemeVxlSs16();
+	afx_msg void OnUpdateThemeVxlSsOff(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeVxlSs2(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeVxlSs4(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeVxlSs8(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeVxlSs16(CCmdUI* pCmdUI);
+	afx_msg void OnThemeFxaa();
+	afx_msg void OnUpdateThemeFxaa(CCmdUI* pCmdUI);
+	afx_msg void OnThemeVxlShading();
+	afx_msg void OnUpdateThemeVxlShading(CCmdUI* pCmdUI);
 
 	DECLARE_MESSAGE_MAP()
 };

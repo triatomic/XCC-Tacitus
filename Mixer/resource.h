@@ -1413,6 +1413,13 @@
 #define ID_THEME_PANES_TWO                41013
 #define ID_THEME_SIZE_FORMAT_AUTO         41014
 #define ID_THEME_SIZE_FORMAT_BYTES        41015
+#define ID_THEME_VXL_SS_OFF               41016
+#define ID_THEME_VXL_SS_2                 41017
+#define ID_THEME_VXL_SS_4                 41018
+#define ID_THEME_VXL_SS_8                 41019
+#define ID_THEME_VXL_SS_16                41020
+#define ID_THEME_FXAA                     41021
+#define ID_THEME_VXL_SHADING              41022
 
 #define IDD_PAL_PATHS                     142
 #define IDC_PAL_PATHS_LIST                1130
@@ -1423,6 +1430,15 @@
 #define IDC_PAL_PATHS_DOWN                1135
 #define IDC_PAL_PATHS_BUTTON              1136
 #define IDC_PAL_PATHS_OVERRIDE            1137
+#define IDC_VXL_SIDE0                     1138
+#define IDC_VXL_SIDE1                     1139
+#define IDC_VXL_SIDE2                     1140
+#define IDC_VXL_SIDE3                     1141
+#define IDC_VXL_SIDE4                     1142
+#define IDC_VXL_SIDE5                     1143
+#define IDC_VXL_SIDE6                     1144
+#define IDC_VXL_SIDE7                     1145
+#define IDC_VXL_SIDE_CUSTOM               1146
 
 // Next default values for new objects
 // 

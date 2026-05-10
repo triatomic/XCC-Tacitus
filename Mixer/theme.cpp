@@ -19,6 +19,9 @@ namespace theme
 		mode g_mode = mode_light;
 		bool g_show_grid = true;
 		size_format g_size_fmt = size_auto;
+		vxl_ss g_vxl_ss = vxl_ss_4;
+		bool g_fxaa = false;
+		bool g_vxl_shading = false;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
 		bool g_use_checkerboard = true;
@@ -89,6 +92,12 @@ namespace theme
 		int sf = AfxGetApp()->GetProfileInt("Theme", "size_format", size_auto);
 		if (sf != size_auto && sf != size_bytes) sf = size_auto;
 		g_size_fmt = static_cast<size_format>(sf);
+		int ss = AfxGetApp()->GetProfileInt("Theme", "vxl_supersample", vxl_ss_4);
+		if (ss != vxl_ss_off && ss != vxl_ss_2 && ss != vxl_ss_4 && ss != vxl_ss_8 && ss != vxl_ss_16)
+			ss = vxl_ss_4;
+		g_vxl_ss = static_cast<vxl_ss>(ss);
+		g_fxaa = AfxGetApp()->GetProfileInt("Theme", "fxaa", 0) != 0;
+		g_vxl_shading = AfxGetApp()->GetProfileInt("Theme", "vxl_shading", 0) != 0;
 		create_brushes();
 	}
 
@@ -102,6 +111,9 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "use_external_programs", g_use_external_programs ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "interpolation", static_cast<int>(g_interp));
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
+		AfxGetApp()->WriteProfileInt("Theme", "fxaa", g_fxaa ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
 	}
 
 	mode get() { return g_mode; }
@@ -135,6 +147,107 @@ namespace theme
 			return;
 		g_size_fmt = v;
 		save();
+	}
+
+	vxl_ss vxl_supersample() { return g_vxl_ss; }
+
+	void set_vxl_supersample(vxl_ss v)
+	{
+		if (g_vxl_ss == v)
+			return;
+		g_vxl_ss = v;
+		save();
+	}
+
+	bool fxaa() { return g_fxaa; }
+
+	void set_fxaa(bool v)
+	{
+		if (g_fxaa == v)
+			return;
+		g_fxaa = v;
+		save();
+	}
+
+	bool vxl_shading() { return g_vxl_shading; }
+
+	void set_vxl_shading(bool v)
+	{
+		if (g_vxl_shading == v)
+			return;
+		g_vxl_shading = v;
+		save();
+	}
+
+	// FXAA-style edge AA over a BGRA framebuffer, in-place.
+	//
+	// Approach (a stripped-down NVIDIA FXAA 3.11):
+	//   1. Compute per-pixel luma from the existing BGRA value (0.299R + 0.587G + 0.114B).
+	//   2. Sample 4-neighborhood lumas (N/S/E/W). If max-min < threshold, skip — flat region.
+	//   3. Pick edge orientation by comparing horizontal vs vertical luma gradients.
+	//   4. Blend the center pixel with its perpendicular neighbor weighted by edge strength.
+	//
+	// This catches the visible 1-pixel staircase on slanted voxel surfaces and
+	// silhouettes without touching flat areas. Two-pass (luma -> blend) so the
+	// blend reads the original (unmodified) neighbors instead of half-blended ones.
+	void apply_fxaa(DWORD* pixels, int cx, int cy)
+	{
+		if (!pixels || cx < 3 || cy < 3) return;
+		const int n = cx * cy;
+		std::vector<unsigned char> luma(n);
+		for (int i = 0; i < n; i++)
+		{
+			DWORD p = pixels[i];
+			int b = p & 0xff;
+			int g = (p >> 8) & 0xff;
+			int r = (p >> 16) & 0xff;
+			// Integer luma approximation: (r*77 + g*150 + b*29) >> 8 ≈ Rec.601.
+			luma[i] = static_cast<unsigned char>((r * 77 + g * 150 + b * 29) >> 8);
+		}
+		const int edge_threshold = 16;	// luma units; below this we treat as flat
+		std::vector<DWORD> out(pixels, pixels + n);
+		for (int y = 1; y < cy - 1; y++)
+		{
+			for (int x = 1; x < cx - 1; x++)
+			{
+				int ofs = x + cx * y;
+				int lc = luma[ofs];
+				int ln = luma[ofs - cx];
+				int ls = luma[ofs + cx];
+				int lw = luma[ofs - 1];
+				int le = luma[ofs + 1];
+				int lmax = std::max({ lc, ln, ls, lw, le });
+				int lmin = std::min({ lc, ln, ls, lw, le });
+				int range = lmax - lmin;
+				if (range < edge_threshold)
+					continue;
+				// Edge direction: horizontal gradient = |lw-le|, vertical = |ln-ls|.
+				int gh = std::abs(lw - le);
+				int gv = std::abs(ln - ls);
+				bool horizontal = gh >= gv;
+				// Pick the perpendicular neighbor that's closer to the center luma
+				// (so we blend along the edge, not across it). This aligns the
+				// blur with the silhouette tangent.
+				int n1, n2;
+				if (horizontal) { n1 = ofs - cx; n2 = ofs + cx; }	// blend with N or S
+				else            { n1 = ofs - 1;  n2 = ofs + 1; }	// blend with W or E
+				int neighbor = std::abs(luma[n1] - lc) < std::abs(luma[n2] - lc) ? n1 : n2;
+				// Blend strength scales with edge contrast; cap at 0.5 so we
+				// never drift more than halfway to the neighbor.
+				float t = static_cast<float>(range) / 255.0f;
+				if (t > 0.5f) t = 0.5f;
+				DWORD pc = pixels[ofs];
+				DWORD pn = pixels[neighbor];
+				int b0 = pc & 0xff,        b1 = pn & 0xff;
+				int g0 = (pc >> 8) & 0xff, g1 = (pn >> 8) & 0xff;
+				int r0 = (pc >> 16) & 0xff, r1 = (pn >> 16) & 0xff;
+				int br = static_cast<int>(b0 + (b1 - b0) * t + 0.5f);
+				int gr = static_cast<int>(g0 + (g1 - g0) * t + 0.5f);
+				int rr = static_cast<int>(r0 + (r1 - r0) * t + 0.5f);
+				out[ofs] = static_cast<DWORD>(br) | (static_cast<DWORD>(gr) << 8) | (static_cast<DWORD>(rr) << 16);
+			}
+		}
+		std::memcpy(pixels, out.data(), static_cast<size_t>(n) * sizeof(DWORD));
 	}
 
 	std::string format_size(long long bytes)

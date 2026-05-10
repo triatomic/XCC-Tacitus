@@ -164,21 +164,6 @@ BEGIN
     BEGIN
         MENUITEM "&Light Mode\tCtrl+1",                 ID_THEME_LIGHT
         MENUITEM "&Dark Mode\tCtrl+2",                  ID_THEME_DARK
-        MENUITEM SEPARATOR
-        MENUITEM "Show &Grid Lines",                    ID_THEME_SHOW_GRID
-        MENUITEM "&Alpha Color...",                     ID_THEME_ALPHA_COLOR
-        MENUITEM "&Use Checkerboard",                   ID_THEME_USE_CHECKERBOARD
-        MENUITEM "SHP &Transparency",                   ID_THEME_SHP_TRANSPARENCY
-        MENUITEM SEPARATOR
-        MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
-        MENUITEM SEPARATOR
-        POPUP "&Image Interpolation"
-        BEGIN
-            MENUITEM "&Nearest (Sharp Pixels)",         ID_THEME_INTERP_NEAREST
-            MENUITEM "&Bilinear",                       ID_THEME_INTERP_BILINEAR
-            MENUITEM "B&icubic",                        ID_THEME_INTERP_BICUBIC
-            MENUITEM "&Lanczos-3",                      ID_THEME_INTERP_LANCZOS
-        END
         POPUP "&Pane Layout"
         BEGIN
             MENUITEM "&One Pane",                       ID_THEME_PANES_ONE
@@ -188,6 +173,34 @@ BEGIN
         BEGIN
             MENUITEM "&Auto",                           ID_THEME_SIZE_FORMAT_AUTO
             MENUITEM "&Bytes",                          ID_THEME_SIZE_FORMAT_BYTES
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "Show &Grid Lines",                    ID_THEME_SHOW_GRID
+        MENUITEM "&Alpha Color...",                     ID_THEME_ALPHA_COLOR
+        MENUITEM "&Use Checkerboard",                   ID_THEME_USE_CHECKERBOARD
+        MENUITEM "SHP &Transparency",                   ID_THEME_SHP_TRANSPARENCY
+        MENUITEM SEPARATOR
+        MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
+        MENUITEM SEPARATOR
+        POPUP "&Graphics"
+        BEGIN
+            POPUP "&Image Interpolation"
+            BEGIN
+                MENUITEM "&Nearest (Sharp Pixels)",     ID_THEME_INTERP_NEAREST
+                MENUITEM "&Bilinear",                   ID_THEME_INTERP_BILINEAR
+                MENUITEM "B&icubic",                    ID_THEME_INTERP_BICUBIC
+                MENUITEM "&Lanczos-3",                  ID_THEME_INTERP_LANCZOS
+            END
+            POPUP "&VXL Supersampling"
+            BEGIN
+                MENUITEM "&Off",                        ID_THEME_VXL_SS_OFF
+                MENUITEM "&2x",                         ID_THEME_VXL_SS_2
+                MENUITEM "&4x",                         ID_THEME_VXL_SS_4
+                MENUITEM "&8x",                         ID_THEME_VXL_SS_8
+                MENUITEM "1&6x",                        ID_THEME_VXL_SS_16
+            END
+            MENUITEM "&FXAA (Edge AA)",                 ID_THEME_FXAA
+            MENUITEM "VXL &Shading",                    ID_THEME_VXL_SHADING
         END
     END
 END

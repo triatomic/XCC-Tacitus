@@ -127,6 +127,20 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_SIZE_FORMAT_BYTES, OnThemeSizeFormatBytes)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_AUTO, OnUpdateThemeSizeFormatAuto)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_BYTES, OnUpdateThemeSizeFormatBytes)
+	ON_COMMAND(ID_THEME_VXL_SS_OFF, OnThemeVxlSsOff)
+	ON_COMMAND(ID_THEME_VXL_SS_2, OnThemeVxlSs2)
+	ON_COMMAND(ID_THEME_VXL_SS_4, OnThemeVxlSs4)
+	ON_COMMAND(ID_THEME_VXL_SS_8, OnThemeVxlSs8)
+	ON_COMMAND(ID_THEME_VXL_SS_16, OnThemeVxlSs16)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_OFF, OnUpdateThemeVxlSsOff)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_2, OnUpdateThemeVxlSs2)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_4, OnUpdateThemeVxlSs4)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_8, OnUpdateThemeVxlSs8)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SS_16, OnUpdateThemeVxlSs16)
+	ON_COMMAND(ID_THEME_FXAA, OnThemeFxaa)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FXAA, OnUpdateThemeFxaa)
+	ON_COMMAND(ID_THEME_VXL_SHADING, OnThemeVxlShading)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_SHADING, OnUpdateThemeVxlShading)
 END_MESSAGE_MAP()
 
 
@@ -1677,6 +1691,45 @@ void CMainFrame::OnThemeSizeFormatBytes() { apply_size_format(theme::size_bytes)
 
 void CMainFrame::OnUpdateThemeSizeFormatAuto(CCmdUI* p)  { p->SetCheck(theme::size_fmt() == theme::size_auto); }
 void CMainFrame::OnUpdateThemeSizeFormatBytes(CCmdUI* p) { p->SetCheck(theme::size_fmt() == theme::size_bytes); }
+
+void CMainFrame::apply_vxl_ss(theme::vxl_ss v)
+{
+	theme::set_vxl_supersample(v);
+	// Force the file pane to repaint so a viewed VXL re-rasterizes at the new
+	// supersample factor.
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate(FALSE);
+}
+
+void CMainFrame::OnThemeVxlSsOff() { apply_vxl_ss(theme::vxl_ss_off); }
+void CMainFrame::OnThemeVxlSs2()   { apply_vxl_ss(theme::vxl_ss_2); }
+void CMainFrame::OnThemeVxlSs4()   { apply_vxl_ss(theme::vxl_ss_4); }
+void CMainFrame::OnThemeVxlSs8()   { apply_vxl_ss(theme::vxl_ss_8); }
+void CMainFrame::OnThemeVxlSs16()  { apply_vxl_ss(theme::vxl_ss_16); }
+
+void CMainFrame::OnUpdateThemeVxlSsOff(CCmdUI* p) { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_off); }
+void CMainFrame::OnUpdateThemeVxlSs2(CCmdUI* p)   { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_2); }
+void CMainFrame::OnUpdateThemeVxlSs4(CCmdUI* p)   { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_4); }
+void CMainFrame::OnUpdateThemeVxlSs8(CCmdUI* p)   { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_8); }
+void CMainFrame::OnUpdateThemeVxlSs16(CCmdUI* p)  { p->SetCheck(theme::vxl_supersample() == theme::vxl_ss_16); }
+
+void CMainFrame::OnThemeFxaa()
+{
+	theme::set_fxaa(!theme::fxaa());
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate(FALSE);
+}
+
+void CMainFrame::OnUpdateThemeFxaa(CCmdUI* p) { p->SetCheck(theme::fxaa()); }
+
+void CMainFrame::OnThemeVxlShading()
+{
+	theme::set_vxl_shading(!theme::vxl_shading());
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate(FALSE);
+}
+
+void CMainFrame::OnUpdateThemeVxlShading(CCmdUI* p) { p->SetCheck(theme::vxl_shading()); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction
