@@ -22,6 +22,7 @@ namespace theme
 		vxl_ss g_vxl_ss = vxl_ss_4;
 		bool g_fxaa = false;
 		bool g_vxl_shading = false;
+		bool g_parallel_extract = true;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
 		bool g_use_checkerboard = true;
@@ -98,6 +99,7 @@ namespace theme
 		g_vxl_ss = static_cast<vxl_ss>(ss);
 		g_fxaa = AfxGetApp()->GetProfileInt("Theme", "fxaa", 0) != 0;
 		g_vxl_shading = AfxGetApp()->GetProfileInt("Theme", "vxl_shading", 0) != 0;
+		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
 		create_brushes();
 	}
 
@@ -114,6 +116,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "fxaa", g_fxaa ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
 	}
 
 	mode get() { return g_mode; }
@@ -179,6 +182,16 @@ namespace theme
 		save();
 	}
 
+	bool parallel_extract() { return g_parallel_extract; }
+
+	void set_parallel_extract(bool v)
+	{
+		if (g_parallel_extract == v)
+			return;
+		g_parallel_extract = v;
+		save();
+	}
+
 	// FXAA-style edge AA over a BGRA framebuffer, in-place.
 	//
 	// Approach (a stripped-down NVIDIA FXAA 3.11):
@@ -195,6 +208,7 @@ namespace theme
 		if (!pixels || cx < 3 || cy < 3) return;
 		const int n = cx * cy;
 		std::vector<unsigned char> luma(n);
+		#pragma omp parallel for schedule(static)
 		for (int i = 0; i < n; i++)
 		{
 			DWORD p = pixels[i];
@@ -206,6 +220,7 @@ namespace theme
 		}
 		const int edge_threshold = 16;	// luma units; below this we treat as flat
 		std::vector<DWORD> out(pixels, pixels + n);
+		#pragma omp parallel for schedule(static)
 		for (int y = 1; y < cy - 1; y++)
 		{
 			for (int x = 1; x < cx - 1; x++)
@@ -380,6 +395,7 @@ namespace theme
 				return;
 			const double scale_x = static_cast<double>(sw) / dw;
 			const double scale_y = static_cast<double>(sh) / dh;
+			#pragma omp parallel for schedule(static)
 			for (int y = 0; y < dh; y++)
 			{
 				double sy = (y + 0.5) * scale_y - 0.5;
@@ -477,6 +493,7 @@ namespace theme
 			if (g_scratch_tmp.size() < tmp_n)
 				g_scratch_tmp.resize(tmp_n);
 			float* tmp = g_scratch_tmp.data();
+			#pragma omp parallel for schedule(static)
 			for (int y = 0; y < sh; y++)
 			{
 				const DWORD* row = src + static_cast<size_t>(y) * sw;
@@ -502,6 +519,7 @@ namespace theme
 				}
 			}
 			// Pass 2: vertical — read the intermediate, write into dst.
+			#pragma omp parallel for schedule(static)
 			for (int y = 0; y < dh; y++)
 			{
 				DWORD* drow = dst + static_cast<size_t>(y) * dw;
@@ -822,6 +840,15 @@ namespace theme
 			ListView_SetTextBkColor(h_listview, ::GetSysColor(COLOR_WINDOW));
 			ListView_SetTextColor(h_listview, ::GetSysColor(COLOR_WINDOWTEXT));
 		}
+		// Always-on double-buffer: the listview composes each paint into an
+		// offscreen DC and blits in one shot, eliminating row-by-row tear
+		// during scrolls and resizes. Composes correctly with the existing
+		// CDDS_ITEMPREPAINT (row bg) and CDDS_ITEMPOSTPAINT (manual gridlines)
+		// paths in CListCtrlEx and CXCCMixerView — the back buffer receives
+		// both passes before the final blit. No measurable perf cost.
+		DWORD ex = static_cast<DWORD>(::SendMessage(h_listview, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0));
+		ex |= LVS_EX_DOUBLEBUFFER;
+		::SendMessage(h_listview, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, ex);
 		::InvalidateRect(h_listview, NULL, TRUE);
 	}
 
@@ -1164,6 +1191,25 @@ void CThemedStatusBar::OnPaint()
 BEGIN_MESSAGE_MAP(CThemedSplitterWnd, CSplitterWnd)
 	ON_WM_LBUTTONUP()
 END_MESSAGE_MAP()
+
+int CThemedSplitterWnd::HitTest(CPoint pt) const
+{
+	int ht = CSplitterWnd::HitTest(pt);
+	// One Pane mode: middle column (col 1) is collapsed to 0px, so bars 201
+	// (left|middle) and 202 (middle|fileinfo) sit at the same X. Column
+	// bars are 201..215 (hSplitterBar1..15) per MFC's winsplit.cpp.
+	//
+	// MFC's TrackColumnSize(x, col) sets m_pColInfo[col].nIdealSize = x:
+	//   - Bar 201 tracks col 0 → drag grows col 0 (left listview); col 1
+	//     stays at min=0 since it can't shrink, col 2 absorbs the loss.
+	//     This is the gesture the user actually wants ("expand left pane").
+	//   - Bar 202 tracks col 1 → drag grows col 1 (the hidden middle pane),
+	//     re-expanding it into view. This is the bug.
+	// So in one-pane mode swallow 202, keep 201 active.
+	if (m_columns_locked && ht == 202)
+		return 0;	// noHit
+	return ht;
+}
 
 void CThemedSplitterWnd::OnDrawSplitter(CDC* pDC, ESplitType nType, const CRect& rect)
 {

@@ -181,6 +181,7 @@ BEGIN
         MENUITEM "SHP &Transparency",                   ID_THEME_SHP_TRANSPARENCY
         MENUITEM SEPARATOR
         MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
+        MENUITEM "&Parallel Extract",                   ID_THEME_PARALLEL_EXTRACT
         MENUITEM SEPARATOR
         POPUP "&Graphics"
         BEGIN
@@ -210,6 +211,7 @@ BEGIN
     POPUP "_POPUP_"
     BEGIN
         MENUITEM "Open\tEnter",													ID_POPUP_OPEN
+        MENUITEM "Open &With...",												ID_POPUP_OPEN_WITH
         MENUITEM "&Explore...",													ID_POPUP_EXPLORE
 				MENUITEM "&New Archive...",											ID_FILE_NEW
         MENUITEM SEPARATOR

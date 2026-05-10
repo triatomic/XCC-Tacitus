@@ -61,6 +61,7 @@
 #include "shortcut.h"
 #include "theme.h"
 #include <shellapi.h>
+#include <shlobj.h>
 
 // Temp files written by the "Use external programs" toggle. The user double-
 // clicks a file inside a MIX, we extract the bytes to %TEMP%\xcc_mixer\<name>
@@ -114,16 +115,61 @@ namespace ext_open
 		return name.substr(0, dot) + "_tmp" + name.substr(dot);
 	}
 
+	// Extract `data` to <temp_dir>\<sanitized_name>. Returns the resolved path
+	// on success and tracks it for cleanup on app exit; returns empty string
+	// on save failure. Shared by extract_and_open + extract_and_open_with so
+	// both paths agree on the temp filename and cleanup tracking.
+	static std::string extract_to_temp(const std::string& name, const Cvirtual_binary& data)
+	{
+		std::string path = temp_dir() + mark_as_tmp(sanitize(name));
+		if (data.save(path))
+			return std::string();
+		g_temp_files.push_back(path);
+		return path;
+	}
+
 	// Extract `data` to <temp_dir>\<sanitized_name> and ShellExecute("open") it.
 	// Returns true on success. Tracks the path for cleanup on app exit.
 	static bool extract_and_open(HWND hwnd, const std::string& name, const Cvirtual_binary& data)
 	{
-		std::string path = temp_dir() + mark_as_tmp(sanitize(name));
-		if (data.save(path))
+		std::string path = extract_to_temp(name, data);
+		if (path.empty())
 			return false;
-		g_temp_files.push_back(path);
 		HINSTANCE rc = ::ShellExecute(hwnd, "open", path.c_str(), NULL, NULL, SW_SHOW);
 		return reinterpret_cast<INT_PTR>(rc) > 32;
+	}
+
+	// Show the Windows "Open With..." picker for an existing filesystem path.
+	// Uses SHOpenWithDialog (Vista+); OAIF_EXEC launches the chosen app
+	// immediately, OAIF_HIDE_REGISTRATION hides the "always use this app"
+	// checkbox so a casual pick doesn't change the user's file association.
+	// Returns true if the dialog was shown (whether or not the user picked).
+	static bool open_with_path(HWND hwnd, const std::string& fs_path)
+	{
+		// Proper ANSI→UTF-16 conversion — naive byte-copy mangles non-ASCII
+		// path components (Westwood game installs sometimes live under
+		// localized Program Files paths).
+		int wlen = ::MultiByteToWideChar(CP_ACP, 0, fs_path.c_str(),
+			static_cast<int>(fs_path.size()), nullptr, 0);
+		std::wstring wpath(wlen, L'\0');
+		if (wlen)
+			::MultiByteToWideChar(CP_ACP, 0, fs_path.c_str(),
+				static_cast<int>(fs_path.size()), wpath.data(), wlen);
+		OPENASINFO oi{};
+		oi.pcszFile = wpath.c_str();
+		oi.pcszClass = nullptr;
+		oi.oaifInFlags = OAIF_EXEC | OAIF_HIDE_REGISTRATION;
+		HRESULT hr = ::SHOpenWithDialog(hwnd, &oi);
+		return SUCCEEDED(hr);
+	}
+
+	// MIX entry → temp file → SHOpenWithDialog. Convenience wrapper.
+	static bool extract_and_open_with(HWND hwnd, const std::string& name, const Cvirtual_binary& data)
+	{
+		std::string path = extract_to_temp(name, data);
+		if (path.empty())
+			return false;
+		return open_with_path(hwnd, path);
 	}
 
 	// Best-effort delete of every temp file we wrote this session. Called from
@@ -170,6 +216,8 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_DELETE, OnUpdatePopupDelete)
 	ON_COMMAND(ID_POPUP_OPEN, OnPopupOpen)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_OPEN, OnUpdatePopupOpen)
+	ON_COMMAND(ID_POPUP_OPEN_WITH, OnPopupOpenWith)
+	ON_UPDATE_COMMAND_UI(ID_POPUP_OPEN_WITH, OnUpdatePopupOpenWith)
 	ON_COMMAND(ID_POPUP_COPY_AS_VXL, OnPopupCopyAsVXL)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_COPY_AS_VXL, OnUpdatePopupCopyAsVXL)
 	ON_COMMAND(ID_POPUP_COPY_AS_XIF, OnPopupCopyAsXIF)
@@ -1125,23 +1173,73 @@ void CXCCMixerView::batch_extract(bool preserve)
 		}
 	}
 	CWaitCursor wait;
-	for (auto& i : m_index_selected)
+	if (theme::parallel_extract())
 	{
-		int id = get_id(i);
-		auto it = m_index.find(id);
-		if (it == m_index.end())
-			continue;
-		const string& src_name = it->second.name;
-		if (src_name.empty() || src_name == ".." || src_name == "Browse...")
-			continue;
-		Ccc_file f(false);
-		if (open_f_id(f, id))
-			continue;
-		string out_name = src_name;
-		for (size_t j = 0; j < out_name.size(); j++)
-			if (out_name[j] == '\\' || out_name[j] == '/')
-				out_name[j] = '_';
-		f.extract(out_dir + out_name);
+		// Two-phase parallel extract.
+		//
+		// Phase 1 (UI thread, serial): pull each selected entry's bytes out
+		// of the MIX into a Cvirtual_binary. Must be serial because every
+		// Ccc_file from the same Cmix_file shares the parent's HANDLE
+		// (cc_file.cpp::open(int, Cmix_file&) does m_f = mix_f.m_f), so
+		// concurrent seek+read would race on file position.
+		//
+		// Phase 2 (OpenMP): write each blob to disk. file32_write opens its
+		// own handle per call and Cvirtual_binary's data()/size() are pure
+		// const reads on already-allocated memory, so writes are independent.
+		// Throughput gain shows up on a fast SSD; spinning disks stay roughly
+		// serial because the bottleneck is destination I/O, not encode.
+		struct extract_job { string out_path; Cvirtual_binary data; };
+		std::vector<extract_job> jobs;
+		jobs.reserve(m_index_selected.size());
+		for (auto& i : m_index_selected)
+		{
+			int id = get_id(i);
+			auto it = m_index.find(id);
+			if (it == m_index.end())
+				continue;
+			const string& src_name = it->second.name;
+			if (src_name.empty() || src_name == ".." || src_name == "Browse...")
+				continue;
+			Ccc_file f(false);
+			if (open_f_id(f, id))
+				continue;
+			// Force the bytes into memory before leaving the UI thread.
+			// vdata() returns the cached blob if extract's fast path would
+			// hit it; otherwise read() pulls bytes through the shared MIX
+			// handle (still serial here — that's the point).
+			if (!f.data())
+				f.read();
+			string out_name = src_name;
+			for (size_t j = 0; j < out_name.size(); j++)
+				if (out_name[j] == '\\' || out_name[j] == '/')
+					out_name[j] = '_';
+			jobs.push_back({ out_dir + out_name, f.vdata() });
+		}
+		const int n = static_cast<int>(jobs.size());
+		#pragma omp parallel for schedule(dynamic)
+		for (int k = 0; k < n; k++)
+			jobs[k].data.save(jobs[k].out_path);
+	}
+	else
+	{
+		for (auto& i : m_index_selected)
+		{
+			int id = get_id(i);
+			auto it = m_index.find(id);
+			if (it == m_index.end())
+				continue;
+			const string& src_name = it->second.name;
+			if (src_name.empty() || src_name == ".." || src_name == "Browse...")
+				continue;
+			Ccc_file f(false);
+			if (open_f_id(f, id))
+				continue;
+			string out_name = src_name;
+			for (size_t j = 0; j < out_name.size(); j++)
+				if (out_name[j] == '\\' || out_name[j] == '/')
+					out_name[j] = '_';
+			f.extract(out_dir + out_name);
+		}
 	}
 	AfxMessageBox("Extraction successful.", MB_OK | MB_ICONINFORMATION);
 }
@@ -2895,6 +2993,66 @@ void CXCCMixerView::OnUpdatePopupOpen(CCmdUI* pCmdUI)
 		}
 	}
 	pCmdUI->Enable(false);
+}
+
+// "Open With..." — show the Windows app picker for the selected entry. Gated
+// by theme::use_external_programs() so the gesture is coherent with the rest
+// of the external-programs flow: when the toggle is off, every double-click
+// and Open routes through the built-in viewer; turning the toggle on enables
+// both the existing default-app open AND this picker. MIX-source entries are
+// extracted to %TEMP%\xcc_mixer\ first (same flow as extract_and_open) so the
+// picker has a real filesystem path to launch against.
+void CXCCMixerView::OnPopupOpenWith()
+{
+	int id = get_current_id();
+	if (id == -1)
+		return;
+	const t_index_entry& index = find_ref(m_index, id);
+	if (index.name.empty())
+		return;
+	if (m_mix_f)
+	{
+		CWaitCursor wait;
+		Cvirtual_binary d = m_mix_f->get_vdata(id);
+		if (d.size())
+			ext_open::extract_and_open_with(m_hWnd, index.name, d);
+	}
+	else
+	{
+		ext_open::open_with_path(m_hWnd, m_dir + index.name);
+	}
+	// SHOpenWithDialog leaves white strips across our dark listview rows
+	// after it dismisses. Cause: the picker's own WM_DESTROY chain keeps
+	// draining paints from the queue *after* control returns to us, so an
+	// inline apply_theme_to_children + RedrawWindow gets overpainted by
+	// stragglers. Post the reapply to the main frame instead so it runs
+	// after the picker's dismiss paints have fully drained, on the next
+	// idle of our message loop.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->PostMessage(WM_USER + 0x102);
+}
+
+void CXCCMixerView::OnUpdatePopupOpenWith(CCmdUI* pCmdUI)
+{
+	if (!theme::use_external_programs())
+	{
+		pCmdUI->Enable(false);
+		return;
+	}
+	int id = get_current_id();
+	if (id == -1)
+	{
+		pCmdUI->Enable(false);
+		return;
+	}
+	const t_index_entry& index = find_ref(m_index, id);
+	// Containers / nav-style entries don't make sense to "open with" — they
+	// open into the pane, they're not files an external app can handle.
+	const bool is_container =
+		index.ft == ft_mix || index.ft == ft_big || index.ft == ft_mix_rg
+		|| index.ft == ft_pak || index.ft == ft_dir || index.ft == ft_drive
+		|| index.ft == ft_lnkdir;
+	pCmdUI->Enable(!is_container && !index.name.empty());
 }
 
 void CXCCMixerView::OnPopupExplore()

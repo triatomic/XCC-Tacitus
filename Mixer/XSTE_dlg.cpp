@@ -145,7 +145,13 @@ int CXSTE_dlg::get_cat_id(const string& name) const
 
 void CXSTE_dlg::create_cat_map()
 {
+	// Phase 1 (serial): walk the CSF map, assign category IDs, insert entries
+	// into m_map. Has to be serial because the category-id minting and
+	// std::map insertion both mutate shared state. Build a flat pointer vector
+	// alongside so Phase 2 can index into m_map without traversing the tree.
 	static int cat_id = 0;
+	std::vector<t_map_entry*> entries;
+	entries.reserve(m_f.get_map().size());
 	for (auto& i : m_f.get_map())
 	{
 		string cat = get_cat(i.first);
@@ -158,6 +164,20 @@ void CXSTE_dlg::create_cat_map()
 		t_map_entry& e = m_map[id++];
 		e.i = &i;
 		e.cat_id = find_ref(m_reverse_cat_map, cat);
+		entries.push_back(&e);
+	}
+	// Phase 2 (parallel): populate the cached converted/extra strings.
+	// WideCharToMultiByte + heap-alloc per entry; was previously paying this
+	// cost twice per sort comparison and once per LVN_GETDISPINFO callback.
+	// Doing it once up front turns the dialog open from O(N log N) conversions
+	// into O(N), and parallelism amortizes the remaining cost across cores.
+	const int n = static_cast<int>(entries.size());
+	#pragma omp parallel for schedule(static)
+	for (int k = 0; k < n; k++)
+	{
+		t_map_entry* e = entries[k];
+		e->converted_value = Ccsf_file::convert2string(e->i->second.value);
+		e->extra_value = e->i->second.extra_value;
 	}
 	string cat = "Other";
 	if (!m_reverse_cat_map.count(cat))
@@ -223,6 +243,12 @@ void CXSTE_dlg::OnEdit()
 	if (dlg.DoModal() == IDOK)
 	{
 		m_f.set_value(name, Ccsf_file::convert2wstring(dlg.get_value()), dlg.get_extra_value());
+		// Refresh the cached strings for this entry so OnGetdispinfoList /
+		// sort comparator see the edited value. Without this they'd keep
+		// returning the old text until the dialog is reopened.
+		t_map_entry& e = m_map[m_list.GetItemData(index)];
+		e.converted_value = dlg.get_value();
+		e.extra_value = dlg.get_extra_value();
 		m_list.Update(index);
 	}
 }
@@ -272,22 +298,25 @@ void CXSTE_dlg::OnEndlabeleditList(NMHDR* pNMHDR, LRESULT* pResult)
 	}
 }
 
-void CXSTE_dlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult) 
+void CXSTE_dlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	LV_DISPINFO* pDispInfo = (LV_DISPINFO*)pNMHDR;
 	int id = m_list.GetItemData(pDispInfo->item.iItem);
 	const t_map_entry& e = m_map.at(id);//find_ref(m_map, id);
 	string& buffer = m_list.get_buffer();
+	// Use cached strings — see create_cat_map's Phase 2. The previous code
+	// re-converted value/extra_value on every callback, which fires for
+	// every visible row on every paint.
 	switch (pDispInfo->item.iSubItem)
 	{
 	case 0:
 		buffer = e.i->first;
 		break;
 	case 1:
-		buffer = m_f.get_converted_value(e.i->first);
+		buffer = e.converted_value;
 		break;
 	case 2:
-		buffer = m_f.get_extra_value(e.i->first);
+		buffer = e.extra_value;
 		break;
 	}
 	pDispInfo->item.pszText = const_cast<char*>(buffer.c_str());
@@ -319,14 +348,18 @@ int CXSTE_dlg::compare(int id_a, int id_b) const
 		swap(id_a, id_b);
 	const t_map_entry& a = find_ref(m_map, id_a);
 	const t_map_entry& b = find_ref(m_map, id_b);
+	// Use the cached strings populated in create_cat_map so each comparison
+	// is a pure string compare. The previous code did get_converted_value()
+	// twice per call (WideCharToMultiByte + heap alloc + map lookup), which
+	// dominated initial-sort time on large CSFs.
 	switch (m_sort_column)
 	{
 	case 0:
 		return compare_string(a.i->first, b.i->first);
 	case 1:
-		return compare_string(m_f.get_converted_value(a.i->first), m_f.get_converted_value(b.i->first));
+		return compare_string(a.converted_value, b.converted_value);
 	case 2:
-		return compare_string(m_f.get_extra_value(a.i->first), m_f.get_extra_value(b.i->first));
+		return compare_string(a.extra_value, b.extra_value);
 	default:
 		return 0;
 	}
