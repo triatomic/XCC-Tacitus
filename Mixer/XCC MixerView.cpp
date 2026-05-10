@@ -2416,11 +2416,6 @@ void CXCCMixerView::OnPopupCopyAsJpegSingle()
 
 void CXCCMixerView::OnUpdatePopupCopyAsJpegSingle(CCmdUI* pCmdUI)
 {
-	// JPEG write path is unstable (libjpeg destination-buffer overrun on
-	// certain SHP-derived inputs). Disabled across the board until the
-	// jpeg_file_write scanline path is rewritten.
-	pCmdUI->Enable(FALSE);
-	return;
 	pCmdUI->Enable(can_copy_as(ft_jpeg_single));
 }
 
@@ -2431,11 +2426,6 @@ void CXCCMixerView::OnPopupCopyAsJpeg()
 
 void CXCCMixerView::OnUpdatePopupCopyAsJpeg(CCmdUI* pCmdUI)
 {
-	// JPEG write path is unstable (libjpeg destination-buffer overrun on
-	// certain SHP-derived inputs). Disabled across the board until the
-	// jpeg_file_write scanline path is rewritten.
-	pCmdUI->Enable(FALSE);
-	return;
 	pCmdUI->Enable(can_copy_as(ft_jpeg));
 }
 
