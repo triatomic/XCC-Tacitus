@@ -31,6 +31,14 @@ void Cvqa_decode::start_decode(const t_vqa_header& header)
 	mcb_d_pixel = 1;
 	m_version = header.video_flags & 0x10 ? game_ts : game_td;
 	frame_index = 0;
+	// VQHD payload byte 13 (high byte of unknown3) is the codebook group
+	// size: the number of CBPZ chunks that must accumulate before the
+	// partial-codebook buffer is committed to the active codebook. The
+	// original decoder hardcoded 8, which is wrong for any VQA whose
+	// header says otherwise (most TS/Firestorm VQAs use a value the
+	// authoring tool picked per-cutscene).
+	int g = (header.unknown3 >> 8) & 0xff;
+	m_groupframes = g ? g : 8;
 }
 
 void Cvqa_decode::set_pf(const DDPIXELFORMAT& pf, int cb_pixel)
@@ -118,6 +126,15 @@ void Cvqa_decode::decode_vpt_chunk(const byte* in, byte* out)
 	}
 	else
 	{
+		// Solid-color vector threshold depends on block geometry: for
+		// 4x2 blocks Westwood reserves codebook indices >= 0x0F00 for
+		// solid fills (hibyte threshold = 0x0F); for 4x4 blocks the
+		// reservation is >= 0xFF00 (hibyte threshold = 0xFF). The
+		// original decoder hardcoded 0x0F, which silently turned every
+		// 4x4 vector lookup with hibyte in 0x10..0xFE into a garbage
+		// solid-fill block — that was the actual "blocks render wrong"
+		// bug on MentalOmega's beachead.vqa and other cy_block=4 VQAs.
+		const int solid_threshold = (mcy_block == 4) ? 0xff : 0x0f;
 		const byte* r1 = in;
 		const byte* r2 = in + cx_b * cy_b;
 		int* w1 = reinterpret_cast<int*>(out);
@@ -129,7 +146,7 @@ void Cvqa_decode::decode_vpt_chunk(const byte* in, byte* out)
 				int v = *r1++;
 				int w = *r2++;
 				int* w3 = w2;
-				if (w < 0xf)
+				if (w < solid_threshold)
 				{
 					v = w << 8 | v;
 					const int* r3 = cbf + mcy_block * v;
@@ -210,7 +227,7 @@ void Cvqa_decode::decode_vqfl_chunk(const byte* s, int cb_s)
 		decode_cbf_chunk(m_in_decoded, cb_in);
 	}
 	else
-		decode_cbf_chunk(s + 8, cb_s - 8);	
+		decode_cbf_chunk(s + 8, cb_s - 8);
 }
 
 void Cvqa_decode::decode_vqfl_chunk(const Cvirtual_binary& s)
@@ -267,7 +284,7 @@ void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palette pal
 		in_raw += 8 + (size + 1 & ~1);
 	}
 	frame_index++;
-	if (c_cbf_read & ~7)
+	if (c_cbf_read >= m_groupframes)
 	{
 		if (cbf_compressed)
 			LCWDecompress(reinterpret_cast<const byte*>(cbf_new), reinterpret_cast<byte*>(cbf));

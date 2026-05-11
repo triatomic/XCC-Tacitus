@@ -24,9 +24,16 @@ public:
 		return reinterpret_cast<const char*>(data() + sizeof(t_hva_header) + 16 * i);
 	}
 
+	// HVA frame data on disk is laid out frame-major: for each frame, a
+	// matrix per section in order. (Confirmed against Vengi's reader at
+	// HVAFormat.cpp:60 which iterates frame outer, section inner.) Earlier
+	// versions of this accessor used section-major indexing, which swapped
+	// matrices between sections on the first non-zero frame.
+	//
+	// i = section index, j = frame index.
 	const float* get_transform_matrix(int i, int j) const
 	{
-		return reinterpret_cast<const float*>(data() + sizeof(t_hva_header) + 16 * get_c_sections() + (get_c_frames() * i + j) * sizeof(t_hva_transform_matrix));
+		return reinterpret_cast<const float*>(data() + sizeof(t_hva_header) + 16 * get_c_sections() + (get_c_sections() * j + i) * sizeof(t_hva_transform_matrix));
 	}
 };
 

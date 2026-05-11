@@ -2,6 +2,7 @@
 
 #include "resource.h"
 #include "video_decoder.h"
+#include "virtual_binary.h"
 #include "virtual_image.h"
 
 class Cdlg_shp_viewer : public ETSLayoutDialog
@@ -10,12 +11,18 @@ public:
 	void show_frame();
 	Cvirtual_image decode_image(int i) const;
 	void write(Cvideo_decoder* decoder);
+	// Optional VQA-specific extras: pre-decoded WAV buffer for audio
+	// playback through xap_play, frame rate for elapsed/total display,
+	// and a name used for the xap toggle key. Pass an empty buffer to skip
+	// audio; pass fps <= 0 to skip the duration label.
+	void write_av(Cvirtual_binary wav, double fps, const std::string& name);
 	Cdlg_shp_viewer(CWnd* pParent = NULL);   // standard constructor
 
 	//{{AFX_DATA(Cdlg_shp_viewer)
 	enum { IDD = IDD_SHP_VIEWER };
 	CSliderCtrl	m_slider;
 	CStatic	m_image;
+	CStatic m_duration;
 	int		m_index;
 	//}}AFX_DATA
 
@@ -32,13 +39,19 @@ protected:
 	virtual BOOL OnInitDialog();
 	afx_msg void OnTimer(UINT nIDEvent);
 	afx_msg void OnPlay();
+	afx_msg void OnDestroy();
 	//}}AFX_MSG
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 private:
+	void update_duration_label();
 	Cvideo_decoder* m_decoder;
 	int m_frame;
 	int m_last_access;
 	t_palette m_palette;
 	int m_timer_id;
+	Cvirtual_binary m_av_wav;
+	double m_av_fps;
+	std::string m_av_name;
+	bool m_av_started;
 };

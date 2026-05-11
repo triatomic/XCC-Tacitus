@@ -94,6 +94,7 @@
 #define IDC_IMAGE                       1031
 #define IDC_SLIDER                      1032
 #define IDC_FRAME                       1033
+#define IDC_DURATION                    1138
 #define IDC_SEARCH                      1034
 #define IDC_FIX_SHADOWS                 1036
 #define IDC_DUNE2_STATIC                1038
@@ -1461,16 +1462,34 @@
 #define IDC_VXL_LIGHT_DIFFUSE_LABEL       1162
 #define IDC_VXL_LIGHT_DIFFUSE_VALUE       1163
 #define IDC_VXL_LIGHT_RESET               1164
+#define IDC_VXL_HVA_LOAD                  1165
+#define IDC_VXL_HVA_LOOP                  1166
+#define IDC_INCLUDE_GAME_MIXES            1167
+#define IDC_LOAD_PAL                      1168
 #define ID_THEME_VXL_LIGHTING             41025
+
+#define IDD_KEYBINDS                      145
+#define IDD_KEY_CAPTURE                   146
+#define IDC_KEYBINDS_LIST                 1169
+#define IDC_KEYBINDS_CHANGE_KEY           1170
+#define IDC_KEYBINDS_CHANGE_MOUSE         1171
+#define IDC_KEYBINDS_CLEAR_KEY            1172
+#define IDC_KEYBINDS_CLEAR_MOUSE          1173
+#define IDC_KEYBINDS_RESET                1174
+#define IDC_KEYBINDS_RESET_ALL            1175
+#define IDC_KEYBINDS_OPEN_INI             1176
+#define IDC_KEYCAP_PROMPT                 1177
+#define IDC_KEYCAP_PREVIEW                1178
+#define ID_KEYBINDS_CONFIGURE             33139
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        143
-#define _APS_NEXT_COMMAND_VALUE         33139
-#define _APS_NEXT_CONTROL_VALUE         1138
+#define _APS_NEXT_RESOURCE_VALUE        147
+#define _APS_NEXT_COMMAND_VALUE         33140
+#define _APS_NEXT_CONTROL_VALUE         1179
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif

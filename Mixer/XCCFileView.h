@@ -94,6 +94,9 @@ protected:
 	afx_msg void OnPlayerSideCustom();
 	afx_msg void OnVxlSide(UINT id);
 	afx_msg void OnVxlSideCustom();
+	afx_msg void OnVxlHvaLoad();
+	afx_msg void OnVxlHvaLoop();
+	afx_msg void OnLoadPal();
 	afx_msg void OnPlayerGridSel();
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
@@ -182,6 +185,51 @@ public:
 	double m_vxl_drag_pitch0 = 0.0;
 	bool is_vxl_view() const { return m_player_mode && m_ft == ft_vxl; }
 	int player_band_h() const { return 64; }
+	void do_zoom_step(int sign);
+
+	// HVA (Hierarchical Voxel Animation) overlay for the current VXL. When
+	// loaded, m_hva_data holds the parsed .hva file and the player band shows
+	// transport controls + slider so the user can scrub through HVA frames.
+	// Each frame supplies per-section transform matrices that replace the
+	// VXL's static section transforms when rebuilding m_vxl_cloud. Cleared on
+	// every post_open of a VXL (HVA is paired with one VXL only).
+	Cvirtual_binary m_hva_data;
+	bool m_hva_loaded = false;
+	CButton m_vxl_hva_load;
+	CButton m_vxl_hva_loop;
+	bool m_hva_loop = true;
+	// Non-owning pointer to the MIX the current file came from (NULL when
+	// browsing the filesystem). Set by open_f(int, Cmix_file&) and cleared by
+	// open_f(string). Used by Load HVA so the user can pick from the MIX's
+	// own .hva entries before falling back to a disk browse.
+	Cmix_file* m_source_mix = nullptr;
+
+	// Persistent "Load PAL..." button. Unlike the HVA button, this lives
+	// across the whole view lifetime (created in OnInitialUpdate) so it can
+	// also appear in grid view, not just in player mode. Shown for all
+	// paletted file types (SHP/WSA/TMP/PCX/CPS/VXL). Loading a PAL appends
+	// to MainFrame::m_pal_list and selects it via set_palette(), keeping
+	// Ctrl+Q traversal and auto_select() compatible with the new entry.
+	CButton m_load_pal_btn;
+	bool m_load_pal_btn_created = false;
+	// Height of the bottom mini-band reserved for the Load PAL button when
+	// the current file is paletted AND the player is not active. Player mode
+	// uses its own band (player_band_h) and parks the button into it.
+	int pal_band_h() const { return 32; }
+	bool is_paletted_file() const;
+	void load_pal_btn_layout();
+	void load_pal_btn_update_visibility();
+	// Wires the PAL bytes into MainFrame's palette list as a fresh entry
+	// (under a synthetic "Loaded" tree node) and calls set_palette() so the
+	// file repaints with it. Returns false on parse failure.
+	bool apply_loaded_pal(const Cvirtual_binary& data, const string& display_name);
+	// On opening a paletted file, scan the source MIX for a .pal whose
+	// basename (sans extension, lowercased) matches the file's basename
+	// exactly. If found, load it via apply_loaded_pal so the file paints
+	// with its paired palette without the user clicking Load PAL. No-op
+	// for non-paletted files, files opened from disk (no source MIX), or
+	// when no exact-stem .pal exists.
+	void try_auto_load_paired_pal();
 
 private:
 	COLORREF  m_colour = RGB(40, 40, 40);

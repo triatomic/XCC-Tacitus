@@ -6,6 +6,7 @@
 #include "XCC MixerDoc.h"
 #include "XCC MixerView.h"
 #include "AudioPlayerDlg.h"
+#include "keybinds.h"
 #include "resource.h"
 #include "XSTE_dlg.h"
 #include <aud_decode.h>
@@ -3683,6 +3684,20 @@ void CXCCMixerView::open_item(int id)
 				break;
 			Cdlg_shp_viewer dlg;
 			dlg.write(decoder);
+			// For VQA: pre-decode audio + frame rate and hand them to the
+			// dialog so it can drive the timer at the correct fps, play
+			// sound through xap_play, and display elapsed/total duration.
+			if (index.ft == ft_vqa)
+			{
+				Cvqa_file fa;
+				fa.load(get_vdata_id(id));
+				Cvirtual_binary wav;
+				if (fa.decode_audio_to_wav(wav))
+					wav = Cvirtual_binary();
+				Cvqa_file ff;
+				ff.load(get_vdata_id(id));
+				dlg.write_av(wav, ff.frame_rate(), index.name);
+			}
 			dlg.DoModal();
 			delete decoder;
 			break;
@@ -3757,28 +3772,35 @@ CAudioPlayerDlg* CXCCMixerView::ensure_audio_dlg()
 
 BOOL CXCCMixerView::PreTranslateMessage(MSG* pMsg)
 {
-	// Spacebar = play/pause for audio files in the listview. Caught here
-	// (not OnKeyDown) so it overrides the listview's default selection-
-	// toggle handling. Only consumes Space when the focused item is audio
-	// — otherwise lets it fall through.
-	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE
-		&& pMsg->hwnd == GetListCtrl().GetSafeHwnd())
+	// Route configurable list-view hotkeys through keybinds. Caught here
+	// (not OnKeyDown) so it overrides the listview's default key handling.
+	if (pMsg->message == WM_KEYDOWN && pMsg->hwnd == GetListCtrl().GetSafeHwnd())
 	{
-		// Filter auto-repeat: holding Space generates ~30 KEYDOWNs per
-		// second; each one would spawn a new playback thread and trash
-		// the shared DirectSound buffer state. lParam bit 30 = 1 means
-		// the key was already down before this event, i.e. auto-repeat.
-		if (pMsg->lParam & (1 << 30))
-			return TRUE;
-		int id = get_current_id();
-		if (id != -1)
+		bool ctrl  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+		bool shift = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+		bool alt   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+		UINT action = 0;
+		if (keybinds::match_view(keybinds::scope_list_view, (UINT)pMsg->wParam, ctrl, shift, alt, action))
 		{
-			const t_index_entry& index = find_ref(m_index, id);
-			if (index.ft == ft_aud || index.ft == ft_ogg
-				|| index.ft == ft_voc || index.ft == ft_wav)
-			{
-				play_audio_id(id);
+			// Filter auto-repeat: holding the key generates ~30 KEYDOWNs per
+			// second; each would spawn a new playback thread and trash the
+			// shared DirectSound buffer state. lParam bit 30 = 1 means the
+			// key was already down before this event.
+			if (pMsg->lParam & (1 << 30))
 				return TRUE;
+			if (action == keybinds::vact_play_audio)
+			{
+				int id = get_current_id();
+				if (id != -1)
+				{
+					const t_index_entry& index = find_ref(m_index, id);
+					if (index.ft == ft_aud || index.ft == ft_ogg
+						|| index.ft == ft_voc || index.ft == ft_wav)
+					{
+						play_audio_id(id);
+						return TRUE;
+					}
+				}
 			}
 		}
 	}

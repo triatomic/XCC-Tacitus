@@ -333,6 +333,16 @@ protected:
 	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLimitVxlCpu();
 	afx_msg void OnUpdateThemeLimitVxlCpu(CCmdUI* pCmdUI);
+	afx_msg void OnKeybindsConfigure();
+
+	// Replace the frame's accelerator table with one built from current
+	// keybinds. Safe to call repeatedly; frees the old table.
+	void rebuild_accel();
+
+	// Walk every menu item and rewrite its trailing "\t<shortcut>" suffix
+	// to match the current Menu-scope keybinds. Run after rebuild_accel so
+	// the visible label always agrees with what TranslateAccelerator sees.
+	void refresh_menu_shortcuts();
 
 	DECLARE_MESSAGE_MAP()
 };

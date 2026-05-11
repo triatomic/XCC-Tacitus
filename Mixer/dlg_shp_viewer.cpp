@@ -1,9 +1,18 @@
 #include "stdafx.h"
 #include "dlg_shp_viewer.h"
+#include "MainFrm.h"
 #include "theme.h"
+#include "xap.h"
+
+static CMainFrame* GetMainFrame()
+{
+	return static_cast<CMainFrame*>(AfxGetMainWnd());
+}
 
 Cdlg_shp_viewer::Cdlg_shp_viewer(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(Cdlg_shp_viewer::IDD, pParent, "shp_viewer_dlg")
+	, m_av_fps(0)
+	, m_av_started(false)
 {
 	//{{AFX_DATA_INIT(Cdlg_shp_viewer)
 	//}}AFX_DATA_INIT
@@ -15,6 +24,7 @@ void Cdlg_shp_viewer::DoDataExchange(CDataExchange* pDX)
 	//{{AFX_DATA_MAP(Cdlg_shp_viewer)
 	DDX_Control(pDX, IDC_SLIDER, m_slider);
 	DDX_Control(pDX, IDC_IMAGE, m_image);
+	DDX_Control(pDX, IDC_DURATION, m_duration);
 	DDX_Text(pDX, IDC_FRAME, m_index);
 	//}}AFX_DATA_MAP
 }
@@ -23,6 +33,7 @@ BEGIN_MESSAGE_MAP(Cdlg_shp_viewer, ETSLayoutDialog)
 	//{{AFX_MSG_MAP(Cdlg_shp_viewer)
 	ON_WM_TIMER()
 	ON_BN_CLICKED(IDC_PLAY, OnPlay)
+	ON_WM_DESTROY()
 	//}}AFX_MSG_MAP
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
@@ -39,7 +50,38 @@ void Cdlg_shp_viewer::write(Cvideo_decoder* decoder)
 	m_decoder = decoder;
 }
 
-static HBITMAP create_bitmap(Cvirtual_image image)
+void Cdlg_shp_viewer::write_av(Cvirtual_binary wav, double fps, const std::string& name)
+{
+	m_av_wav = wav;
+	m_av_fps = fps;
+	m_av_name = name;
+}
+
+static std::string format_mmss(int total_s)
+{
+	if (total_s < 0)
+		total_s = 0;
+	char buf[16];
+	wsprintfA(buf, "%d:%02d", total_s / 60, total_s % 60);
+	return buf;
+}
+
+void Cdlg_shp_viewer::update_duration_label()
+{
+	if (!m_duration.GetSafeHwnd())
+		return;
+	if (m_av_fps <= 0 || !m_decoder)
+	{
+		m_duration.SetWindowText("");
+		return;
+	}
+	const int elapsed_s = static_cast<int>(m_frame / m_av_fps);
+	const int total_s = static_cast<int>(m_decoder->cf() / m_av_fps);
+	const std::string s = format_mmss(elapsed_s) + " / " + format_mmss(total_s);
+	m_duration.SetWindowText(s.c_str());
+}
+
+static HBITMAP create_bitmap(Cvirtual_image image, bool /*source_was_paletted*/)
 {
 	if (image.cx() & 3)
 	{
@@ -69,12 +111,13 @@ static HBITMAP create_bitmap(Cvirtual_image image)
 	return CreateDIBitmap(CClientDC(NULL), &header, CBM_INIT, image.image(), reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS);
 }
 
-BOOL Cdlg_shp_viewer::OnInitDialog() 
+BOOL Cdlg_shp_viewer::OnInitDialog()
 {
 	CreateRoot(VERTICAL)
 		<< item(IDC_IMAGE, GREEDY)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_FRAME, NORESIZE)
+			<< item(IDC_DURATION, NORESIZE)
 			<< item(IDC_SLIDER, GREEDY)
 			<< item(IDC_PLAY, NORESIZE)
 			<< item(IDOK, NORESIZE)
@@ -83,13 +126,37 @@ BOOL Cdlg_shp_viewer::OnInitDialog()
 	m_slider.SetRange(0, m_decoder->cf() - 1);
 	m_frame = 0;
 	show_frame();
+	update_duration_label();
 	m_last_access = 0;
-	m_timer_id = SetTimer(1, 100, NULL);
+	// VQA: drive the timer at the source frame rate so video and audio
+	// stay aligned. Non-VQA decoders (SHP/WSA) keep the legacy 100 ms
+	// poll + 15 s auto-advance behaviour.
+	const UINT period = (m_av_fps > 0)
+		? static_cast<UINT>(1000.0 / m_av_fps + 0.5)
+		: 100;
+	m_timer_id = SetTimer(1, period > 0 ? period : 1, NULL);
 	theme::apply_dialog(GetSafeHwnd());
+	// Start audio if we were handed a pre-decoded WAV buffer.
+	if (m_av_wav.size() && GetMainFrame() && GetMainFrame()->get_ds())
+	{
+		xap_play(GetMainFrame()->get_ds(), m_av_wav, m_av_name);
+		m_av_started = true;
+	}
 	return true;
 }
 
-void Cdlg_shp_viewer::OnTimer(UINT nIDEvent) 
+void Cdlg_shp_viewer::OnDestroy()
+{
+	// Stop any audio we started so it doesn't outlive the dialog.
+	if (m_av_started)
+	{
+		xap_stop();
+		m_av_started = false;
+	}
+	ETSLayoutDialog::OnDestroy();
+}
+
+void Cdlg_shp_viewer::OnTimer(UINT nIDEvent)
 {
 	if (m_timer_id == nIDEvent)
 	{
@@ -97,11 +164,25 @@ void Cdlg_shp_viewer::OnTimer(UINT nIDEvent)
 		time_t t = time(NULL);
 		if (m_frame != frame)
 		{
+			// User scrubbed the slider — sync the video position. For VQA
+			// the audio keeps playing through xap_play independently;
+			// scrubbing intentionally only repositions the video.
 			m_last_access = t;
 			m_frame = frame;
 		}
+		else if (m_av_fps > 0)
+		{
+			// VQA: timer fires at the source frame rate; advance every tick.
+			// Stop at the last frame instead of looping so it matches the
+			// behaviour of the audio buffer (which plays once and stops).
+			if (m_frame + 1 < m_decoder->cf())
+				m_frame++;
+			else
+				return;
+		}
 		else if (t - m_last_access > 15)
 		{
+			// SHP/WSA legacy behaviour: auto-advance after 15 s of idle.
 			m_frame++;
 			m_frame %= m_decoder->cf();
 		}
@@ -135,9 +216,11 @@ Cvirtual_image Cdlg_shp_viewer::decode_image(int i) const
 
 void Cdlg_shp_viewer::show_frame()
 {
-	DeleteObject(m_image.SetBitmap(create_bitmap(decode_image(m_frame))));
+	const bool paletted = (m_decoder->cb_pixel() == 1);
+	DeleteObject(m_image.SetBitmap(create_bitmap(decode_image(m_frame), paletted)));
 	m_index = m_frame;
 	m_slider.SetPos(m_frame);
+	update_duration_label();
 	UpdateData(false);
 }
 

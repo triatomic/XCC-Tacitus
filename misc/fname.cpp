@@ -177,7 +177,7 @@ int move_file(string s, string d)
 	return !MoveFileA(s.c_str(), d.c_str());
 }
 
-bool fname_filter(const string& fname, const string& filter)
+static bool fname_filter_one(const string& fname, const string& filter)
 {
 	size_t i;
 	if (filter.contains('*') || filter.contains('?'))
@@ -190,11 +190,11 @@ bool fname_filter(const string& fname, const string& filter)
 				if (filter.find('*', i + 1) == string::npos)
 				{
 					int j = fname.length() - filter.length() + 1;
-					return j < 0 ? false : fname_filter(fname.substr(i + j), filter.substr(i + 1));
+					return j < 0 ? false : fname_filter_one(fname.substr(i + j), filter.substr(i + 1));
 				}
 				for (size_t j = 0; j < fname.size(); j++)
 				{
-					if (fname_filter(fname.substr(i + j), filter.substr(i + 1)))
+					if (fname_filter_one(fname.substr(i + j), filter.substr(i + 1)))
 						return true;
 				}
 				return false;
@@ -210,4 +210,22 @@ bool fname_filter(const string& fname, const string& filter)
 		return tmp1.find(tmp2) != string::npos;
 	}
 	return fname.length() == i;
+}
+
+bool fname_filter(const string& fname, const string& filter)
+{
+	if (filter.find('|') == string::npos)
+		return fname_filter_one(fname, filter);
+	size_t start = 0;
+	while (start <= filter.size())
+	{
+		size_t end = filter.find('|', start);
+		if (end == string::npos)
+			end = filter.size();
+		string sub = filter.substr(start, end - start);
+		if (!sub.empty() && fname_filter_one(fname, sub))
+			return true;
+		start = end + 1;
+	}
+	return false;
 }

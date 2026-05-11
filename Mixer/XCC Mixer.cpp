@@ -6,6 +6,7 @@
 #include "XCC MixerView.h"
 
 #include <gdiplus.h>
+#include <shlobj.h>
 #include <id_log.h>
 #include "ListCtrlEx.h"
 #include "mix_cache.h"
@@ -61,7 +62,22 @@ BOOL CXCCMixerApp::InitInstance()
 	Gdiplus::GdiplusStartupInput gdiplusStartupInput;
 	Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 	AfxEnableControlContainer();
-	SetRegistryKey("XCC");
+	// Settings live in %APPDATA%\XCC\Mixer\settings.ini, not the registry.
+	// MFC's GetProfileString / WriteProfileString route to GetPrivateProfile*
+	// when m_pszRegistryKey is null and m_pszProfileName holds an absolute
+	// path — so every existing call site (theme, PalPaths, MainFrame window
+	// placement, keybinds, etc.) lands in the INI without further changes.
+	{
+		char appdata[MAX_PATH] = {0};
+		::SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata);
+		std::string dir = std::string(appdata) + "\\XCC\\Mixer";
+		::SHCreateDirectoryExA(NULL, dir.c_str(), NULL);
+		std::string ini = dir + "\\settings.ini";
+		// CWinApp owns m_pszProfileName via free(); allocate with malloc to match.
+		if (m_pszProfileName)
+			free((void*)m_pszProfileName);
+		m_pszProfileName = _strdup(ini.c_str());
+	}
 	LoadStdProfileSettings(0);
 	theme::load();
 	theme::apply_app_mode();

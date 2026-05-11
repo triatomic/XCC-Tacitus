@@ -1,7 +1,9 @@
 #include "stdafx.h"
 #include "MainFrm.h"
 #include "XCCFileView.h"
+#include "keybinds.h"
 #include "resource.h"
+#include <algorithm>
 #include <csf_file.h>
 #include <aud_file.h>
 #include <big_file.h>
@@ -89,6 +91,9 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_PLAYER_SIDE_CUSTOM, OnPlayerSideCustom)
 	ON_CONTROL_RANGE(BN_CLICKED, IDC_VXL_SIDE0, IDC_VXL_SIDE7, OnVxlSide)
 	ON_BN_CLICKED(IDC_VXL_SIDE_CUSTOM, OnVxlSideCustom)
+	ON_BN_CLICKED(IDC_VXL_HVA_LOAD, OnVxlHvaLoad)
+	ON_BN_CLICKED(IDC_VXL_HVA_LOOP, OnVxlHvaLoop)
+	ON_BN_CLICKED(IDC_LOAD_PAL, OnLoadPal)
 	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
 	ON_WM_DRAWITEM()
 	ON_WM_CTLCOLOR()
@@ -100,17 +105,25 @@ void CXCCFileView::OnLButtonDown(UINT nFlags, CPoint point)
 	SetFocus();
 	if (is_vxl_view())
 	{
-		// Only start orbit drag in the image area, not over the controls band.
-		CRect cr;
-		GetClientRect(&cr);
-		if (point.y < cr.bottom - 32)
+		bool ctrl  = (nFlags & MK_CONTROL) != 0;
+		bool shift = (nFlags & MK_SHIFT) != 0;
+		bool alt   = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+		UINT action = 0;
+		if (keybinds::match_mouse(keybinds::scope_file_view, keybinds::mb_left, ctrl, shift, alt, action)
+			&& action == keybinds::vact_orbit_drag)
 		{
-			m_vxl_dragging = true;
-			m_vxl_drag_origin = point;
-			m_vxl_drag_yaw0 = m_vxl_yaw;
-			m_vxl_drag_pitch0 = m_vxl_pitch;
-			SetCapture();
-			return;
+			// Only start orbit drag in the image area, not over the controls band.
+			CRect cr;
+			GetClientRect(&cr);
+			if (point.y < cr.bottom - 32)
+			{
+				m_vxl_dragging = true;
+				m_vxl_drag_origin = point;
+				m_vxl_drag_yaw0 = m_vxl_yaw;
+				m_vxl_drag_pitch0 = m_vxl_pitch;
+				SetCapture();
+				return;
+			}
 		}
 	}
 	CScrollView::OnLButtonDown(nFlags, point);
@@ -139,17 +152,25 @@ void CXCCFileView::OnRButtonDown(UINT nFlags, CPoint point)
 	// click lands inside the image area (not on the control band).
 	if (m_player_mode)
 	{
-		CRect cr;
-		GetClientRect(&cr);
-		if (point.y < cr.bottom - player_band_h())
+		bool ctrl  = (nFlags & MK_CONTROL) != 0;
+		bool shift = (nFlags & MK_SHIFT) != 0;
+		bool alt   = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+		UINT action = 0;
+		if (keybinds::match_mouse(keybinds::scope_file_view, keybinds::mb_right, ctrl, shift, alt, action)
+			&& action == keybinds::vact_pan_drag)
 		{
-			m_player_panning = true;
-			m_player_pan_origin = point;
-			m_player_pan_x0 = m_player_pan_x;
-			m_player_pan_y0 = m_player_pan_y;
-			SetCapture();
-			::SetCursor(::LoadCursor(NULL, IDC_SIZEALL));
-			return;
+			CRect cr;
+			GetClientRect(&cr);
+			if (point.y < cr.bottom - player_band_h())
+			{
+				m_player_panning = true;
+				m_player_pan_origin = point;
+				m_player_pan_x0 = m_player_pan_x;
+				m_player_pan_y0 = m_player_pan_y;
+				SetCapture();
+				::SetCursor(::LoadCursor(NULL, IDC_SIZEALL));
+				return;
+			}
 		}
 	}
 	CScrollView::OnRButtonDown(nFlags, point);
@@ -230,45 +251,60 @@ BOOL CXCCFileView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 
 void CXCCFileView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
-	if (nChar == 'M')
+	bool ctrl  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+	bool shift = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+	bool alt   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+	UINT action = 0;
+	if (keybinds::match_view(keybinds::scope_file_view, nChar, ctrl, shift, alt, action))
 	{
-		m_show_alpha_only = !m_show_alpha_only;
-		Invalidate();
-		return;
-	}
-	if (nChar == 'P' && is_playable_file())
-	{
-		if (m_player_mode)
-			player_exit();
-		else
-			player_enter();
-		return;
-	}
-	if (m_player_mode && nChar == VK_LEFT)
-	{
-		player_set_frame(m_player_frame - 1);
-		return;
-	}
-	if (m_player_mode && nChar == VK_RIGHT)
-	{
-		player_set_frame(m_player_frame + 1);
-		return;
-	}
-	if (m_player_mode && nChar == VK_SPACE && !is_vxl_view())
-	{
-		OnPlayerPlay();
-		return;
-	}
-	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-	if (ctrl && m_zoomable_file && (nChar == '0' || nChar == VK_NUMPAD0))
-	{
-		if (m_zoom_pct != 100)
+		switch (action)
 		{
-			m_zoom_pct = 100;
-			m_text_cache_valid = false;
+		case keybinds::vact_alpha_toggle:
+			m_show_alpha_only = !m_show_alpha_only;
 			Invalidate();
+			return;
+		case keybinds::vact_player_toggle:
+			if (is_playable_file())
+			{
+				if (m_player_mode)
+					player_exit();
+				else
+					player_enter();
+			}
+			return;
+		case keybinds::vact_player_prev:
+			if (m_player_mode)
+				player_set_frame(m_player_frame - 1);
+			return;
+		case keybinds::vact_player_next:
+			if (m_player_mode)
+				player_set_frame(m_player_frame + 1);
+			return;
+		case keybinds::vact_player_space:
+			if (m_player_mode && !is_vxl_view())
+				OnPlayerPlay();
+			return;
+		case keybinds::vact_zoom_100:
+			if (m_player_mode)
+			{
+				m_player_zoom_pct = 100;
+				m_player_pan_x = m_player_pan_y = 0;
+				Invalidate(FALSE);
+			}
+			else if (m_zoomable_file && m_zoom_pct != 100)
+			{
+				m_zoom_pct = 100;
+				m_text_cache_valid = false;
+				Invalidate();
+			}
+			return;
+		case keybinds::vact_zoom_in:
+			do_zoom_step(+1);
+			return;
+		case keybinds::vact_zoom_out:
+			do_zoom_step(-1);
+			return;
 		}
-		return;
 	}
 	CScrollView::OnKeyDown(nChar, nRepCnt, nFlags);
 }
@@ -297,17 +333,14 @@ BOOL CXCCFileView::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
-BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+// Apply a +/- 25% zoom step. Handles both player-mode zoom and the
+// CScrollView image-grid zoom, depending on what the file view is currently
+// displaying. Centralized so wheel-tick and a key-bound zoom hit the same
+// state machine.
+void CXCCFileView::do_zoom_step(int sign)
 {
-	CPoint position = GetScrollPosition();
-	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
-	bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-
-	if (ctrl && m_player_mode)
+	if (m_player_mode)
 	{
-		// Player zoom: works for SHP/WSA frames and the VXL orbit viewer.
-		// Seed from the currently-displayed s_pct (auto-fit or 100 for Native)
-		// so the first wheel tick zooms relative to what the user sees, not 0.
 		int cur = m_player_zoom_pct;
 		if (cur <= 0)
 		{
@@ -330,25 +363,20 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 			if (cur < 25) cur = 25;
 			if (cur > 1600) cur = 1600;
 		}
-		int step = zDelta > 0 ? 25 : -25;
-		int next = cur + step;
+		int next = cur + (sign > 0 ? 25 : -25);
 		if (next < 25) next = 25;
 		if (next > 1600) next = 1600;
 		if (next != m_player_zoom_pct)
 		{
 			m_player_zoom_pct = next;
-			// Reset pan so the new zoom level starts centered. Without this,
-			// the user's previous pan would persist into the new zoom and
-			// could leave the image out of view at a higher magnification.
 			m_player_pan_x = m_player_pan_y = 0;
 			Invalidate(FALSE);
 		}
-		return TRUE;
+		return;
 	}
-	if (ctrl && m_zoomable_file)
+	if (m_zoomable_file)
 	{
-		int step = zDelta > 0 ? 25 : -25;
-		int next = m_zoom_pct + step;
+		int next = m_zoom_pct + (sign > 0 ? 25 : -25);
 		if (next < 25) next = 25;
 		if (next > 1600) next = 1600;
 		if (next != m_zoom_pct)
@@ -357,15 +385,43 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 			m_text_cache_valid = false;
 			Invalidate();
 		}
-		return TRUE;
 	}
-	if (shiftState)
+}
+
+BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	CPoint position = GetScrollPosition();
+	bool ctrl  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+	bool shift = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+	bool alt   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+
+	// Wheel direction is encoded as a synthetic mouse button.
+	BYTE btn = (zDelta > 0) ? keybinds::mb_wheel_up : keybinds::mb_wheel_down;
+	UINT action = 0;
+	if (keybinds::match_mouse(keybinds::scope_file_view, btn, ctrl, shift, alt, action))
+	{
+		if (action == keybinds::vact_zoom_in)  { do_zoom_step(+1); return TRUE; }
+		if (action == keybinds::vact_zoom_out) { do_zoom_step(-1); return TRUE; }
+		if (action == keybinds::vact_zoom_100)
+		{
+			if (m_player_mode)
+				m_player_zoom_pct = 100;
+			else if (m_zoomable_file)
+				m_zoom_pct = 100;
+			Invalidate();
+			return TRUE;
+		}
+	}
+
+	// No matching mouse binding: fall through to scroll. Shift scrolls
+	// horizontally, otherwise vertically.
+	if (shift)
 	{
 		ScrollToPosition(CPoint(position.x - zDelta, position.y));
-		return false;
+		return FALSE;
 	}
 	ScrollToPosition(CPoint(position.x, position.y - zDelta));
-	return false;
+	return FALSE;
 }
 
 void CXCCFileView::OnMouseHWheel(UINT nFlags, short zDelta, CPoint pt)
@@ -390,6 +446,75 @@ void CXCCFileView::OnInitialUpdate()
 	m_font.CreateFont(12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Lucida Console");
 	//m_font.CreateFont(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Consolas");
 	//m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, ""); //default font, but if it isn't monospace it sucks
+	// Persistent "Load PAL..." button. Lives across the whole view lifetime
+	// so it appears in grid view too (not just player mode). Visibility is
+	// driven by is_paletted_file() in load_pal_btn_update_visibility().
+	CRect r0(0, 0, 0, 0);
+	m_load_pal_btn.Create("Load PAL...", WS_CHILD | BS_PUSHBUTTON, r0, this, IDC_LOAD_PAL);
+	m_load_pal_btn.SetFont(&m_font);
+	theme::apply_window(m_load_pal_btn.GetSafeHwnd());
+	m_load_pal_btn_created = true;
+}
+
+bool CXCCFileView::is_paletted_file() const
+{
+	switch (m_ft)
+	{
+	case ft_shp:
+	case ft_shp_ts:
+	case ft_shp_dune2:
+	case ft_wsa:
+	case ft_wsa_dune2:
+	case ft_tmp_ra:
+	case ft_tmp_ts:
+	case ft_pcx:
+	case ft_cps:
+	case ft_vxl:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void CXCCFileView::load_pal_btn_layout()
+{
+	if (!m_load_pal_btn_created)
+		return;
+	CRect cr;
+	GetClientRect(&cr);
+	const int W = 90;
+	const int H = 24;
+	const int pad = 4;
+	if (m_player_mode)
+	{
+		// In player mode the player band owns the bottom; park the button on
+		// the upper row at the right edge so it doesn't overlap transport
+		// controls (which start from the left). For VXL the HVA button is on
+		// the upper row at the right end — shift our button further left.
+		const bool vxl = (m_ft == ft_vxl);
+		int y = cr.bottom - 2 * H - 2 * pad;	// upper row of two-row band
+		int x = cr.right - W - pad;
+		if (vxl)
+			x -= (90 + pad);	// leave room for the HVA load button to our right
+		m_load_pal_btn.MoveWindow(x, y, W, H);
+	}
+	else
+	{
+		// Grid view: bottom-right corner, inside the pal mini-band.
+		int y = cr.bottom - H - (pal_band_h() - H) / 2;
+		int x = cr.right - W - pad;
+		m_load_pal_btn.MoveWindow(x, y, W, H);
+	}
+}
+
+void CXCCFileView::load_pal_btn_update_visibility()
+{
+	if (!m_load_pal_btn_created)
+		return;
+	const bool show = m_is_open && is_paletted_file();
+	m_load_pal_btn.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	if (show)
+		load_pal_btn_layout();
 }
 
 void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d)
@@ -798,6 +923,117 @@ static const COLORREF k_side_colors[8] = {
 	RGB(0x4f, 0xd1, 0xc5),
 	RGB(0xd5, 0x3f, 0x8c),
 };
+
+// --------------------------------------------------------------------------
+// HVA keyframe interpolation
+//
+// HVA stores N keyframes. Vengi's scene graph spaces them at frame indices
+// 0, 6, 12, ... and interpolates linearly between consecutive keyframes
+// (slerp on rotation, lerp on translation). c_HVA_INTER is the per-gap step
+// count we expose so the timeline slider gives meaningful sub-keyframe
+// scrubbing — the value isn't observable elsewhere so 12 (matches Vengi's
+// implicit ~6fps * one-second feel scaled up) is reasonable.
+// --------------------------------------------------------------------------
+static const int c_HVA_INTER = 12;
+
+// Decompose a 3x3 rotation matrix into a unit quaternion (Shoemake's
+// trace-based method). Tolerates mild non-orthogonality from HVA mats by
+// renormalizing rows beforehand.
+static void mat3_to_quat(const float m[3][3], float q[4])
+{
+	const float tr = m[0][0] + m[1][1] + m[2][2];
+	if (tr > 0.0f) {
+		float s = std::sqrt(tr + 1.0f) * 2.0f;
+		q[3] = 0.25f * s;
+		q[0] = (m[2][1] - m[1][2]) / s;
+		q[1] = (m[0][2] - m[2][0]) / s;
+		q[2] = (m[1][0] - m[0][1]) / s;
+	} else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+		float s = std::sqrt(1.0f + m[0][0] - m[1][1] - m[2][2]) * 2.0f;
+		q[3] = (m[2][1] - m[1][2]) / s;
+		q[0] = 0.25f * s;
+		q[1] = (m[0][1] + m[1][0]) / s;
+		q[2] = (m[0][2] + m[2][0]) / s;
+	} else if (m[1][1] > m[2][2]) {
+		float s = std::sqrt(1.0f + m[1][1] - m[0][0] - m[2][2]) * 2.0f;
+		q[3] = (m[0][2] - m[2][0]) / s;
+		q[0] = (m[0][1] + m[1][0]) / s;
+		q[1] = 0.25f * s;
+		q[2] = (m[1][2] + m[2][1]) / s;
+	} else {
+		float s = std::sqrt(1.0f + m[2][2] - m[0][0] - m[1][1]) * 2.0f;
+		q[3] = (m[1][0] - m[0][1]) / s;
+		q[0] = (m[0][2] + m[2][0]) / s;
+		q[1] = (m[1][2] + m[2][1]) / s;
+		q[2] = 0.25f * s;
+	}
+}
+
+static void quat_to_mat3(const float q[4], float m[3][3])
+{
+	const float x = q[0], y = q[1], z = q[2], w = q[3];
+	m[0][0] = 1 - 2*(y*y + z*z); m[0][1] = 2*(x*y - z*w);     m[0][2] = 2*(x*z + y*w);
+	m[1][0] = 2*(x*y + z*w);     m[1][1] = 1 - 2*(x*x + z*z); m[1][2] = 2*(y*z - x*w);
+	m[2][0] = 2*(x*z - y*w);     m[2][1] = 2*(y*z + x*w);     m[2][2] = 1 - 2*(x*x + y*y);
+}
+
+static void quat_slerp(const float a[4], const float b_in[4], float t, float out[4])
+{
+	float b[4] = { b_in[0], b_in[1], b_in[2], b_in[3] };
+	float dot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3];
+	if (dot < 0.0f) {
+		b[0] = -b[0]; b[1] = -b[1]; b[2] = -b[2]; b[3] = -b[3];
+		dot = -dot;
+	}
+	float s0, s1;
+	if (dot > 0.9995f) {
+		// Nearly parallel: fall back to lerp + normalize.
+		s0 = 1.0f - t;
+		s1 = t;
+	} else {
+		const float th = std::acos(dot);
+		const float sth = std::sin(th);
+		s0 = std::sin((1.0f - t) * th) / sth;
+		s1 = std::sin(t * th) / sth;
+	}
+	out[0] = s0*a[0] + s1*b[0];
+	out[1] = s0*a[1] + s1*b[1];
+	out[2] = s0*a[2] + s1*b[2];
+	out[3] = s0*a[3] + s1*b[3];
+	const float len = std::sqrt(out[0]*out[0] + out[1]*out[1] + out[2]*out[2] + out[3]*out[3]);
+	if (len > 1e-6f) { out[0]/=len; out[1]/=len; out[2]/=len; out[3]/=len; }
+}
+
+// Interpolate between two HVA keyframe matrices into a 3x4 row-major output.
+// Rotation goes through quaternion slerp so spin animations sweep smoothly
+// between keyframes (linear matrix lerp would produce non-rigid shearing).
+static void hva_interp(const float* a, const float* b, float t, float out[3][4])
+{
+	// Pull 3x3 rotations out of each row-major 3x4.
+	float ra[3][3] = {
+		{ a[0], a[1], a[2]  },
+		{ a[4], a[5], a[6]  },
+		{ a[8], a[9], a[10] }
+	};
+	float rb[3][3] = {
+		{ b[0], b[1], b[2]  },
+		{ b[4], b[5], b[6]  },
+		{ b[8], b[9], b[10] }
+	};
+	float qa[4], qb[4], qr[4], rr[3][3];
+	mat3_to_quat(ra, qa);
+	mat3_to_quat(rb, qb);
+	quat_slerp(qa, qb, t, qr);
+	quat_to_mat3(qr, rr);
+	// Translation: simple lerp.
+	const float tx = a[3]  * (1.0f - t) + b[3]  * t;
+	const float ty = a[7]  * (1.0f - t) + b[7]  * t;
+	const float tz = a[11] * (1.0f - t) + b[11] * t;
+	out[0][0] = rr[0][0]; out[0][1] = rr[0][1]; out[0][2] = rr[0][2]; out[0][3] = tx;
+	out[1][0] = rr[1][0]; out[1][1] = rr[1][1]; out[1][2] = rr[1][2]; out[1][3] = ty;
+	out[2][0] = rr[2][0]; out[2][1] = rr[2][1]; out[2][2] = rr[2][2]; out[2][3] = tz;
+}
+
 
 struct t_vector
 {
@@ -2014,6 +2250,7 @@ void CXCCFileView::open_f(int id, Cmix_file& mix_f, t_game game, t_palette palet
 		m_id = id;
 		m_palette = palette;
 	}
+	m_source_mix = &mix_f;
 	post_open(f);
 }
 
@@ -2028,6 +2265,7 @@ void CXCCFileView::open_f(const string& name)
 		m_id = Cmix_file::get_id(m_game, Cfname(name).get_ftitle());
 		m_palette = NULL;
 	}
+	m_source_mix = nullptr;
 	post_open(f);
 }
 
@@ -2054,6 +2292,10 @@ void CXCCFileView::post_open(Ccc_file& f)
 		// next paint. Don't clear vectors — they'll be reassigned on rebuild
 		// and the old allocations get reused if same/larger size.
 		m_open_token++;
+		// HVA pairs with one VXL; drop any previous load so the next file
+		// starts clean. The button can re-load on demand.
+		m_hva_loaded = false;
+		m_hva_data.clear();
 		m_is_open = true;
 		m_zoom_pct = 100;
 		m_zoomable_file =
@@ -2067,6 +2309,8 @@ void CXCCFileView::post_open(Ccc_file& f)
 	if (m_player_mode)
 		player_exit();
 	ScrollToPosition(CPoint(0, 0));
+	load_pal_btn_update_visibility();
+	try_auto_load_paired_pal();
 	Invalidate();
 }
 
@@ -2074,6 +2318,8 @@ void CXCCFileView::close_f()
 {
 	m_is_open = false;
 	m_text_cache.clear();
+	if (m_load_pal_btn_created)
+		m_load_pal_btn.ShowWindow(SW_HIDE);
 }
 
 bool CXCCFileView::is_playable_file() const
@@ -2249,6 +2495,58 @@ void CXCCFileView::player_decode_frames()
 		f.load(m_data);
 		load_color_table(get_default_palette(), true);
 
+		// HVA overlay: when loaded, look up the per-section transform for the
+		// current m_player_frame and use it in place of the VXL section's
+		// static transform. Matched by 16-byte section id (HVA names mirror
+		// VXL section headers). Frame index is clamped against HVA's frame
+		// count, which also drives m_player_cf below.
+		// HVA = keyframed animation. Each HVA "frame" is a keyframe; the
+		// engine interpolates between consecutive keyframes (Vengi spaces them
+		// 6 timeline-frames apart and slerps rotation / lerps translation —
+		// see SceneGraph::transformForFrame). We expose the timeline as
+		// m_player_cf = c_keyframes * c_HVA_INTER (so a 2-keyframe HVA
+		// becomes c_HVA_INTER timeline steps from kf0 to kf1, then another
+		// c_HVA_INTER back when looping). m_player_frame is the timeline
+		// position; we resolve it to (kf_start, kf_end, t) here.
+		Chva_file hva;
+		bool hva_ok = false;
+		int kf_start = 0;
+		int kf_end = 0;
+		float kf_t = 0.0f; // 0..1 between kf_start and kf_end
+		if (m_hva_loaded && m_hva_data.size() > 0)
+		{
+			hva.load(m_hva_data);
+			if (hva.is_valid() && hva.get_c_frames() > 0)
+			{
+				hva_ok = true;
+				const int n_kf = hva.get_c_frames();
+				if (n_kf == 1)
+				{
+					kf_start = kf_end = 0;
+					kf_t = 0.0f;
+				}
+				else
+				{
+					// Snap-wrap: timeline only spans the n_kf-1 forward gaps,
+					// plus one extra slot to land exactly on the last keyframe.
+					// No kf_last -> kf_0 interpolation; OnTimer instead resets
+					// m_player_frame to 0 at the end. Avoids the shortest-arc
+					// slerp reversing rotation each cycle.
+					int tl = m_player_frame;
+					const int span = c_HVA_INTER;
+					const int total = (n_kf - 1) * span + 1;
+					if (tl < 0) tl = 0;
+					if (tl >= total) tl = total - 1;
+					int k0 = tl / span;
+					int rem = tl - k0 * span;
+					if (k0 >= n_kf - 1) { k0 = n_kf - 1; rem = 0; }
+					kf_start = k0;
+					kf_end = (k0 + 1 < n_kf) ? (k0 + 1) : k0;
+					kf_t = static_cast<float>(rem) / static_cast<float>(span);
+				}
+			}
+		}
+
 		// Build the object-space point cloud once. The viewer rasterizes it
 		// per frame at the current m_vxl_yaw/m_vxl_pitch.
 		m_vxl_cloud.clear();
@@ -2262,6 +2560,54 @@ void CXCCFileView::player_decode_frames()
 			double sx = (st.x_max_scale - st.x_min_scale) / std::max(1, cx);
 			double sy = (st.y_max_scale - st.y_min_scale) / std::max(1, cy);
 			double sz = (st.z_max_scale - st.z_min_scale) / std::max(1, cz);
+			// Pick the section transform: HVA per-frame matrix when loaded,
+			// otherwise the static VXL section transform. Match by 16-byte
+			// section id first; if no match (common — TS/RA2 HVAs frequently
+			// rename sections), fall back to positional index pairing so a
+			// single-section turret HVA still drives a single-section VXL.
+			//
+			// HVA translation column is expressed in *voxels* (per the HVA
+			// spec); convert to world units by multiplying by the section's
+			// voxel scale. Rotation/shear columns are unitless multipliers
+			// that act directly on world-unit local coords, so they pass
+			// through unchanged. We also skip the file-Y flip used by the
+			// static path when HVA is active — HVAs are authored in the
+			// engine's native axes which already match yaw=0 facing camera.
+			float tm[3][4];
+			memcpy(tm, st.transform, sizeof(tm));
+			if (hva_ok)
+			{
+				int hs_match = -1;
+				const char* vid = f.get_section_header(i)->id;
+				for (int hs = 0; hs < hva.get_c_sections(); hs++)
+				{
+					if (!strncmp(hva.get_section_id(hs), vid, 16))
+					{
+						hs_match = hs;
+						break;
+					}
+				}
+				if (hs_match < 0 && i < hva.get_c_sections())
+					hs_match = i;
+				if (hs_match >= 0)
+				{
+					// Interpolate the section transform between kf_start and
+					// kf_end (rotation slerped, translation lerped). When the
+					// two keyframes are the same (single-keyframe HVA, or the
+					// timeline lands exactly on a key) hva_interp degenerates
+					// to that keyframe's matrix.
+					const float* ma = hva.get_transform_matrix(hs_match, kf_start);
+					const float* mb = hva.get_transform_matrix(hs_match, kf_end);
+					hva_interp(ma, mb, kf_t, tm);
+					// HVA translation column is in leptons (cell-based units).
+					// Scale by st.scale (the section's global scale, ~1/12) to
+					// bring it into the same world-unit space as the voxel
+					// positions, which are already sx/sy/sz-scaled when emitted.
+					tm[0][3] *= st.scale;
+					tm[1][3] *= st.scale;
+					tm[2][3] *= st.scale;
+				}
+			}
 			// Section-local occupancy grid for neighbor-based normal derivation.
 			// Each voxel's normal points away from its empty neighbor cells (sum
 			// of empty-side unit vectors). Store color sentinel 0 = empty so a
@@ -2308,15 +2654,28 @@ void CXCCFileView::player_decode_frames()
 			for (const auto& lv : locals)
 			{
 				const int x = lv.lx, y = lv.ly, z = lv.lz;
-				double lx = (x + 0.5 - cx / 2.0) * sx;
-				// Flip file Y so the model's front faces the camera at
-				// yaw=0 (matches Vengi's VXL viewer convention).
-				double ly = (cy - y - 0.5 - cy / 2.0) * sy;
-				double lz = (z + 0.5 - cz / 2.0) * sz;
-				double wx = st.transform[0][0] * lx + st.transform[0][1] * ly + st.transform[0][2] * lz + st.transform[0][3];
-				double wy = st.transform[1][0] * lx + st.transform[1][1] * ly + st.transform[1][2] * lz + st.transform[1][3];
-				double wz = st.transform[2][0] * lx + st.transform[2][1] * ly + st.transform[2][2] * lz + st.transform[2][3];
-				// Local-space normal from empty-neighbor sides.
+				// Place voxels using the section's mins/maxs as the local
+				// origin. Voxel index 0 maps to st.{x,y,z}_min_scale, voxel
+				// index (size-1) maps near st.{x,y,z}_max_scale - sectionScale.
+				// This mirrors Vengi's renderer applying translate(wm,
+				// -pivot * dimensions) where pivot = -mins/(maxs-mins). It's
+				// how per-section authored positions (rotor above body) are
+				// expressed in the file, since the static transform is
+				// typically identity for stock VXLs.
+				double lx = st.x_min_scale + (x + 0.5) * sx;
+				double ly = st.y_min_scale + (y + 0.5) * sy;
+				double lz = st.z_min_scale + (z + 0.5) * sz;
+				double wx = tm[0][0] * lx + tm[0][1] * ly + tm[0][2] * lz + tm[0][3];
+				double wy = tm[1][0] * lx + tm[1][1] * ly + tm[1][2] * lz + tm[1][3];
+				double wz = tm[2][0] * lx + tm[2][1] * ly + tm[2][2] * lz + tm[2][3];
+				// Camera-facing convention: flip Y after the section transform
+				// so the model presents its front at yaw=0. Applying the flip
+				// post-transform keeps tm's rotation/translation columns in
+				// their authored axes — important so HVA matrices compose
+				// correctly with sibling sections.
+				wy = -wy;
+				// Local-space normal from empty-neighbor sides (cube faces
+				// exposed to empty cells). Then rotated by tm's 3x3 submatrix.
 				float lnx = 0.0f, lny = 0.0f, lnz = 0.0f;
 				auto empty = [&](int xx, int yy, int zz) {
 					if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
@@ -2325,16 +2684,16 @@ void CXCCFileView::player_decode_frames()
 				};
 				if (empty(x - 1, y, z)) lnx -= 1.0f;
 				if (empty(x + 1, y, z)) lnx += 1.0f;
-				if (empty(x, y - 1, z)) lny += 1.0f; // Y is flipped on emit
-				if (empty(x, y + 1, z)) lny -= 1.0f;
+				if (empty(x, y - 1, z)) lny -= 1.0f;
+				if (empty(x, y + 1, z)) lny += 1.0f;
 				if (empty(x, y, z - 1)) lnz -= 1.0f;
 				if (empty(x, y, z + 1)) lnz += 1.0f;
 				if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
 					lnz = 1.0f;
-				// Rotate by 3x3 submatrix of section transform (directions only).
-				float wnx = static_cast<float>(st.transform[0][0]) * lnx + static_cast<float>(st.transform[0][1]) * lny + static_cast<float>(st.transform[0][2]) * lnz;
-				float wny = static_cast<float>(st.transform[1][0]) * lnx + static_cast<float>(st.transform[1][1]) * lny + static_cast<float>(st.transform[1][2]) * lnz;
-				float wnz = static_cast<float>(st.transform[2][0]) * lnx + static_cast<float>(st.transform[2][1]) * lny + static_cast<float>(st.transform[2][2]) * lnz;
+				float wnx = tm[0][0] * lnx + tm[0][1] * lny + tm[0][2] * lnz;
+				float wny = tm[1][0] * lnx + tm[1][1] * lny + tm[1][2] * lnz;
+				float wnz = tm[2][0] * lnx + tm[2][1] * lny + tm[2][2] * lnz;
+				wny = -wny;
 				float nlen = std::sqrt(wnx * wnx + wny * wny + wnz * wnz);
 				if (nlen > 1e-6f) { wnx /= nlen; wny /= nlen; wnz /= nlen; }
 				else              { wnx = 0; wny = 0; wnz = 1; }
@@ -2356,7 +2715,13 @@ void CXCCFileView::player_decode_frames()
 		m_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
 		m_player_cx = 2 * m_vxl_half;
 		m_player_cy = 2 * m_vxl_half;
-		m_player_cf = 1; // single interactive frame
+		// VXL is normally a single interactive frame; with HVA loaded the
+		// timeline expands so each adjacent pair of keyframes is split into
+		// c_HVA_INTER interpolated steps. A 2-keyframe HVA -> 2*c_HVA_INTER
+		// timeline frames (kf0 -> kf1 -> back to kf0 when wrapping).
+		m_player_cf = hva_ok
+			? (hva.get_c_frames() <= 1 ? 1 : (hva.get_c_frames() - 1) * c_HVA_INTER + 1)
+			: 1;
 	}
 }
 
@@ -2463,14 +2828,28 @@ void CXCCFileView::player_enter()
 		m_vxl_side_custom.Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_VXL_SIDE_CUSTOM);
 		theme::apply_window(m_vxl_side_custom.GetSafeHwnd());
 
+		// HVA load button (VXL-only). Stays hidden for SHP/WSA.
+		m_vxl_hva_load.Create("Load HVA...", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_VXL_HVA_LOAD);
+		m_vxl_hva_load.SetFont(&m_font);
+		theme::apply_window(m_vxl_hva_load.GetSafeHwnd());
+
+		// Loop checkbox: only relevant when an HVA is driving multi-frame
+		// playback. Default on (mirrors Vengi's animation panel).
+		m_vxl_hva_loop.Create("Loop", WS_CHILD | BS_AUTOCHECKBOX, r, this, IDC_VXL_HVA_LOOP);
+		m_vxl_hva_loop.SetFont(&m_font);
+		theme::apply_window(m_vxl_hva_loop.GetSafeHwnd());
+
 		m_player_controls_created = true;
 	}
 	const bool vxl = (m_ft == ft_vxl);
+	// VXL playback is hidden by default, but a loaded HVA turns the VXL into
+	// a multi-frame animation — show the transport row so the user can scrub.
+	const bool vxl_hva = vxl && m_hva_loaded && m_player_cf > 1;
 	m_player_slider.SetRange(0, std::max(0, m_player_cf - 1));
 	m_player_slider.SetPos(0);
 	m_player_fps_edit.SetWindowText(n(m_player_fps).c_str());
 	m_player_fps_spin.SetPos(m_player_fps);
-	const int playback_show = vxl ? SW_HIDE : SW_SHOW;
+	const int playback_show = (!vxl || vxl_hva) ? SW_SHOW : SW_HIDE;
 	m_player_play.ShowWindow(playback_show);
 	m_player_reverse.ShowWindow(playback_show);
 	m_player_reverse.SetCheck(m_player_reverse_dir ? BST_CHECKED : BST_UNCHECKED);
@@ -2502,6 +2881,11 @@ void CXCCFileView::player_enter()
 	for (int i = 0; i < 8; i++)
 		m_vxl_side[i].ShowWindow(vxl_show);
 	m_vxl_side_custom.ShowWindow(vxl_show);
+	m_vxl_hva_load.ShowWindow(vxl_show);
+	// Loop only meaningful while an HVA is supplying multiple frames.
+	const int hva_loop_show = vxl_hva ? SW_SHOW : SW_HIDE;
+	m_vxl_hva_loop.ShowWindow(hva_loop_show);
+	m_vxl_hva_loop.SetCheck(m_hva_loop ? BST_CHECKED : BST_UNCHECKED);
 	// Game Grid combobox shows for both SHP and VXL — the overlay applies in
 	// either case (already drawn for VXL via the post-stretch path below).
 	m_player_iso_grid.ShowWindow(SW_SHOW);
@@ -2521,6 +2905,7 @@ void CXCCFileView::player_enter()
 	if (!vxl)
 		player_prefill_bgra_cache();
 	SetScrollSizes(MM_TEXT, CSize(1, 1));
+	load_pal_btn_update_visibility();
 	Invalidate();
 }
 
@@ -2551,6 +2936,8 @@ void CXCCFileView::player_exit()
 		for (int i = 0; i < 8; i++)
 			m_vxl_side[i].ShowWindow(SW_HIDE);
 		m_vxl_side_custom.ShowWindow(SW_HIDE);
+		m_vxl_hva_load.ShowWindow(SW_HIDE);
+		m_vxl_hva_loop.ShowWindow(SW_HIDE);
 		m_player_iso_grid.ShowWindow(SW_HIDE);
 	}
 	m_player_frames.clear();
@@ -2559,6 +2946,7 @@ void CXCCFileView::player_exit()
 	if (GetCapture() == this)
 		ReleaseCapture();
 	m_text_cache_valid = false;
+	load_pal_btn_update_visibility();
 	Invalidate();
 }
 
@@ -2588,6 +2976,13 @@ void CXCCFileView::player_set_frame(int f)
 	if (m_player_controls_created)
 		m_player_slider.SetPos(f);
 	player_update_label();
+	// VXL+HVA scrubbing: rebuild the point cloud for the new frame and bump
+	// m_open_token so the splat cache (keyed on token) rebuilds on next paint.
+	if (m_ft == ft_vxl && m_hva_loaded)
+	{
+		player_decode_frames();
+		m_open_token++;
+	}
 	// Only invalidate the image area above the controls band; the controls paint themselves.
 	CRect cr;
 	GetClientRect(&cr);
@@ -2624,12 +3019,18 @@ void CXCCFileView::player_layout_controls()
 	m_player_slider.MoveWindow(slider_x, y, slider_w, H);
 	if (vxl)
 	{
-		// VXL: most transport controls are hidden, so the iso-grid combo
-		// sits to the right of the Native button on the single visible row.
-		// Slider/label/FPS positions above are computed but never shown.
-		int gx = pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
-		m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
-		// Upper row: BG toggle + 9 VXL side-color swatches.
+		// VXL without HVA: transport row is hidden, so the iso-grid combo
+		// gets parked to the right of the Native button on the single
+		// visible row. With HVA loaded the transport is live and the combo
+		// stays on the upper row (placed below) next to the swatches.
+		const bool vxl_hva = m_hva_loaded && m_player_cf > 1;
+		if (!vxl_hva)
+		{
+			int gx = pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
+			m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
+		}
+		// Upper row: BG toggle + 9 VXL side-color swatches + HVA button
+		// (+ iso-grid when HVA is loaded).
 		int y2 = y - H - pad;
 		int x2 = pad;
 		m_player_bg.MoveWindow(x2, y2, 36, H); x2 += 36 + pad;
@@ -2639,7 +3040,13 @@ void CXCCFileView::player_layout_controls()
 			m_vxl_side[i].MoveWindow(x2, y2, swatch, H);
 			x2 += swatch + 2;
 		}
-		m_vxl_side_custom.MoveWindow(x2, y2, swatch, H);
+		m_vxl_side_custom.MoveWindow(x2, y2, swatch, H); x2 += swatch + pad;
+		// HVA load button — sits at the right end of the VXL upper row.
+		m_vxl_hva_load.MoveWindow(x2, y2, 90, H); x2 += 90 + pad;
+		// Loop checkbox — only visible while an HVA is loaded.
+		m_vxl_hva_loop.MoveWindow(x2, y2, 56, H); x2 += 56 + pad;
+		if (vxl_hva)
+			m_player_iso_grid.MoveWindow(x2, y2, 90, H * 8);
 		return;
 	}
 	// Upper row (SHP family only): Shadows, BG, 8 side-color swatches.
@@ -3306,6 +3713,7 @@ void CXCCFileView::OnSize(UINT nType, int cx, int cy)
 	CScrollView::OnSize(nType, cx, cy);
 	if (m_player_mode)
 		player_layout_controls();
+	load_pal_btn_layout();
 }
 
 void CXCCFileView::OnTimer(UINT_PTR nIDEvent)
@@ -3316,17 +3724,25 @@ void CXCCFileView::OnTimer(UINT_PTR nIDEvent)
 		if (m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0)
 			range = m_player_cf / 2;
 		int next;
+		// HVA mode with Loop off: stop at the end (Vengi-style one-shot).
+		const bool loop = !(m_ft == ft_vxl && m_hva_loaded) || m_hva_loop;
 		if (m_player_reverse_dir)
 		{
 			next = m_player_frame - 1;
 			if (next < 0)
+			{
+				if (!loop) { m_player_playing = false; KillTimer(1); return; }
 				next = range - 1;
+			}
 		}
 		else
 		{
 			next = m_player_frame + 1;
 			if (next >= range)
+			{
+				if (!loop) { m_player_playing = false; KillTimer(1); return; }
 				next = 0;
+			}
 		}
 		player_set_frame(next);
 		return;
@@ -3347,6 +3763,16 @@ void CXCCFileView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				KillTimer(1);
 			m_player_frame = pos;
 			player_update_label();
+			// VXL+HVA scrubbing: rebuild the point cloud for the new frame
+			// and bump m_open_token so the splat cache (keyed on token)
+			// invalidates and the next paint re-rasterizes. Without this the
+			// slider moves but the model stays on the cloud built at the
+			// original frame.
+			if (m_ft == ft_vxl && m_hva_loaded)
+			{
+				player_decode_frames();
+				m_open_token++;
+			}
 			// Partial invalidate of the image area only, no erase. Full
 			// Invalidate() would repaint the controls band too, making the
 			// slider thumb flicker on every drag tick.
@@ -3410,6 +3836,14 @@ HBRUSH CXCCFileView::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
 void CXCCFileView::reapply_player_theme()
 {
+	// Persistent Load PAL button outlives player mode (created in
+	// OnInitialUpdate), so theme it regardless of whether the player band
+	// controls were created.
+	if (HWND h = m_load_pal_btn.GetSafeHwnd())
+	{
+		theme::apply_window(h);
+		::InvalidateRect(h, NULL, TRUE);
+	}
 	if (!m_player_controls_created)
 		return;
 	HWND ctrls[] = {
@@ -3663,6 +4097,393 @@ void CXCCFileView::OnVxlSideCustom()
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::OnVxlHvaLoad()
+{
+	if (m_ft != ft_vxl)
+		return;
+
+	// Build a popup menu listing every .hva entry in the source MIX (if any),
+	// plus a "Browse disk..." fallback. Selecting a MIX entry loads it
+	// directly from the MIX via get_vdata(id); selecting Browse falls
+	// through to the file picker path below.
+	const int k_browse_cmd = 1;
+	const int k_mix_base   = 100;	// MIX entries get k_mix_base + index
+	struct mix_choice { int id; string label; };
+	std::vector<mix_choice> mix_choices;
+	// Derive the VXL basename (sans extension) once for similarity matching.
+	// Filter HVA candidates by longest-common-prefix score so users see only
+	// the entries that are plausibly paired with this VXL — typical pairs
+	// share the full base (e.g. siren2tur.vxl <-> siren2tur.hva).
+	string vxl_base;
+	{
+		Cfname fn(m_fname);
+		vxl_base = fn.get_ftitle();
+		for (auto& c : vxl_base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+	}
+	auto similarity = [](const string& a, const string& b) -> double {
+		if (a.empty() || b.empty()) return 0.0;
+		size_t i = 0;
+		const size_t m = (std::min)(a.size(), b.size());
+		while (i < m && a[i] == b[i]) i++;
+		return static_cast<double>(i) / static_cast<double>((std::max)(a.size(), b.size()));
+	};
+	if (m_source_mix)
+	{
+		for (size_t i = 0; i < m_source_mix->get_c_files(); i++)
+		{
+			const int id = m_source_mix->get_id(static_cast<int>(i));
+			string name = m_source_mix->get_name(id);
+			if (name.empty())
+				continue;
+			// Match by extension; mix_database names always carry the suffix
+			// when known. Case-insensitive compare for safety.
+			if (name.size() < 4)
+				continue;
+			string lc = name;
+			for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			if (lc.substr(lc.size() - 4) != ".hva")
+				continue;
+			// Similarity filter: prefix match against the VXL basename. ~80%
+			// keeps near-twins (siren2tur vs siren2tur, harv vs harvtur) and
+			// drops unrelated rigs sharing only a letter or two.
+			string hva_base = lc.substr(0, lc.size() - 4);
+			if (!vxl_base.empty() && similarity(vxl_base, hva_base) < 0.8)
+				continue;
+			mix_choices.push_back({ id, name });
+		}
+	}
+
+	int chosen = k_browse_cmd;
+	if (!mix_choices.empty())
+	{
+		CMenu menu;
+		menu.CreatePopupMenu();
+		for (size_t i = 0; i < mix_choices.size(); i++)
+			menu.AppendMenu(MF_STRING, k_mix_base + i, mix_choices[i].label.c_str());
+		menu.AppendMenu(MF_SEPARATOR);
+		menu.AppendMenu(MF_STRING, k_browse_cmd, "Browse disk...");
+		CRect br;
+		m_vxl_hva_load.GetWindowRect(&br);
+		chosen = menu.TrackPopupMenu(
+			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+			br.left, br.bottom, this);
+		if (chosen == 0)	// user dismissed
+			return;
+	}
+
+	Cvirtual_binary data;
+	string source_label;
+	if (chosen >= k_mix_base && chosen < k_mix_base + static_cast<int>(mix_choices.size()))
+	{
+		const mix_choice& c = mix_choices[chosen - k_mix_base];
+		data = m_source_mix->get_vdata(c.id);
+		source_label = c.label;
+		if (data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected HVA entry from the MIX.", MB_ICONERROR);
+			return;
+		}
+	}
+	else
+	{
+		CFileDialog dlg(TRUE, "hva", NULL,
+			OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+			"HVA files (*.hva)|*.hva|All files (*.*)|*.*||", this);
+		if (dlg.DoModal() != IDOK)
+			return;
+		const string path = static_cast<const char*>(dlg.GetPathName());
+		if (data.load(path) || data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected HVA file.", MB_ICONERROR);
+			return;
+		}
+	}
+
+	// Validate by parsing — Chva_file::is_valid() checks the header sizing
+	// against the file size, so we don't trust extension alone.
+	Chva_file probe;
+	probe.load(data);
+	if (!probe.is_valid() || probe.get_c_frames() <= 0 || probe.get_c_sections() <= 0)
+	{
+		AfxMessageBox("File is not a valid HVA.", MB_ICONERROR);
+		return;
+	}
+	m_hva_data = data;
+	m_hva_loaded = true;
+	// Re-enter the player so the transport row / slider rebind to the new
+	// frame count. player_enter calls player_decode_frames which now sees
+	// m_hva_loaded and produces m_player_cf = HVA frame count.
+	player_exit();
+	player_enter();
+}
+
+void CXCCFileView::OnVxlHvaLoop()
+{
+	m_hva_loop = (m_vxl_hva_loop.GetCheck() == BST_CHECKED);
+}
+
+bool CXCCFileView::apply_loaded_pal(const Cvirtual_binary& data, const string& display_name)
+{
+	// Parse the bytes as a PAL. Cpal_file derives from Ccc_file; load()
+	// takes the raw buffer and (via base) sets up size+data without needing
+	// a backing file.
+	Cpal_file pf;
+	pf.load(data);
+	if (!pf.is_valid())
+		return false;
+	CMainFrame* mf = GetMainFrame();
+	// Append a fresh pal_list entry under a synthetic "Loaded" tree node so
+	// it shows up in Select Palette and participates in Ctrl+Q traversal.
+	// Lazy-create the root once per session by scanning for an existing
+	// "Loaded" entry with parent == -1; reuse if present so multiple loads
+	// cluster under one node instead of spamming the tree.
+	int loaded_root = -1;
+	for (auto& it : mf->pal_map_list_mut())
+	{
+		if (it.second.parent == -1 && it.second.name == "Loaded")
+		{
+			loaded_root = it.first;
+			break;
+		}
+	}
+	if (loaded_root == -1)
+	{
+		loaded_root = mf->pal_list_create_map("Loaded", -1);
+		// Mark session_only so reload_pal_paths() doesn't erase it.
+		mf->pal_map_list_mut()[loaded_root].session_only = true;
+	}
+	// Dedupe: if a previous load under the Loaded root already has the same
+	// display name AND the same palette bytes, reselect it. Without the
+	// bytes check, two distinct MIXes with same-named PALs (e.g. both
+	// containing 'palette.pal' with different colors) would collide on the
+	// stale entry, painting B with A's palette — exactly the failure mode
+	// we hit when navigating between paired SHPs from different MIXes.
+	int new_idx = -1;
+	{
+		auto& pl = mf->pal_list_mut();
+		for (size_t i = 0; i < pl.size(); i++)
+		{
+			if (pl[i].parent != loaded_root || pl[i].name != display_name)
+				continue;
+			if (memcmp(pl[i].palette, pf.get_data(), sizeof(t_palette)) == 0)
+			{
+				new_idx = static_cast<int>(i);
+				break;
+			}
+		}
+	}
+	if (new_idx < 0)
+	{
+		t_pal_list_entry e;
+		e.name = display_name;
+		memcpy(e.palette, pf.get_data(), sizeof(t_palette));
+		e.parent = loaded_root;
+		mf->pal_list_mut().push_back(e);
+		new_idx = static_cast<int>(mf->pal_list_mut().size()) - 1;
+	}
+	// Drive the view through the same path as Ctrl+Q / auto_select: set the
+	// global palette index, which invalidates the file-info pane. The next
+	// paint reads get_pal_data() and rebuilds the color table.
+	mf->set_palette(new_idx);
+	mf->set_msg(display_name + " selected");
+	// Bump player BGRA cache so any cached SHP frames repaint with the new
+	// palette on the next tick.
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view())
+		player_prefill_bgra_cache();
+	Invalidate();
+	return true;
+}
+
+void CXCCFileView::try_auto_load_paired_pal()
+{
+	if (!m_is_open || !is_paletted_file() || !m_source_mix)
+		return;
+	string file_base;
+	{
+		Cfname fn(m_fname);
+		file_base = fn.get_ftitle();
+		for (auto& c : file_base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+	}
+	if (file_base.empty())
+		return;
+	// Use the same pairing rule as the Load PAL... button: exact stem match
+	// preferred, otherwise first-4-chars prefix (Westwood data clusters PALs
+	// by 4-letter stem: flashmuz <-> flashbeam, tibtree <-> tibsnow). Rank
+	// candidates by longest common prefix length so the closest name wins;
+	// ties broken by alphabetic order for determinism.
+	struct pal_hit { int id; string name; size_t score; };
+	std::vector<pal_hit> hits;
+	const int n_total = m_source_mix->get_c_files();
+	for (int i = 0; i < n_total; i++)
+	{
+		const int id = m_source_mix->get_id(i);
+		string name = m_source_mix->get_name(id);
+		if (name.size() < 5)
+			continue;
+		string lc = name;
+		for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+		if (lc.compare(lc.size() - 4, 4, ".pal") != 0)
+			continue;
+		const string pal_base = lc.substr(0, lc.size() - 4);
+		size_t j = 0;
+		const size_t m = (std::min)(file_base.size(), pal_base.size());
+		while (j < m && file_base[j] == pal_base[j]) j++;
+		const bool exact = (pal_base == file_base);
+		const bool prefix_ok = (file_base.size() >= 4 && pal_base.size() >= 4 && j >= 4);
+		if (!exact && !prefix_ok)
+			continue;
+		hits.push_back({ id, name, exact ? SIZE_MAX : j });
+	}
+	if (hits.empty())
+		return;
+	std::sort(hits.begin(), hits.end(), [](const pal_hit& a, const pal_hit& b) {
+		if (a.score != b.score) return a.score > b.score;
+		return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
+	});
+	const pal_hit& best = hits.front();
+	Cvirtual_binary data = m_source_mix->get_vdata(best.id);
+	if (data.size() == 0)
+		return;
+	apply_loaded_pal(data, best.name);
+}
+
+void CXCCFileView::OnLoadPal()
+{
+	if (!m_is_open || !is_paletted_file())
+		return;
+	// Same MIX-popup-then-Browse pattern as OnVxlHvaLoad: list every .pal
+	// entry in the source MIX with a similarity-filtered name, plus a
+	// Browse-disk fallback.
+	const int k_browse_cmd = 1;
+	const int k_mix_base   = 100;
+	struct mix_choice { int id; string label; };
+	std::vector<mix_choice> mix_choices;
+	string file_base;
+	{
+		Cfname fn(m_fname);
+		file_base = fn.get_ftitle();
+		for (auto& c : file_base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+	}
+	auto similarity = [](const string& a, const string& b) -> double {
+		if (a.empty() || b.empty()) return 0.0;
+		size_t i = 0;
+		const size_t m = (std::min)(a.size(), b.size());
+		while (i < m && a[i] == b[i]) i++;
+		return static_cast<double>(i) / static_cast<double>((std::max)(a.size(), b.size()));
+	};
+	// PAL pairing in Westwood data clusters by 4-letter stem (flashmuz <->
+	// flashbeam, tibtree <-> tibsnow). The HVA similarity score gates on
+	// proportion of full base, which is too strict here — bump the rule to
+	// "first 4 chars match" with the score as a fallback for shorter names.
+	auto pal_likely = [&](const string& shp_base, const string& pal_base) {
+		if (shp_base.size() >= 4 && pal_base.size() >= 4)
+			return shp_base.compare(0, 4, pal_base, 0, 4) == 0;
+		return similarity(shp_base, pal_base) >= 0.8;
+	};
+	// Likely matches (similarity >= 0.8 prefix score vs SHP basename) live
+	// at the top level. Everything else collapses under an "All PALs"
+	// submenu so the default surface stays small but every PAL in the MIX
+	// is still reachable in two clicks.
+	std::vector<mix_choice> likely;
+	std::vector<mix_choice> other;
+	if (m_source_mix)
+	{
+		for (size_t i = 0; i < m_source_mix->get_c_files(); i++)
+		{
+			const int id = m_source_mix->get_id(static_cast<int>(i));
+			string name = m_source_mix->get_name(id);
+			if (name.size() < 4)
+				continue;
+			string lc = name;
+			for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			if (lc.substr(lc.size() - 4) != ".pal")
+				continue;
+			string pal_base = lc.substr(0, lc.size() - 4);
+			const bool match = !file_base.empty() && pal_likely(file_base, pal_base);
+			(match ? likely : other).push_back({ id, name });
+		}
+	}
+	auto by_name = [](const mix_choice& a, const mix_choice& b) {
+		return _stricmp(a.label.c_str(), b.label.c_str()) < 0;
+	};
+	std::sort(likely.begin(), likely.end(), by_name);
+	std::sort(other.begin(), other.end(), by_name);
+	// Flat indices into mix_choices map 1:1 with k_mix_base commands.
+	// Order: likely first, then other (in submenu). Same flat indexing
+	// works for both because the command IDs are what the chosen value
+	// returns; the menu structure is just presentation.
+	mix_choices.insert(mix_choices.end(), likely.begin(), likely.end());
+	const size_t other_start = mix_choices.size();
+	mix_choices.insert(mix_choices.end(), other.begin(), other.end());
+
+	int chosen = k_browse_cmd;
+	if (!mix_choices.empty())
+	{
+		CMenu menu;
+		menu.CreatePopupMenu();
+		// Top-level: likely matches.
+		for (size_t i = 0; i < other_start; i++)
+			menu.AppendMenu(MF_STRING, k_mix_base + i, mix_choices[i].label.c_str());
+		// "All PALs" submenu for everything else. CMenu destructor would
+		// free the HMENU we attach, so Detach() after AppendMenu hands
+		// ownership to the parent menu (which already owns sub-popups).
+		CMenu all_menu;
+		const bool have_other = (other_start < mix_choices.size());
+		if (have_other)
+		{
+			all_menu.CreatePopupMenu();
+			for (size_t i = other_start; i < mix_choices.size(); i++)
+				all_menu.AppendMenu(MF_STRING, k_mix_base + i, mix_choices[i].label.c_str());
+			if (other_start > 0)
+				menu.AppendMenu(MF_SEPARATOR);
+			menu.AppendMenu(MF_POPUP, reinterpret_cast<UINT_PTR>(all_menu.GetSafeHmenu()), "All PALs");
+			all_menu.Detach();
+		}
+		menu.AppendMenu(MF_SEPARATOR);
+		menu.AppendMenu(MF_STRING, k_browse_cmd, "Browse disk...");
+		CRect br;
+		m_load_pal_btn.GetWindowRect(&br);
+		chosen = menu.TrackPopupMenu(
+			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+			br.left, br.bottom, this);
+		if (chosen == 0)
+			return;
+	}
+
+	Cvirtual_binary data;
+	string source_label;
+	if (chosen >= k_mix_base && chosen < k_mix_base + static_cast<int>(mix_choices.size()))
+	{
+		const mix_choice& c = mix_choices[chosen - k_mix_base];
+		data = m_source_mix->get_vdata(c.id);
+		source_label = c.label;
+		if (data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected PAL entry from the MIX.", MB_ICONERROR);
+			return;
+		}
+	}
+	else
+	{
+		CFileDialog dlg(TRUE, "pal", NULL,
+			OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+			"PAL files (*.pal)|*.pal|All files (*.*)|*.*||", this);
+		if (dlg.DoModal() != IDOK)
+			return;
+		const string path = static_cast<const char*>(dlg.GetPathName());
+		if (data.load(path) || data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected PAL file.", MB_ICONERROR);
+			return;
+		}
+		source_label = static_cast<Cfname>(path).get_fname();
+	}
+
+	if (!apply_loaded_pal(data, source_label))
+		AfxMessageBox("File is not a valid PAL.", MB_ICONERROR);
 }
 
 void CXCCFileView::OnPlayerGridSel()

@@ -11,6 +11,8 @@
 #include "searchfiledlg.h"
 #include "SearchInPaneDlg.h"
 #include "PalPathsDlg.h"
+#include "KeybindsDlg.h"
+#include "keybinds.h"
 #include "SelectPaletteDlg.h"
 #include "VxlLightingDlg.h"
 #include "string_conversion.h"
@@ -146,6 +148,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
 	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
 	ON_UPDATE_COMMAND_UI(ID_THEME_LIMIT_VXL_CPU, OnUpdateThemeLimitVxlCpu)
+	ON_COMMAND(ID_KEYBINDS_CONFIGURE, OnKeybindsConfigure)
 END_MESSAGE_MAP()
 
 
@@ -183,6 +186,12 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	rebuild_menu_owner_draw();
+	// Load user-overridden keybinds from registry and rebuild the frame's
+	// accelerator table so customized shortcuts are live from the first key
+	// press, no restart required.
+	keybinds::load_from_registry();
+	rebuild_accel();
+	refresh_menu_shortcuts();
 	// Suffix the frame caption with the mix-database source so the user can
 	// see at a glance whether names are coming from <data dir>\global mix
 	// database.dat (with their own additions, if any) or from the embedded
@@ -2048,4 +2057,112 @@ BOOL CMainFrame::OnEraseBkgnd(CDC* pDC)
 		return TRUE;
 	}
 	return CFrameWnd::OnEraseBkgnd(pDC);
+}
+
+void CMainFrame::rebuild_accel()
+{
+	HACCEL h_new = keybinds::build_accel_table();
+	HACCEL h_old = m_hAccelTable;
+	m_hAccelTable = h_new;
+	if (h_old)
+		DestroyAcceleratorTable(h_old);
+}
+
+// Recurse through every menu, rewriting each item's trailing "\t<shortcut>"
+// suffix to match the current Menu-scope binding for that command id.
+// Handles both plain MFT_STRING items and our owner-draw items (which keep
+// the label inside the theme_menu_data blob).
+static void refresh_menu_shortcuts_recursive(HMENU hm)
+{
+	if (!hm) return;
+	int n = ::GetMenuItemCount(hm);
+	for (int i = 0; i < n; i++)
+	{
+		MENUITEMINFOA mii = {};
+		mii.cbSize = sizeof(mii);
+		mii.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_DATA | MIIM_SUBMENU | MIIM_ID;
+		char buf[256] = {};
+		mii.dwTypeData = buf;
+		mii.cch = sizeof(buf) - 1;
+		if (!::GetMenuItemInfoA(hm, i, TRUE, &mii))
+			continue;
+
+		if (mii.hSubMenu)
+			refresh_menu_shortcuts_recursive(mii.hSubMenu);
+
+		// Skip separators and items without a real command id (popups, etc.).
+		if ((mii.fType & MFT_SEPARATOR) || mii.wID == 0 || mii.hSubMenu)
+			continue;
+
+		// Resolve the current label, regardless of owner-draw state.
+		bool is_owner_draw = (mii.fType & MFT_OWNERDRAW) != 0;
+		std::string label;
+		byte* stored = reinterpret_cast<byte*>(mii.dwItemData);
+		theme_menu_data* hdr = reinterpret_cast<theme_menu_data*>(stored);
+		bool ours = stored && hdr && hdr->magic == kThemeMenuMagic;
+		if (is_owner_draw && ours)
+			label = reinterpret_cast<const char*>(stored + sizeof(theme_menu_data));
+		else
+			label = buf;
+
+		// Strip any existing "\t..." suffix; we're about to rewrite it.
+		size_t tab = label.find('\t');
+		if (tab != std::string::npos)
+			label.erase(tab);
+
+		std::string sc = keybinds::shortcut_for_command(mii.wID);
+		if (!sc.empty())
+		{
+			label += '\t';
+			label += sc;
+		}
+
+		// Write the new label back. For owner-draw items we replace the blob
+		// (different label length needs a new allocation). For string items
+		// we just push the new dwTypeData.
+		if (is_owner_draw)
+		{
+			size_t len = label.size() + 1;
+			byte* fresh = new byte[sizeof(theme_menu_data) + len];
+			theme_menu_data* h2 = reinterpret_cast<theme_menu_data*>(fresh);
+			h2->magic = kThemeMenuMagic;
+			h2->is_bar = ours ? hdr->is_bar : 0;
+			memcpy(fresh + sizeof(theme_menu_data), label.c_str(), len);
+			MENUITEMINFOA upd = {};
+			upd.cbSize = sizeof(upd);
+			upd.fMask = MIIM_DATA;
+			upd.dwItemData = reinterpret_cast<ULONG_PTR>(fresh);
+			::SetMenuItemInfoA(hm, i, TRUE, &upd);
+			if (ours)
+				delete[] stored;
+		}
+		else
+		{
+			MENUITEMINFOA upd = {};
+			upd.cbSize = sizeof(upd);
+			upd.fMask = MIIM_STRING;
+			upd.dwTypeData = const_cast<char*>(label.c_str());
+			upd.cch = static_cast<UINT>(label.size());
+			::SetMenuItemInfoA(hm, i, TRUE, &upd);
+		}
+	}
+}
+
+void CMainFrame::refresh_menu_shortcuts()
+{
+	HMENU hm = ::GetMenu(GetSafeHwnd());
+	if (!hm) return;
+	refresh_menu_shortcuts_recursive(hm);
+	// Owner-draw widths cache stale strings; force the bar to re-measure.
+	::DrawMenuBar(GetSafeHwnd());
+}
+
+void CMainFrame::OnKeybindsConfigure()
+{
+	CKeybindsDlg dlg(this);
+	if (dlg.DoModal() == IDOK)
+	{
+		rebuild_accel();
+		refresh_menu_shortcuts();
+	}
 }

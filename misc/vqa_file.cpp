@@ -6,6 +6,7 @@
 #include "pcx_decode.h"
 #include "string_conversion.h"
 #include "vqa_decode.h"
+#include "wav_file.h"
 #include "wav_structures.h"
 #include "xcc_log.h"
 
@@ -36,20 +37,19 @@ public:
 	{
 		if (m_frame_i >= cf())
 			return 1;
-		if (cb_pixel() == 1)
-		{
-			while (!m_f.is_video_chunk())
-				m_f.skip_chunk();
-			m_vqa_d.decode_vqfr_chunk(m_f.read_chunk().data(), m_frame.write_start(cb_image()), m_palette);
-		}
-		else
+		// VQFL (codebook) chunks live between VQFR frame chunks in both
+		// 8-bit and 16-bit VQAs (TS/Firestorm 8-bit VQAs rely on them).
+		// The original 8-bit branch skipped them, leaving the codebook
+		// stale and producing garbage-block frames.
+		while (!m_f.is_video_chunk())
 		{
 			if (m_f.get_chunk_id() == vqa_vqfl_id)
 				m_vqa_d.decode_vqfl_chunk(m_f.read_chunk());
-			while (!m_f.is_video_chunk())
+			else
 				m_f.skip_chunk();
-			m_vqa_d.decode_vqfr_chunk(m_f.read_chunk().data(), m_frame.write_start(cb_image()), NULL);
 		}
+		t_palette_entry* pal = (cb_pixel() == 1) ? m_palette : NULL;
+		m_vqa_d.decode_vqfr_chunk(m_f.read_chunk().data(), m_frame.write_start(cb_image()), pal);
 		if (d)
 			m_frame.read(d);
 		m_frame_i++;
@@ -386,12 +386,13 @@ struct t_list_entry
 	short* audio;
 };
 
-int Cvqa_file::extract_as_wav(const string& name)
+int Cvqa_file::decode_audio_to_wav(Cvirtual_binary& out)
 {
-	int error = 0;
+	if (!get_c_channels())
+		return 1;
 	using t_list = vector<t_list_entry>;
 	t_list list;
-	int cs_remaining = 0;	
+	int cs_remaining = 0;
 	Cvqa_decode vqa_d;
 	vqa_d.start_decode(header());
 	for (int i = 0; i < get_c_frames(); i++)
@@ -416,46 +417,95 @@ int Cvqa_file::extract_as_wav(const string& name)
 					vqa_d.decode_snd2_chunk(read_chunk().data(), size, e.audio);
 				}
 				cs_remaining += e.c_samples;
-				list.push_back(e);				
+				list.push_back(e);
 			}
 			else if (is_video_chunk())
-				break;				
+				break;
 			else
 				skip_chunk();
 		}
 		skip_chunk();
 	}
-	Cfile32 f;
-	error = f.open(name, GENERIC_WRITE);
-	if (!error)
+	if (cs_remaining <= 0)
 	{
-		t_wav_header header;
-		memset(&header, 0, sizeof(t_wav_header));
-		header.file_header.id = wav_file_id;
-		header.file_header.size = sizeof(header) - sizeof(header.file_header) + cs_remaining;
-		header.form_type = wav_form_id;
-		header.format_chunk.header.id = wav_format_id;
-		header.format_chunk.header.size = sizeof(header.format_chunk) - sizeof(header.format_chunk.header);
-		header.format_chunk.formattag = 1;
-		header.format_chunk.c_channels = get_c_channels();
-		header.format_chunk.samplerate = get_samplerate();
-		header.format_chunk.byterate = 2 * get_c_channels() * get_samplerate();
-		header.format_chunk.blockalign = 2 * get_c_channels();
-		header.format_chunk.cbits_sample = 16;
-		header.data_chunk_header.id = wav_data_id;
-		header.data_chunk_header.size = cs_remaining << 1;
-		error = f.write(&header, sizeof(t_wav_header));
-		if (!error)
-		{
-			for (auto& i : list)
-			{
-				f.write(i.audio, 2 * i.c_samples);
-				delete[] i.audio;
-			}
-		}
-		f.close();
+		out = Cvirtual_binary();
+		return 1;
 	}
-	return error;
+	// Coalesce into one PCM buffer, then run the canonical WAV-PCM
+	// writer so the result parses cleanly through Cwav_file::process
+	// (which is what xap_play2 uses to validate the buffer before
+	// pushing it to DirectSound). Rolling our own RIFF header was the
+	// reason audio was silent — the file_header.size used sample count
+	// instead of bytes and tripped up the parser.
+	const int cb_pcm = cs_remaining << 1;
+	std::vector<short> pcm;
+	pcm.reserve(cs_remaining);
+	for (auto& i : list)
+	{
+		pcm.insert(pcm.end(), i.audio, i.audio + i.c_samples);
+		delete[] i.audio;
+	}
+	Cvirtual_file w = wav_pcm_file_write(pcm.data(), cb_pcm, get_samplerate(), 2, get_c_channels());
+	out = w.read();
+	return 0;
+}
+
+double Cvqa_file::frame_rate()
+{
+	// Count audio samples between the first two video chunks; FPS =
+	// samplerate / samples_per_frame. Falls back to 15 fps if the stream
+	// has no audio or never reaches a second video chunk.
+	const double fallback = 15.0;
+	if (!get_c_channels() || !get_samplerate())
+		return fallback;
+	const long long save_p = get_p();
+	const t_vqa_chunk_header save_chunk = { vqa_file_id, 0 }; // placeholder; we restore via seek
+	(void)save_chunk;
+	int samples = 0;
+	bool saw_video = false;
+	Cvqa_decode probe;
+	probe.start_decode(header());
+	for (int guard = 0; guard < 4096; guard++)
+	{
+		if (is_video_chunk())
+		{
+			if (saw_video)
+				break;
+			saw_video = true;
+			skip_chunk();
+			continue;
+		}
+		if (is_audio_chunk())
+		{
+			int size = get_chunk_size();
+			if (get_chunk_id() >> 24 == '0')
+				samples += size >> 1;
+			else
+				samples += size << 1;
+			skip_chunk();
+		}
+		else
+			skip_chunk();
+	}
+	// Restore stream position so subsequent decoding starts from frame 0.
+	seek(sizeof(t_vqa_header));
+	read_chunk_header();
+	(void)save_p;
+	if (samples <= 0)
+		return fallback;
+	const int per_frame = samples / get_c_channels();
+	if (per_frame <= 0)
+		return fallback;
+	return static_cast<double>(get_samplerate()) / per_frame;
+}
+
+int Cvqa_file::extract_as_wav(const string& name)
+{
+	Cvirtual_binary wav;
+	int error = decode_audio_to_wav(wav);
+	if (error)
+		return error;
+	return wav.save(name);
 }
 
 int Cvqa_file::read_chunk_header()

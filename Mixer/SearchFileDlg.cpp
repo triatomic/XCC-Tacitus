@@ -19,6 +19,7 @@ CSearchFileDlg::CSearchFileDlg(CWnd* pParent /*=NULL*/)
 	//{{AFX_DATA_INIT(CSearchFileDlg)
 	//}}AFX_DATA_INIT
 	m_filename = AfxGetApp()->GetProfileString(m_reg_key, "file_name");
+	m_include_game_mixes = AfxGetApp()->GetProfileInt(m_reg_key, "include_game_mixes", 1) != 0;
 }
 
 void CSearchFileDlg::DoDataExchange(CDataExchange* pDX)
@@ -63,13 +64,17 @@ BOOL CSearchFileDlg::OnInitDialog()
 			)
 		<< item(IDC_LIST, GREEDY)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
-			<< item(IDC_PRESERVE_STRUCTURE, NORESIZE)
+			<< (pane(VERTICAL, ABSOLUTE_HORZ)
+				<< item(IDC_PRESERVE_STRUCTURE, NORESIZE)
+				<< item(IDC_INCLUDE_GAME_MIXES, NORESIZE)
+				)
 			<< itemGrowing(HORIZONTAL)
 			<< item(IDOK, NORESIZE)
 			<< item(IDC_EXTRACT, NORESIZE)
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+	CheckDlgButton(IDC_INCLUDE_GAME_MIXES, m_include_game_mixes ? BST_CHECKED : BST_UNCHECKED);
 	// Two-column layout: Source = the MIX chain ("top.mix (1) - sub.mix"),
 	// File = the leaf entry inside it. Split is done at render time in
 	// OnGetdispinfoList; t_map_entry::name continues to hold the full
@@ -88,7 +93,7 @@ BOOL CSearchFileDlg::OnInitDialog()
 	return true;
 }
 
-void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id, const string& top_mix_path)
+void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id, const string& top_mix_path, bool predefined)
 {
 	for (int i = 0; i < f.get_c_files(); i++)
 	{
@@ -99,16 +104,16 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 		{
 			name = nh(8, id);
 			if (Cmix_file::get_id(f.get_game(), file_name) == id)
-				add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz);
+				add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz, predefined);
 		}
 		else if (fname_filter(name, file_name))
-			add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz);
+			add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz, predefined);
 		if (f.get_type(id) == ft_mix)
 		{
 			Cmix_file fg;
 			if (!fg.open(id, f))
 			{
-				find(fg, file_name, mix_name + " - " + name, mix_id, i, top_mix_path);
+				find(fg, file_name, mix_name + " - " + name, mix_id, i, top_mix_path, predefined);
 			}
 		}
 	}
@@ -118,7 +123,29 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 			continue;
 		Cmix_file g;
 		if (!g.open(i.second.id, f))
-			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, -1, top_mix_path);
+			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, -1, top_mix_path, predefined);
+	}
+}
+
+// Walk every predefined-game MIX registered by CMainFrame::find_mixs (i.e.
+// every t_mix_map_list entry whose fname names an on-disk file — the top-
+// level RA2/TS/etc. archives). For each such root, the existing
+// find(Cmix_file&,...) overload recurses into nested MIXes via mix_map_list
+// using parent==mix_id, so we only kick off the roots here. predefined=true
+// is propagated so add() tags the rows; OnDblclkList then routes them
+// through the iterator-based open_location_mix overload (which walks
+// parents back to the on-disk fname) instead of the pane t_index_list path.
+void CSearchFileDlg::find_predefined()
+{
+	for (auto& i : m_main_frame->mix_map_list())
+	{
+		if (i.second.fname.empty())
+			continue;
+		Cmix_file f;
+		if (f.open(i.second.fname))
+			continue;
+		const auto& parent = find_ref(m_main_frame->mix_map_list(), i.second.parent);
+		find(f, get_filename(), parent.name + " - " + i.second.name, i.first, -1, i.second.fname, true);
 	}
 }
 
@@ -168,9 +195,12 @@ void CSearchFileDlg::OnFind()
 		// which pane the row came from. With group headers + a Path column
 		// that's redundant noise. m_sepindex still partitions left vs right
 		// by m_map insertion order so open_mix() routes correctly.
+		m_include_game_mixes = IsDlgButtonChecked(IDC_INCLUDE_GAME_MIXES) == BST_CHECKED;
 		find(m_main_frame->left_mix_pane()->t_index_list(), "", m_main_frame->left_mix_pane()->current_dir());
 		m_sepindex = m_map.size();
 		find(m_main_frame->right_mix_pane()->t_index_list(), "", m_main_frame->right_mix_pane()->current_dir());
+		if (m_include_game_mixes)
+			find_predefined();
 
 		// Assign one LVGROUP per unique source chain. Group ids are
 		// first-seen-first so group ordering matches search-encounter order.
@@ -320,7 +350,7 @@ void CSearchFileDlg::OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	*pResult = 0;
 }
 
-void CSearchFileDlg::add(string name, int mix_id, int file_id, int sub_mix_id, const string& top_mix_path, long long size_bytes)
+void CSearchFileDlg::add(string name, int mix_id, int file_id, int sub_mix_id, const string& top_mix_path, long long size_bytes, bool predefined)
 {
 	t_map_entry& e = m_map[m_map.size()];
 	e.name = name;
@@ -329,6 +359,7 @@ void CSearchFileDlg::add(string name, int mix_id, int file_id, int sub_mix_id, c
 	e.parent_parent = sub_mix_id;
 	e.top_mix_path = top_mix_path;
 	e.size_bytes = size_bytes;
+	e.predefined = predefined;
 }
 
 void CSearchFileDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult) 
@@ -342,8 +373,14 @@ void CSearchFileDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
 void CSearchFileDlg::open_mix(int id)
 {
 	const t_map_entry& e = m_map[id];
-	//m_main_frame->left_mix_pane()->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id);
-	if (id < m_sepindex) // left
+	if (e.predefined)
+	{
+		// Predefined-game row: e.parent is a mix_map_list id. The iterator-
+		// based open_location_mix walks parents to the on-disk fname and
+		// re-descends. Routed to the right pane by user preference.
+		m_main_frame->right_mix_pane()->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id);
+	}
+	else if (id < m_sepindex) // left
 	{
 		m_main_frame->left_mix_pane()->open_location_mix(e.parent, e.parent_parent, e.id);
 	}
@@ -468,6 +505,7 @@ void CSearchFileDlg::OnDestroy()
 {
 	ETSLayoutDialog::OnDestroy();
 	AfxGetApp()->WriteProfileString(m_reg_key, "file_name", m_filename);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "include_game_mixes", m_include_game_mixes ? 1 : 0);
 }
 
 void CSearchFileDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult) 

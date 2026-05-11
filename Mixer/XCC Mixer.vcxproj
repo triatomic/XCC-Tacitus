@@ -195,6 +195,12 @@
     </ClCompile>
     <ClCompile Include="VxlLightingDlg.cpp">
     </ClCompile>
+    <ClCompile Include="keybinds.cpp">
+    </ClCompile>
+    <ClCompile Include="KeybindsDlg.cpp">
+    </ClCompile>
+    <ClCompile Include="KeyCaptureDlg.cpp">
+    </ClCompile>
     <ClCompile Include="SelectPaletteDlg.cpp">
     </ClCompile>
     <ClCompile Include="shp_properties_dlg.cpp">
@@ -248,6 +254,9 @@
     <ClInclude Include="PalPathsDlg.h" />
     <ClInclude Include="AudioPlayerDlg.h" />
     <ClInclude Include="VxlLightingDlg.h" />
+    <ClInclude Include="keybinds.h" />
+    <ClInclude Include="KeybindsDlg.h" />
+    <ClInclude Include="KeyCaptureDlg.h" />
     <ClInclude Include="SelectPaletteDlg.h" />
     <ClInclude Include="shortcut.h" />
     <ClInclude Include="shp_properties_dlg.h" />

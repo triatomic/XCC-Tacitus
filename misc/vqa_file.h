@@ -15,6 +15,13 @@ public:
 	int extract_as_avi(const string& name, HWND hwnd);
 	int extract_as_pcx(const Cfname& name, t_file_type ft);
 	int extract_as_wav(const string& name);
+	// Decode the entire VQA audio track into a self-contained WAV buffer.
+	// Shared by extract_as_wav and the in-Mixer popup playback path.
+	int decode_audio_to_wav(Cvirtual_binary& out);
+	// Frames per second derived from samplerate / (audio samples per video
+	// frame). Falls back to 15 fps when the audio track is missing or the
+	// header math degenerates.
+	double frame_rate();
 	int read_chunk_header();
 	int read_chunk(void* data);
 	Cvirtual_binary read_chunk();
@@ -101,6 +108,15 @@ public:
 	int get_cbits_pixel() const
 	{
 		return m_header.video_flags & 0x10 ? 16 : 8;
+	}
+
+	// Codebook group size (CBPZ chunks per full-codebook commit). VQHD
+	// payload byte 13, i.e. high byte of unknown3. Falls back to 8 which
+	// is what the original XCC decoder hardcoded.
+	int get_groupframes() const
+	{
+		int g = (m_header.unknown3 >> 8) & 0xff;
+		return g ? g : 8;
 	}
 
 	int get_cbits_sample() const

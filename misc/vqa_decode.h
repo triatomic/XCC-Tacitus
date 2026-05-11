@@ -14,6 +14,7 @@ private:
 	byte* cbf_write;
 	int frame_index;
 	int c_cbf_read;
+	int m_groupframes;
 	int mc_channels;
 	int m_cx;
 	int m_cy;
