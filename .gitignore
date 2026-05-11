@@ -3,6 +3,24 @@ Debug/
 Release/
 vcpkg_installed/
 
+# MSBuild intermediates that can escape Release/Debug
+[Oo]bj/
+x64/
+ipch/
+*.pdb
+*.ipdb
+*.iobj
+*.ilk
+*.idb
+*.tlog
+*.pch
+*.lastbuildstate
+*.recipe
+*.cache
+
+# Per-app log files written next to the exe
+XCC*log.txt
+
 # Per-user / local
 *.user
 *.suo
