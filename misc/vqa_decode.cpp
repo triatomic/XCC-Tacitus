@@ -206,7 +206,7 @@ void Cvqa_decode::decode_vqfl_chunk(const byte* s, int cb_s)
 	{
 		int cb_in = s[8]
 			? LCWDecompress(s + 8, m_in_decoded)
-			: LCWDecompress(s + 9, m_in_decoded);
+			: LCWDecompress(s + 9, m_in_decoded, true);
 		decode_cbf_chunk(m_in_decoded, cb_in);
 	}
 	else
@@ -243,7 +243,7 @@ void Cvqa_decode::decode_vqfr_chunk(const byte* in_raw, byte* out, t_palette pal
 			if (in_raw[8])
 				cb_in = LCWDecompress(in_raw + 8, in_decoded);
 			else
-				cb_in = LCWDecompress(in_raw + 9, in_decoded);
+				cb_in = LCWDecompress(in_raw + 9, in_decoded, true);
 			in = in_decoded;
 		}
 		else
