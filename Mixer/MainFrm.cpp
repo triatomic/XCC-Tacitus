@@ -948,8 +948,17 @@ void CMainFrame::OnViewDirectories()
 
 void CMainFrame::OnFileSearch()
 {
+	// Detect which pane is focused so predefined-game results route into
+	// the user's active pane instead of always landing in the right pane.
+	bool prefer_right = false;
+	if (CWnd* focus = GetFocus())
+	{
+		HWND h = focus->GetSafeHwnd();
+		if (m_right_mix_pane && (h == m_right_mix_pane->GetSafeHwnd() || ::IsChild(m_right_mix_pane->GetSafeHwnd(), h)))
+			prefer_right = true;
+	}
 	CSearchFileDlg dlg;
-	dlg.set(this);
+	dlg.set(this, prefer_right);
 	dlg.DoModal();
 }
 

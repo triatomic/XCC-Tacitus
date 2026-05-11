@@ -14,7 +14,7 @@ public:
 	void find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id = -1, const string& top_mix_path = "", bool predefined = false);
 	void find(const map<int, t_index_entry>& t_map, const string& post, const string& dir);
 	void find_predefined();
-	void set(CMainFrame* main_frame);
+	void set(CMainFrame* main_frame, bool prefer_right = false);
 	CSearchFileDlg(CWnd* pParent = NULL);   // standard constructor
 
 	string get_filename() const
@@ -71,6 +71,7 @@ private:
 	using t_map = map<int, t_map_entry>;
 
 	CMainFrame* m_main_frame;
+	bool m_prefer_right = false;	// which pane to route predefined-game results into
 	t_map m_map;
 	// Display order (m_map keys). Sort + repopulate operate on this; m_map
 	// stays insertion-ordered so the m_sepindex left/right split (set in

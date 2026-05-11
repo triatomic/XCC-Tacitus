@@ -13,6 +13,7 @@ Cdlg_shp_viewer::Cdlg_shp_viewer(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(Cdlg_shp_viewer::IDD, pParent, "shp_viewer_dlg")
 	, m_av_fps(0)
 	, m_av_started(false)
+	, m_paused(false)
 {
 	//{{AFX_DATA_INIT(Cdlg_shp_viewer)
 	//}}AFX_DATA_INIT
@@ -141,6 +142,8 @@ BOOL Cdlg_shp_viewer::OnInitDialog()
 	{
 		xap_play(GetMainFrame()->get_ds(), m_av_wav, m_av_name);
 		m_av_started = true;
+		if (CWnd* btn = GetDlgItem(IDC_PLAY))
+			btn->SetWindowText("Pause");
 	}
 	return true;
 }
@@ -165,20 +168,34 @@ void Cdlg_shp_viewer::OnTimer(UINT nIDEvent)
 		if (m_frame != frame)
 		{
 			// User scrubbed the slider — sync the video position. For VQA
-			// the audio keeps playing through xap_play independently;
-			// scrubbing intentionally only repositions the video.
+			// also seek audio so the two stay aligned; otherwise the next
+			// tick's xap_get_progress would snap video right back to where
+			// audio is and the scrub would appear to do nothing.
 			m_last_access = t;
 			m_frame = frame;
+			if (m_av_started && m_decoder->cf() > 1)
+				xap_seek(static_cast<double>(frame) / (m_decoder->cf() - 1));
 		}
 		else if (m_av_fps > 0)
 		{
-			// VQA: timer fires at the source frame rate; advance every tick.
-			// Stop at the last frame instead of looping so it matches the
-			// behaviour of the audio buffer (which plays once and stops).
-			if (m_frame + 1 < m_decoder->cf())
-				m_frame++;
-			else
+			// VQA: drive video frame off audio playback position so we don't
+			// drift on coarse timer ticks. xap_get_progress returns 0..1 of
+			// the WAV buffer; the buffer was decoded at the file's frame
+			// rate, so progress * cf is the target frame. Falls back to a
+			// tick-based advance when audio is paused or unavailable.
+			if (m_paused)
 				return;
+			int target = m_frame;
+			const double p = xap_get_progress();
+			if (p >= 0)
+				target = static_cast<int>(p * m_decoder->cf());
+			else if (m_frame + 1 < m_decoder->cf())
+				target = m_frame + 1;
+			if (target >= m_decoder->cf())
+				target = m_decoder->cf() - 1;
+			if (target == m_frame)
+				return;
+			m_frame = target;
 		}
 		else if (t - m_last_access > 15)
 		{
@@ -224,7 +241,25 @@ void Cdlg_shp_viewer::show_frame()
 	UpdateData(false);
 }
 
-void Cdlg_shp_viewer::OnPlay() 
+void Cdlg_shp_viewer::OnPlay()
 {
-	m_last_access = 0;	
+	// SHP/WSA: legacy "kick the 15 s idle auto-advance" behaviour.
+	if (m_av_fps <= 0)
+	{
+		m_last_access = 0;
+		return;
+	}
+	// VQA: real pause/resume. Pause both the audio (DirectSound buffer
+	// stays alive at its current byte offset) and the video advance in
+	// OnTimer. Slider scrubbing still works while paused.
+	m_paused = !m_paused;
+	if (m_av_started)
+	{
+		if (m_paused)
+			xap_pause();
+		else
+			xap_resume();
+	}
+	if (CWnd* btn = GetDlgItem(IDC_PLAY))
+		btn->SetWindowText(m_paused ? "Play" : "Pause");
 }

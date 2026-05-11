@@ -50,9 +50,10 @@ HBRUSH CSearchFileDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
-void CSearchFileDlg::set(CMainFrame* main_frame)
+void CSearchFileDlg::set(CMainFrame* main_frame, bool prefer_right)
 {
 	m_main_frame = main_frame;
+	m_prefer_right = prefer_right;
 }
 
 BOOL CSearchFileDlg::OnInitDialog() 
@@ -377,8 +378,12 @@ void CSearchFileDlg::open_mix(int id)
 	{
 		// Predefined-game row: e.parent is a mix_map_list id. The iterator-
 		// based open_location_mix walks parents to the on-disk fname and
-		// re-descends. Routed to the right pane by user preference.
-		m_main_frame->right_mix_pane()->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id);
+		// re-descends. Route into whichever pane was active when the search
+		// dialog was opened (m_prefer_right captured at construction).
+		CXCCMixerView* target = m_prefer_right
+			? m_main_frame->right_mix_pane()
+			: m_main_frame->left_mix_pane();
+		target->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id);
 	}
 	else if (id < m_sepindex) // left
 	{

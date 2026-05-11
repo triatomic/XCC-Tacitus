@@ -54,4 +54,5 @@ private:
 	double m_av_fps;
 	std::string m_av_name;
 	bool m_av_started;
+	bool m_paused;
 };

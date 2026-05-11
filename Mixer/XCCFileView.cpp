@@ -2756,8 +2756,8 @@ void CXCCFileView::player_enter()
 		m_player_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
 		m_player_native.Create("Native", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_NATIVE);
 		m_player_slider.Create(WS_CHILD | TBS_HORZ | TBS_NOTICKS, r, this, IDC_PLAYER_SLIDER);
-		m_player_label.Create("", WS_CHILD | SS_LEFT, r, this, IDC_PLAYER_FRAME_LABEL);
-		m_player_fps_label.Create("FPS", WS_CHILD | SS_LEFT, r, this, IDC_PLAYER_FPS_LABEL);
+		m_player_label.Create("", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FRAME_LABEL);
+		m_player_fps_label.Create("FPS", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FPS_LABEL);
 		m_player_fps_edit.Create(WS_CHILD | ES_NUMBER | ES_RIGHT | WS_BORDER, r, this, IDC_PLAYER_FPS_EDIT);
 		m_player_fps_spin.Create(WS_CHILD | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, r, this, IDC_PLAYER_FPS_SPIN);
 		m_player_fps_spin.SetBuddy(&m_player_fps_edit);
@@ -3008,9 +3008,9 @@ void CXCCFileView::player_layout_controls()
 	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
 	m_player_native.MoveWindow(x, y, 60, H);          x += 60 + pad;
 	int label_w = 110;
-	m_player_label.MoveWindow(x, y + 4, label_w, H - 8); x += label_w + pad;
+	m_player_label.MoveWindow(x, y, label_w, H); x += label_w + pad;
 	int fps_label_w = 26;
-	m_player_fps_label.MoveWindow(x, y + 4, fps_label_w, H - 8); x += fps_label_w + 2;
+	m_player_fps_label.MoveWindow(x, y, fps_label_w, H); x += fps_label_w + 2;
 	int fps_w = 44;
 	m_player_fps_edit.MoveWindow(x, y, fps_w, H);     x += fps_w + pad;
 	int slider_x = x;

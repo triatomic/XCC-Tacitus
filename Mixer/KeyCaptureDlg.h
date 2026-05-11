@@ -24,12 +24,25 @@ protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual void OnCancel();
+	virtual void OnOK();
 
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
+
+	// Thread-local mouse hook: middle and X-button clicks don't always
+	// reach PreTranslateMessage when delivered to certain child controls,
+	// so we intercept every mouse message in this thread for the dialog's
+	// lifetime.
+	static LRESULT CALLBACK MouseHookProc(int code, WPARAM wParam, LPARAM lParam);
+	bool handle_mouse_msg(UINT msg, WPARAM wParam, HWND hit);
+	void install_mouse_hook();
+	void remove_mouse_hook();
 
 private:
 	void update_preview();
 	bool m_mouse_mode;
 	CStatic m_preview;
+	HHOOK m_mouse_hook = NULL;
+	static CKeyCaptureDlg* s_active;
 };
