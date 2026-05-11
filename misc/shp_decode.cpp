@@ -629,7 +629,7 @@ int LCWCompress(const byte* s, byte* d, int cb_s)	//LCW Compress
 }
 
 
-int LCWDecompress(void const* source, void* dest)	//LCW Decompress
+int LCWDecompress(void const* source, void* dest, bool r)	//LCW Decompress
 {
 	unsigned char* source_ptr, * dest_ptr, * copy_ptr, op_code;
 	unsigned count;
@@ -637,7 +637,6 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 	/* Copy the source and destination ptrs. */
 	source_ptr = (unsigned char*)source;
 	dest_ptr = (unsigned char*)dest;
-	//dest_end = dest_ptr + sizeof(dest);
 
 	while (true) {
 
@@ -649,11 +648,6 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 			/* Do a short copy from destination. */
 			count = (op_code >> 4) + 3;
 			copy_ptr = dest_ptr - ((unsigned)*source_ptr++ + (((unsigned)op_code & 0x0f) << 8));
-
-			/* Check we aren't going to write past the end of the destination buffer */
-			//if (count > (unsigned)(dest_end - dest_ptr)) {
-			//	count = dest_end - dest_ptr;
-			//}
 
 			while (count--)
 				*dest_ptr++ = *copy_ptr++;
@@ -674,11 +668,6 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 					/* Do a medium copy from source. */
 					count = op_code & 0x3f;
 
-					/* Check we aren't going to write past the end of the destination buffer */
-					//if (count > (unsigned)(dest_end - dest_ptr)) {
-					//	count = dest_end - dest_ptr;
-					//}
-
 					while (count--)
 						*dest_ptr++ = *source_ptr++;
 				}
@@ -691,10 +680,6 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 					/* Do a long run. */
 					count = *source_ptr++;
 					count += (*source_ptr++) << 8;
-
-					//if (count > (unsigned)(dest_end - dest_ptr)) {
-					//	count = dest_end - dest_ptr;
-					//}
 
 					memset(dest_ptr, (*source_ptr++), count);
 					dest_ptr += count;
@@ -710,10 +695,6 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 						copy_ptr = (unsigned char*)dest + *source_ptr++;
 						copy_ptr += (*source_ptr++) << 8;
 
-						//if (count > (unsigned)(dest_end - dest_ptr)) {
-						//	count = dest_end - dest_ptr;
-						//}
-
 						while (count--)
 							*dest_ptr++ = *copy_ptr++;
 
@@ -722,12 +703,14 @@ int LCWDecompress(void const* source, void* dest)	//LCW Decompress
 
 						/* Do a medium copy from destination. */
 						count = (op_code & 0x3f) + 3;
-						copy_ptr = (unsigned char*)dest + *source_ptr + ((unsigned)*(source_ptr + 1) << 8);
-						source_ptr += 2;
 
-						//if (count > (unsigned)(dest_end - dest_ptr)) {
-						//	count = dest_end - dest_ptr;
-						//}
+						if (!r) {
+							copy_ptr = (unsigned char*)dest + *source_ptr + ((unsigned)*(source_ptr + 1) << 8);
+							source_ptr += 2;
+						}
+						else {//used in vqa_decode.cpp for decoding 4x4
+							copy_ptr = dest_ptr - (*source_ptr++ | (*source_ptr++ << 8));
+						}
 
 						while (count--)
 							*dest_ptr++ = *copy_ptr++;
