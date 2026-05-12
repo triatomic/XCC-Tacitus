@@ -52,6 +52,7 @@ namespace theme
 	{
 		mode_light = 0,
 		mode_dark = 1,
+		mode_system = 2, // Follow Windows' AppsUseLightTheme setting.
 	};
 
 	void load();
@@ -59,6 +60,15 @@ namespace theme
 	mode get();
 	void set(mode m);
 	bool is_dark();
+	// Reads the Windows "AppsUseLightTheme" registry value. Returns true when
+	// the system is configured for dark apps. Used by mode_system; safe to call
+	// even when the registry value is absent (returns false).
+	bool system_prefers_dark();
+	// Call from WM_SETTINGCHANGE handlers. When in mode_system, re-queries the
+	// system preference and returns true if the resolved dark/light state
+	// flipped (caller should rebuild theme-dependent UI). Returns false in any
+	// other mode or when the resolved state didn't change.
+	bool refresh_system_mode();
 
 	bool show_grid();
 	void set_show_grid(bool v);

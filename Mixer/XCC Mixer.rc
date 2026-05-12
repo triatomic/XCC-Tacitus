@@ -162,8 +162,12 @@ BEGIN
     END
     POPUP "&Theme"
     BEGIN
-        MENUITEM "&Light Mode\tCtrl+1",                 ID_THEME_LIGHT
-        MENUITEM "&Dark Mode\tCtrl+2",                  ID_THEME_DARK
+        POPUP "&Color"
+        BEGIN
+            MENUITEM "&Light Mode\tCtrl+1",             ID_THEME_LIGHT
+            MENUITEM "&Dark Mode\tCtrl+2",              ID_THEME_DARK
+            MENUITEM "&System Default",                 ID_THEME_SYSTEM
+        END
         POPUP "&Pane Layout"
         BEGIN
             MENUITEM "&One Pane",                       ID_THEME_PANES_ONE
@@ -182,49 +186,53 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
         MENUITEM "&Parallel Extract",                   ID_THEME_PARALLEL_EXTRACT
-        MENUITEM SEPARATOR
-        POPUP "&Graphics"
+    END
+    POPUP "&Graphics"
+    BEGIN
+        POPUP "&Image Interpolation"
         BEGIN
-            POPUP "&Image Interpolation"
-            BEGIN
-                MENUITEM "&Nearest (Sharp Pixels)",     ID_THEME_INTERP_NEAREST
-                MENUITEM "&Bilinear",                   ID_THEME_INTERP_BILINEAR
-                MENUITEM "B&icubic",                    ID_THEME_INTERP_BICUBIC
-                MENUITEM "&Lanczos-2",                  ID_THEME_INTERP_LANCZOS
-            END
-            POPUP "S&harpen"
-            BEGIN
-                MENUITEM "&Off",                        ID_THEME_SHARPEN_0
-                MENUITEM "&25%",                        ID_THEME_SHARPEN_25
-                MENUITEM "&50%",                        ID_THEME_SHARPEN_50
-                MENUITEM "&75%",                        ID_THEME_SHARPEN_75
-                MENUITEM "&100%",                       ID_THEME_SHARPEN_100
-            END
-            POPUP "&Frame Rate Cap"
-            BEGIN
-                MENUITEM "&30 fps",                     ID_THEME_FPS_30
-                MENUITEM "&60 fps",                     ID_THEME_FPS_60
-                MENUITEM "1&20 fps",                    ID_THEME_FPS_120
-                MENUITEM "&Unlimited (soft cap 1000)",  ID_THEME_FPS_UNLIMITED
-                MENUITEM "&Custom...",                  ID_THEME_FPS_CUSTOM
-            END
-            POPUP "&VXL Supersampling"
-            BEGIN
-                MENUITEM "&Off",                        ID_THEME_VXL_SS_OFF
-                MENUITEM "&2x",                         ID_THEME_VXL_SS_2
-                MENUITEM "&4x",                         ID_THEME_VXL_SS_4
-                MENUITEM "&8x",                         ID_THEME_VXL_SS_8
-                MENUITEM "1&6x",                        ID_THEME_VXL_SS_16
-            END
-            MENUITEM "VXL &Shading",                    ID_THEME_VXL_SHADING
-            MENUITEM "VXL &Lighting...\tCtrl+L",        ID_THEME_VXL_LIGHTING
-            MENUITEM "&Limit VXL CPU",                  ID_THEME_LIMIT_VXL_CPU
-            MENUITEM "Load &Full Hierarchy",            ID_THEME_VXL_FULL_HIER
+            MENUITEM "&Nearest (Sharp Pixels)",         ID_THEME_INTERP_NEAREST
+            MENUITEM "&Bilinear",                       ID_THEME_INTERP_BILINEAR
+            MENUITEM "B&icubic",                        ID_THEME_INTERP_BICUBIC
+            MENUITEM "&Lanczos-2",                      ID_THEME_INTERP_LANCZOS
         END
+        POPUP "S&harpen"
+        BEGIN
+            MENUITEM "&Off",                            ID_THEME_SHARPEN_0
+            MENUITEM "&25%",                            ID_THEME_SHARPEN_25
+            MENUITEM "&50%",                            ID_THEME_SHARPEN_50
+            MENUITEM "&75%",                            ID_THEME_SHARPEN_75
+            MENUITEM "&100%",                           ID_THEME_SHARPEN_100
+        END
+        POPUP "&Frame Rate Cap"
+        BEGIN
+            MENUITEM "&30 fps",                         ID_THEME_FPS_30
+            MENUITEM "&60 fps",                         ID_THEME_FPS_60
+            MENUITEM "1&20 fps",                        ID_THEME_FPS_120
+            MENUITEM "&Unlimited (soft cap 1000)",      ID_THEME_FPS_UNLIMITED
+            MENUITEM "&Custom...",                      ID_THEME_FPS_CUSTOM
+        END
+        POPUP "&VXL Supersampling"
+        BEGIN
+            MENUITEM "&Off",                            ID_THEME_VXL_SS_OFF
+            MENUITEM "&2x",                             ID_THEME_VXL_SS_2
+            MENUITEM "&4x",                             ID_THEME_VXL_SS_4
+            MENUITEM "&8x",                             ID_THEME_VXL_SS_8
+            MENUITEM "1&6x",                            ID_THEME_VXL_SS_16
+        END
+        MENUITEM "VXL &Shading",                        ID_THEME_VXL_SHADING
+        MENUITEM "VXL &Lighting...\tCtrl+L",            ID_THEME_VXL_LIGHTING
+        MENUITEM "&Limit VXL CPU",                      ID_THEME_LIMIT_VXL_CPU
+        MENUITEM "Load &Full Hierarchy",                ID_THEME_VXL_FULL_HIER
     END
     POPUP "&Keybinds"
     BEGIN
         MENUITEM "&Configure...",                       ID_KEYBINDS_CONFIGURE
+        POPUP "&Settings Directory"
+        BEGIN
+            MENUITEM "&AppData",                        ID_SETTINGS_DIR_APPDATA
+            MENUITEM "Next to &Exe",                    ID_SETTINGS_DIR_EXE
+        END
     END
 END
 

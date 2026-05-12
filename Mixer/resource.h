@@ -1490,6 +1490,9 @@
 #define ID_THEME_FPS_120                  41034
 #define ID_THEME_FPS_UNLIMITED            41035
 #define ID_THEME_FPS_CUSTOM               41036
+#define ID_THEME_SYSTEM                   41037
+#define ID_SETTINGS_DIR_APPDATA           41038
+#define ID_SETTINGS_DIR_EXE               41039
 
 #define IDD_KEYBINDS                      145
 #define IDD_KEY_CAPTURE                   146

@@ -17,6 +17,11 @@ namespace theme
 	namespace
 	{
 		mode g_mode = mode_light;
+		// Resolved light/dark for the current g_mode. For mode_light/mode_dark
+		// this mirrors g_mode; for mode_system it's whatever the last system
+		// query returned. is_dark() reads this; set() and refresh_system_mode()
+		// keep it up-to-date.
+		bool g_resolved_dark = false;
 		bool g_show_grid = true;
 		size_format g_size_fmt = size_auto;
 		vxl_ss g_vxl_ss = vxl_ss_4;
@@ -101,9 +106,62 @@ namespace theme
 		}
 	}
 
+	bool system_prefers_dark()
+	{
+		// HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+		// AppsUseLightTheme = 0 → dark, 1 → light. Absent on Win7/early Win10
+		// builds; treat that as light.
+		HKEY hk = NULL;
+		if (::RegOpenKeyExA(HKEY_CURRENT_USER,
+			"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+			0, KEY_QUERY_VALUE, &hk) != ERROR_SUCCESS)
+			return false;
+		DWORD v = 1, cb = sizeof(v), type = 0;
+		bool dark = false;
+		if (::RegQueryValueExA(hk, "AppsUseLightTheme", NULL, &type,
+				reinterpret_cast<BYTE*>(&v), &cb) == ERROR_SUCCESS
+			&& type == REG_DWORD)
+		{
+			dark = (v == 0);
+		}
+		::RegCloseKey(hk);
+		return dark;
+	}
+
+	namespace
+	{
+		// Computes the resolved dark/light from the user-pref g_mode.
+		bool resolve_dark(mode m)
+		{
+			switch (m)
+			{
+			case mode_dark: return true;
+			case mode_system: return system_prefers_dark();
+			default: return false;
+			}
+		}
+	}
+
+	bool refresh_system_mode()
+	{
+		if (g_mode != mode_system)
+			return false;
+		bool new_dark = system_prefers_dark();
+		if (new_dark == g_resolved_dark)
+			return false;
+		g_resolved_dark = new_dark;
+		create_brushes();
+		apply_app_mode();
+		return true;
+	}
+
 	void load()
 	{
-		g_mode = static_cast<mode>(AfxGetApp()->GetProfileInt("Theme", "mode", mode_light));
+		int mv = AfxGetApp()->GetProfileInt("Theme", "mode", mode_light);
+		if (mv != mode_light && mv != mode_dark && mv != mode_system)
+			mv = mode_light;
+		g_mode = static_cast<mode>(mv);
+		g_resolved_dark = resolve_dark(g_mode);
 		g_show_grid = AfxGetApp()->GetProfileInt("Theme", "show_grid", 1) != 0;
 		g_shp_transparency = AfxGetApp()->GetProfileInt("Theme", "shp_transparency", 0) != 0;
 		g_alpha_color = static_cast<COLORREF>(AfxGetApp()->GetProfileInt("Theme", "alpha_color", RGB(0, 255, 0)));
@@ -183,13 +241,14 @@ namespace theme
 	}
 
 	mode get() { return g_mode; }
-	bool is_dark() { return g_mode == mode_dark; }
+	bool is_dark() { return g_resolved_dark; }
 
 	void set(mode m)
 	{
 		if (g_mode == m)
 			return;
 		g_mode = m;
+		g_resolved_dark = resolve_dark(g_mode);
 		create_brushes();
 		save();
 		apply_app_mode();

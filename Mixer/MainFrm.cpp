@@ -146,6 +146,13 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XSE_RA2_YR, OnUpdateLaunchXSE_RA2_YR)
 	ON_COMMAND(ID_THEME_LIGHT, OnThemeLight)
 	ON_COMMAND(ID_THEME_DARK, OnThemeDark)
+	ON_COMMAND(ID_THEME_SYSTEM, OnThemeSystem)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SYSTEM, OnUpdateThemeSystem)
+	ON_WM_SETTINGCHANGE()
+	ON_COMMAND(ID_SETTINGS_DIR_APPDATA, OnSettingsDirAppData)
+	ON_COMMAND(ID_SETTINGS_DIR_EXE, OnSettingsDirExe)
+	ON_UPDATE_COMMAND_UI(ID_SETTINGS_DIR_APPDATA, OnUpdateSettingsDirAppData)
+	ON_UPDATE_COMMAND_UI(ID_SETTINGS_DIR_EXE, OnUpdateSettingsDirExe)
 	ON_COMMAND(ID_THEME_SHOW_GRID, OnThemeShowGrid)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
 	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
@@ -1637,6 +1644,36 @@ void CMainFrame::OnThemeDark()
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
 }
 
+void CMainFrame::OnThemeSystem()
+{
+	theme::set(theme::mode_system);
+	theme::apply_titlebar(GetSafeHwnd());
+	PostMessage(WM_USER + 0x101);
+	apply_theme_to_children();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+}
+
+// WM_SETTINGCHANGE with lParam == "ImmersiveColorSet" fires when the user
+// flips Windows' Apps Light/Dark setting. Only meaningful in mode_system —
+// refresh_system_mode() returns false in any other mode.
+void CMainFrame::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)
+{
+	CFrameWnd::OnSettingChange(uFlags, lpszSection);
+	// Section is "ImmersiveColorSet" for the Apps Light/Dark flip on Win10/11,
+	// but some shells/builds broadcast with NULL or other strings — and the
+	// query itself is one cheap registry read, so just always re-check when
+	// the user is in system mode. refresh_system_mode() is a no-op in
+	// light/dark modes.
+	if (theme::refresh_system_mode())
+	{
+		theme::apply_titlebar(GetSafeHwnd());
+		PostMessage(WM_USER + 0x101);
+		apply_theme_to_children();
+		RedrawWindow(NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
+	}
+}
+
 LRESULT CMainFrame::OnDeferredAccelRebuild(WPARAM, LPARAM)
 {
 	// Posted from OnCreate. Runs after MFC's LoadFrame has installed the
@@ -1674,6 +1711,65 @@ void CMainFrame::OnUpdateThemeLight(CCmdUI* pCmdUI)
 void CMainFrame::OnUpdateThemeDark(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::get() == theme::mode_dark);
+}
+
+void CMainFrame::OnUpdateThemeSystem(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::get() == theme::mode_system);
+}
+
+// ---------- Settings Directory menu ----------
+//
+// Flips the HKCU pointer key that InitInstance reads on next launch. The
+// running session keeps using the file it loaded from. A destination file
+// that already exists is left alone - users who've configured the other
+// location previously get their old settings back instead of fresh defaults.
+
+namespace
+{
+	bool file_exists(const std::string& path)
+	{
+		DWORD a = ::GetFileAttributesA(path.c_str());
+		return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+	}
+
+	void switch_settings_dir(CWnd* parent, e_settings_dir v)
+	{
+		if (settings_dir_get() == v)
+			return;
+		settings_dir_set(v);
+		std::string dest = settings_dir_path(v);
+		const char* loc = (v == settings_exe) ? "next to the executable" : "in %APPDATA%\\XCC\\Mixer";
+		std::string msg = "Settings location will be ";
+		msg += loc;
+		msg += " on next launch.\n\nFile:\n";
+		msg += dest;
+		if (file_exists(dest))
+			msg += "\n\nThis file already exists. It will be loaded as-is on next launch.";
+		else
+			msg += "\n\nNo file exists yet at this location. Defaults will apply on next launch.";
+		parent->MessageBox(msg.c_str(), "Settings Directory", MB_OK | MB_ICONINFORMATION);
+	}
+}
+
+void CMainFrame::OnSettingsDirAppData()
+{
+	switch_settings_dir(this, settings_appdata);
+}
+
+void CMainFrame::OnSettingsDirExe()
+{
+	switch_settings_dir(this, settings_exe);
+}
+
+void CMainFrame::OnUpdateSettingsDirAppData(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(settings_dir_get() == settings_appdata);
+}
+
+void CMainFrame::OnUpdateSettingsDirExe(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(settings_dir_get() == settings_exe);
 }
 
 void CMainFrame::OnThemeShowGrid()

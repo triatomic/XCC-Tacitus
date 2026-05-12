@@ -288,6 +288,13 @@ protected:
 	afx_msg void OnUpdateConversionRemapTeamColors(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLight();
 	afx_msg void OnThemeDark();
+	afx_msg void OnThemeSystem();
+	afx_msg void OnUpdateThemeSystem(CCmdUI* pCmdUI);
+	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+	afx_msg void OnSettingsDirAppData();
+	afx_msg void OnSettingsDirExe();
+	afx_msg void OnUpdateSettingsDirAppData(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateSettingsDirExe(CCmdUI* pCmdUI);
 	afx_msg void OnThemeShowGrid();
 	afx_msg void OnThemeAlphaColor();
 	afx_msg void OnThemeShpTransparency();

@@ -56,23 +56,94 @@ CXCCMixerApp theApp;
 // will display 8-hex IDs.
 e_mix_db_source g_mix_db_source = mix_db_source_none;
 
+// ---------- Settings directory pointer ----------
+//
+// Lives in HKCU outside the INI itself (chicken-and-egg: we need to know
+// where the INI lives before we can read anything from it). One small string
+// value; default empty = AppData.
+namespace
+{
+	const char* k_settings_ptr_key = "Software\\XCC\\Mixer";
+	const char* k_settings_ptr_val = "settings_dir";
+
+	std::string read_settings_dir_pointer()
+	{
+		HKEY hk = NULL;
+		if (::RegOpenKeyExA(HKEY_CURRENT_USER, k_settings_ptr_key, 0,
+				KEY_QUERY_VALUE, &hk) != ERROR_SUCCESS)
+			return "";
+		char buf[64] = {0};
+		DWORD cb = sizeof(buf) - 1, type = 0;
+		std::string out;
+		if (::RegQueryValueExA(hk, k_settings_ptr_val, NULL, &type,
+				reinterpret_cast<BYTE*>(buf), &cb) == ERROR_SUCCESS
+			&& type == REG_SZ)
+		{
+			out = buf;
+		}
+		::RegCloseKey(hk);
+		return out;
+	}
+
+	std::string appdata_settings_path()
+	{
+		char appdata[MAX_PATH] = {0};
+		::SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata);
+		std::string dir = std::string(appdata) + "\\XCC\\Mixer";
+		::SHCreateDirectoryExA(NULL, dir.c_str(), NULL);
+		return dir + "\\settings.ini";
+	}
+
+	std::string exe_settings_path()
+	{
+		char exe[MAX_PATH] = {0};
+		::GetModuleFileNameA(NULL, exe, MAX_PATH);
+		std::string p = exe;
+		auto slash = p.find_last_of("\\/");
+		std::string dir = (slash == std::string::npos) ? "." : p.substr(0, slash);
+		return dir + "\\settings.ini";
+	}
+}
+
+e_settings_dir settings_dir_get()
+{
+	return read_settings_dir_pointer() == "exe" ? settings_exe : settings_appdata;
+}
+
+void settings_dir_set(e_settings_dir v)
+{
+	HKEY hk = NULL;
+	DWORD disp = 0;
+	if (::RegCreateKeyExA(HKEY_CURRENT_USER, k_settings_ptr_key, 0, NULL,
+			REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &hk, &disp) != ERROR_SUCCESS)
+		return;
+	const char* s = (v == settings_exe) ? "exe" : "appdata";
+	::RegSetValueExA(hk, k_settings_ptr_val, 0, REG_SZ,
+		reinterpret_cast<const BYTE*>(s),
+		static_cast<DWORD>(strlen(s) + 1));
+	::RegCloseKey(hk);
+}
+
+std::string settings_dir_path(e_settings_dir v)
+{
+	return v == settings_exe ? exe_settings_path() : appdata_settings_path();
+}
+
 BOOL CXCCMixerApp::InitInstance()
 {
 	ULONG_PTR gdiplusToken;
 	Gdiplus::GdiplusStartupInput gdiplusStartupInput;
 	Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 	AfxEnableControlContainer();
-	// Settings live in %APPDATA%\XCC\Mixer\settings.ini, not the registry.
-	// MFC's GetProfileString / WriteProfileString route to GetPrivateProfile*
-	// when m_pszRegistryKey is null and m_pszProfileName holds an absolute
-	// path — so every existing call site (theme, PalPaths, MainFrame window
-	// placement, keybinds, etc.) lands in the INI without further changes.
+	// Settings live in an INI file, not the registry. Path is selected by the
+	// HKCU pointer key (see settings_dir_get) — either %APPDATA%\XCC\Mixer\
+	// settings.ini (default) or <exe folder>\settings.ini. MFC's profile API
+	// routes to GetPrivateProfile* when m_pszRegistryKey is null and
+	// m_pszProfileName holds an absolute path, so every existing call site
+	// (theme, PalPaths, MainFrame window placement, keybinds, etc.) lands in
+	// the chosen INI without further changes.
 	{
-		char appdata[MAX_PATH] = {0};
-		::SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata);
-		std::string dir = std::string(appdata) + "\\XCC\\Mixer";
-		::SHCreateDirectoryExA(NULL, dir.c_str(), NULL);
-		std::string ini = dir + "\\settings.ini";
+		std::string ini = settings_dir_path(settings_dir_get());
 		// CWinApp owns m_pszProfileName via free(); allocate with malloc to match.
 		if (m_pszProfileName)
 			free((void*)m_pszProfileName);
