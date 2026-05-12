@@ -42,6 +42,8 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_LIGHT_EL_VALUE, m_el_value);
 	DDX_Control(pDX, IDC_VXL_LIGHT_AMBIENT_VALUE, m_ambient_value);
 	DDX_Control(pDX, IDC_VXL_LIGHT_DIFFUSE_VALUE, m_diffuse_value);
+	DDX_Control(pDX, IDC_VXL_NORMAL_METHOD, m_method);
+	DDX_Control(pDX, IDC_VXL_NORMAL_KERNEL, m_kernel);
 }
 
 BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
@@ -53,6 +55,12 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	// flipping the matching radio's check state (statics don't auto-track).
 	ON_STN_CLICKED(IDC_VXL_NORMAL_SRC_COMPUTED_LABEL, OnNormalSrcComputed)
 	ON_STN_CLICKED(IDC_VXL_NORMAL_SRC_FILE_LABEL, OnNormalSrcFile)
+	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_METHOD, OnNormalMethodChanged)
+	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_KERNEL, OnNormalKernelChanged)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AZ_VALUE,      OnAzEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_EL_VALUE,      OnElEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE, OnAmbientEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_DIFFUSE_VALUE, OnDiffuseEditKillFocus)
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -63,6 +71,13 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_el.SetRange(0, k_steps);
 	m_ambient.SetRange(0, k_steps);
 	m_diffuse.SetRange(0, k_steps);
+	// Populate the Method + Kernel comboboxes once. Order matches the enum
+	// values in theme.h so the index can be passed straight through.
+	m_method.AddString("Basic (6 faces)");
+	m_method.AddString("Faces + edges + corners");
+	m_method.AddString("Smooth gradient");
+	m_kernel.AddString("3\xB3 (radius 1)");
+	m_kernel.AddString("5\xB3 (radius 2)");
 	load_from_theme();
 
 	// Tooltips. Multi-line wraps via TTM_SETMAXTIPWIDTH; embedded \r\n inside
@@ -96,6 +111,17 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"Use the on-disk Westwood normal index per voxel (TS uses 36 normals, "
 		"RA2/YR uses 244). The same normals the original engine used to shade "
 		"these units. Will rebuild the voxel cloud when switched.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_METHOD),
+		"Algorithm used to compute per-voxel normals.\r\n"
+		"  Basic (6 faces) \x97 legacy face-neighbor sum (~7 directions, faceted).\r\n"
+		"  Faces + edges + corners \x97 26-neighbor weighted sum (~26 directions).\r\n"
+		"  Smooth gradient \x97 Gaussian-blurred density field gradient. Continuous "
+		"directions, smooth curved hulls. Recommended.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_KERNEL),
+		"Gaussian kernel size for Smooth gradient. 3\xB3 preserves thin features "
+		"like antennas and barrels. 5\xB3 smooths blocky hulls more aggressively "
+		"but can over-soften small features. Only used when Method = Smooth "
+		"gradient.");
 	m_tooltips.Activate(TRUE);
 
 	theme::apply_dialog(GetSafeHwnd());
@@ -106,6 +132,19 @@ BOOL CVxlLightingDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltips.GetSafeHwnd())
 		m_tooltips.RelayEvent(pMsg);
+	// Enter key in any of the four lighting edit boxes commits the typed
+	// value (parse + clamp + write to theme + snap the slider). Without
+	// this, Enter would route to the default button (Close) and dismiss
+	// the dialog before the typed value is read. We swallow the message
+	// so MFC doesn't continue to IDOK dispatch.
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
+	{
+		const HWND focus = ::GetFocus();
+		if      (focus == m_az_value.GetSafeHwnd())      { commit_az_edit();      return TRUE; }
+		else if (focus == m_el_value.GetSafeHwnd())      { commit_el_edit();      return TRUE; }
+		else if (focus == m_ambient_value.GetSafeHwnd()) { commit_ambient_edit(); return TRUE; }
+		else if (focus == m_diffuse_value.GetSafeHwnd()) { commit_diffuse_edit(); return TRUE; }
+	}
 	return CDialog::PreTranslateMessage(pMsg);
 }
 
@@ -119,27 +158,52 @@ void CVxlLightingDlg::load_from_theme()
 	const bool is_file = theme::vxl_normal_src() == theme::vxl_normals_file;
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, is_file ? BST_UNCHECKED : BST_CHECKED);
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     is_file ? BST_CHECKED   : BST_UNCHECKED);
+	m_method.SetCurSel(static_cast<int>(theme::vxl_normals_method()));
+	m_kernel.SetCurSel(static_cast<int>(theme::vxl_normals_kernel()));
+	update_computed_combos_enable();
 	update_value_labels();
+}
+
+void CVxlLightingDlg::update_computed_combos_enable()
+{
+	const bool computed = theme::vxl_normal_src() == theme::vxl_normals_computed;
+	const bool gradient = theme::vxl_normals_method() == theme::vxl_method_gradient;
+	if (HWND h = m_method.GetSafeHwnd())
+		::EnableWindow(h, computed ? TRUE : FALSE);
+	if (HWND h = m_kernel.GetSafeHwnd())
+		::EnableWindow(h, (computed && gradient) ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_NORMAL_METHOD_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, computed ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_NORMAL_KERNEL_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, (computed && gradient) ? TRUE : FALSE);
 }
 
 void CVxlLightingDlg::update_value_labels()
 {
+	// Push the current theme:: values into the four edit boxes. The
+	// m_updating_ui guard suppresses our own EN_KILLFOCUS handlers from
+	// trying to parse-then-re-write the same value we just wrote (would
+	// produce duplicate set_vxl_light_* calls but no actual change; mostly
+	// harmless, but it's cleaner to short-circuit).
+	m_updating_ui = true;
 	char buf[32];
-	std::snprintf(buf, sizeof(buf), "%.0f\xB0", theme::vxl_light_azimuth());
+	std::snprintf(buf, sizeof(buf), "%.0f", theme::vxl_light_azimuth());
 	m_az_value.SetWindowText(buf);
-	std::snprintf(buf, sizeof(buf), "%.0f\xB0", theme::vxl_light_elevation());
+	std::snprintf(buf, sizeof(buf), "%.0f", theme::vxl_light_elevation());
 	m_el_value.SetWindowText(buf);
 	std::snprintf(buf, sizeof(buf), "%.2f", theme::vxl_light_ambient());
 	m_ambient_value.SetWindowText(buf);
 	std::snprintf(buf, sizeof(buf), "%.2f", theme::vxl_light_diffuse());
 	m_diffuse_value.SetWindowText(buf);
+	m_updating_ui = false;
 }
 
 void CVxlLightingDlg::invalidate_vxl_view()
 {
-	// Tell the main frame's file-info pane to repaint. The splat cache will
-	// miss because theme::vxl_lighting_version() bumped, so the next paint
-	// rebuilds with the new lighting.
+	// Repaint the file view at the user's chosen supersample factor.
+	// (We previously routed through an SS=1 preview + idle upgrade, but
+	// commits are now infrequent enough — mid-drag is preview-only —
+	// that a single full-quality paint per commit is fine.)
 	if (CMainFrame* mf = GetMainFrame())
 		mf->invalidate_file_info_pane();
 }
@@ -151,27 +215,69 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
 	}
+	// Two phases:
+	//   mid-drag (TB_THUMBTRACK): only update the edit-box text to preview
+	//     where the value will land. Don't touch theme or repaint — the
+	//     model stays at whatever lighting was set before the drag began.
+	//   release / discrete step (TB_ENDTRACK, TB_THUMBPOSITION, plus
+	//     keyboard/arrow/click events): commit the value to theme and
+	//     repaint the view. This is the user's "I'm done; apply it" signal.
+	// This keeps the dialog interactive (slider thumb visibly moves, edit
+	// shows the in-flight value) while keeping the heavy splat work to one
+	// paint per discrete adjustment — solving the 80% CPU peg during drag.
+	const bool is_commit =
+		nSBCode == TB_ENDTRACK
+		|| nSBCode == TB_THUMBPOSITION
+		|| nSBCode == TB_LINEUP || nSBCode == TB_LINEDOWN
+		|| nSBCode == TB_PAGEUP || nSBCode == TB_PAGEDOWN
+		|| nSBCode == TB_TOP || nSBCode == TB_BOTTOM;
 	int id = pScrollBar->GetDlgCtrlID();
+	// Compute the would-be value from the slider position, regardless of
+	// phase. Used either to update the edit preview (mid-drag) or to
+	// commit (release).
+	float preview_value = 0.0f;
 	switch (id)
 	{
-	case IDC_VXL_LIGHT_AZ_SLIDER:
-		theme::set_vxl_light_azimuth(unscale_az(m_az.GetPos()));
-		break;
-	case IDC_VXL_LIGHT_EL_SLIDER:
-		theme::set_vxl_light_elevation(unscale_el(m_el.GetPos()));
-		break;
-	case IDC_VXL_LIGHT_AMBIENT_SLIDER:
-		theme::set_vxl_light_ambient(unscale_unit(m_ambient.GetPos()));
-		break;
-	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:
-		theme::set_vxl_light_diffuse(unscale_unit(m_diffuse.GetPos()));
-		break;
+	case IDC_VXL_LIGHT_AZ_SLIDER:      preview_value = unscale_az(m_az.GetPos()); break;
+	case IDC_VXL_LIGHT_EL_SLIDER:      preview_value = unscale_el(m_el.GetPos()); break;
+	case IDC_VXL_LIGHT_AMBIENT_SLIDER: preview_value = unscale_unit(m_ambient.GetPos()); break;
+	case IDC_VXL_LIGHT_DIFFUSE_SLIDER: preview_value = unscale_unit(m_diffuse.GetPos()); break;
 	default:
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
 	}
+	if (!is_commit)
+	{
+		// Mid-drag preview: update only the matching edit box. No theme
+		// write, no invalidate. Guard so the EN_KILLFOCUS handler doesn't
+		// re-commit our own preview text if focus moves.
+		m_updating_ui = true;
+		char buf[32];
+		const char* fmt = (id == IDC_VXL_LIGHT_AZ_SLIDER || id == IDC_VXL_LIGHT_EL_SLIDER) ? "%.0f" : "%.2f";
+		std::snprintf(buf, sizeof(buf), fmt, preview_value);
+		switch (id)
+		{
+		case IDC_VXL_LIGHT_AZ_SLIDER:      m_az_value.SetWindowText(buf); break;
+		case IDC_VXL_LIGHT_EL_SLIDER:      m_el_value.SetWindowText(buf); break;
+		case IDC_VXL_LIGHT_AMBIENT_SLIDER: m_ambient_value.SetWindowText(buf); break;
+		case IDC_VXL_LIGHT_DIFFUSE_SLIDER: m_diffuse_value.SetWindowText(buf); break;
+		}
+		m_updating_ui = false;
+		return;
+	}
+	// Commit: write through to theme:: and trigger a single repaint.
+	switch (id)
+	{
+	case IDC_VXL_LIGHT_AZ_SLIDER:      theme::set_vxl_light_azimuth(preview_value); break;
+	case IDC_VXL_LIGHT_EL_SLIDER:      theme::set_vxl_light_elevation(preview_value); break;
+	case IDC_VXL_LIGHT_AMBIENT_SLIDER: theme::set_vxl_light_ambient(preview_value); break;
+	case IDC_VXL_LIGHT_DIFFUSE_SLIDER: theme::set_vxl_light_diffuse(preview_value); break;
+	}
 	update_value_labels();
 	invalidate_vxl_view();
+	// Registry save is deferred until the dialog is closed (OnOK / OnCancel),
+	// not on slider release. The lighting setters keep the value in memory +
+	// bump the dirty flag; flush_lighting_save() runs once at close.
 }
 
 void CVxlLightingDlg::OnReset()
@@ -181,6 +287,69 @@ void CVxlLightingDlg::OnReset()
 	invalidate_vxl_view();
 }
 
+// Edit-box commit implementations. Parse + clamp + write to theme +
+// snap slider position + repaint. The m_updating_ui guard skips parsing
+// when the edit was just programmatically updated by update_value_labels
+// (slider drag). Each commit also re-emits the canonical formatted
+// value back into the edit so "180.7" snaps to "181", "1.5" to "1.00",
+// etc., giving immediate feedback on clamping.
+void CVxlLightingDlg::commit_az_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_az_value.GetWindowText(s);
+	float v = static_cast<float>(_tstof(s));
+	if (v < 0.0f) v = 0.0f; else if (v > 360.0f) v = 360.0f;
+	theme::set_vxl_light_azimuth(v);
+	m_az.SetPos(static_cast<int>((v / 360.0f) * 1000));
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::commit_el_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_el_value.GetWindowText(s);
+	float v = static_cast<float>(_tstof(s));
+	if (v < -90.0f) v = -90.0f; else if (v > 90.0f) v = 90.0f;
+	theme::set_vxl_light_elevation(v);
+	m_el.SetPos(static_cast<int>(((v + 90.0f) / 180.0f) * 1000));
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::commit_ambient_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_ambient_value.GetWindowText(s);
+	float v = static_cast<float>(_tstof(s));
+	if (v < 0.0f) v = 0.0f; else if (v > 1.0f) v = 1.0f;
+	theme::set_vxl_light_ambient(v);
+	m_ambient.SetPos(static_cast<int>(v * 1000));
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::commit_diffuse_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_diffuse_value.GetWindowText(s);
+	float v = static_cast<float>(_tstof(s));
+	if (v < 0.0f) v = 0.0f; else if (v > 1.0f) v = 1.0f;
+	theme::set_vxl_light_diffuse(v);
+	m_diffuse.SetPos(static_cast<int>(v * 1000));
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnAzEditKillFocus()      { commit_az_edit(); }
+void CVxlLightingDlg::OnElEditKillFocus()      { commit_el_edit(); }
+void CVxlLightingDlg::OnAmbientEditKillFocus() { commit_ambient_edit(); }
+void CVxlLightingDlg::OnDiffuseEditKillFocus() { commit_diffuse_edit(); }
+
 void CVxlLightingDlg::OnNormalSrcComputed()
 {
 	// Sync radio visual state (no-op when called from the radio itself;
@@ -189,6 +358,7 @@ void CVxlLightingDlg::OnNormalSrcComputed()
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, BST_CHECKED);
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     BST_UNCHECKED);
 	theme::set_vxl_normal_src(theme::vxl_normals_computed);
+	update_computed_combos_enable();
 	// Normal source affects the voxel cloud itself (not just the splat
 	// cache), so we have to drop+rebuild the cloud rather than just
 	// invalidate the splat.
@@ -201,17 +371,42 @@ void CVxlLightingDlg::OnNormalSrcFile()
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, BST_UNCHECKED);
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     BST_CHECKED);
 	theme::set_vxl_normal_src(theme::vxl_normals_file);
+	update_computed_combos_enable();
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnNormalMethodChanged()
+{
+	const int sel = m_method.GetCurSel();
+	if (sel < 0) return;
+	theme::set_vxl_normals_method(static_cast<theme::vxl_normal_method>(sel));
+	update_computed_combos_enable();
+	// Method also bakes into the cloud — rebuild rather than splat-invalidate.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnNormalKernelChanged()
+{
+	const int sel = m_kernel.GetCurSel();
+	if (sel < 0) return;
+	theme::set_vxl_normals_kernel(static_cast<theme::vxl_normal_kernel>(sel));
+	// Kernel only matters when method == gradient, but cheaper to always
+	// rebuild than to inspect — the dialog enable state already gates it.
 	if (CMainFrame* mf = GetMainFrame())
 		mf->invalidate_vxl_cloud_in_file_view();
 }
 
 void CVxlLightingDlg::OnOK()
 {
+	theme::flush_lighting_save();
 	ShowWindow(SW_HIDE);
 }
 
 void CVxlLightingDlg::OnCancel()
 {
+	theme::flush_lighting_save();
 	ShowWindow(SW_HIDE);
 }
 

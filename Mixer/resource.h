@@ -1449,6 +1449,9 @@
 #define IDC_AUDIO_TIME                    1150
 #define IDC_AUDIO_FILENAME                1151
 #define IDD_VXL_LIGHTING                  144
+#define IDD_FPS_CUSTOM                    147
+#define IDC_FPS_CUSTOM_EDIT               1180
+#define IDC_FPS_CUSTOM_LABEL              1181
 #define IDC_VXL_LIGHT_AZ_SLIDER           1152
 #define IDC_VXL_LIGHT_AZ_LABEL            1153
 #define IDC_VXL_LIGHT_AZ_VALUE            1154
@@ -1467,6 +1470,10 @@
 #define IDC_VXL_NORMAL_SRC_FILE           1168
 #define IDC_VXL_NORMAL_SRC_COMPUTED_LABEL 1169
 #define IDC_VXL_NORMAL_SRC_FILE_LABEL     1170
+#define IDC_VXL_NORMAL_METHOD             1171
+#define IDC_VXL_NORMAL_METHOD_LABEL       1172
+#define IDC_VXL_NORMAL_KERNEL             1173
+#define IDC_VXL_NORMAL_KERNEL_LABEL       1174
 #define IDC_VXL_HVA_LOAD                  1165
 #define IDC_VXL_HVA_LOOP                  1166
 #define IDC_INCLUDE_GAME_MIXES            1167
@@ -1478,6 +1485,11 @@
 #define ID_THEME_SHARPEN_50               41029
 #define ID_THEME_SHARPEN_75               41030
 #define ID_THEME_SHARPEN_100              41031
+#define ID_THEME_FPS_30                   41032
+#define ID_THEME_FPS_60                   41033
+#define ID_THEME_FPS_120                  41034
+#define ID_THEME_FPS_UNLIMITED            41035
+#define ID_THEME_FPS_CUSTOM               41036
 
 #define IDD_KEYBINDS                      145
 #define IDD_KEY_CAPTURE                   146

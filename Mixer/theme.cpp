@@ -22,6 +22,8 @@ namespace theme
 		vxl_ss g_vxl_ss = vxl_ss_4;
 		bool g_vxl_shading = false;
 		vxl_normal_source g_vxl_normal_src = vxl_normals_computed;
+		vxl_normal_method g_vxl_normal_method = vxl_method_basic;
+		vxl_normal_kernel g_vxl_normal_kernel = vxl_kernel_3;
 		// Defaults below match the original hand-tuned constants in
 		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
 		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
@@ -35,6 +37,10 @@ namespace theme
 		float g_vxl_light_ambient = k_default_ambient;
 		float g_vxl_light_diffuse = k_default_diffuse;
 		int g_vxl_lighting_version = 0;
+		// Set to true by any of the four lighting slider setters whenever they
+		// would otherwise have called save(). flush_lighting_save() consumes
+		// it. Decouples slider-drag tick rate from registry write rate.
+		bool g_vxl_lighting_save_pending = false;
 		bool g_limit_vxl_cpu = false;
 		bool g_vxl_full_hierarchy = true;
 		bool g_parallel_extract = true;
@@ -44,6 +50,7 @@ namespace theme
 		bool g_use_external_programs = false;
 		interpolation g_interp = interp_nearest;
 		int g_sharpen_amount = 0;   // 0..100, post-pass strength on non-nearest stretch_image paths
+		int g_fps_cap = 60;
 
 		// Cached brushes — recreated when the mode flips.
 		HBRUSH g_brush_bg = NULL;
@@ -109,6 +116,9 @@ namespace theme
 		int sa = AfxGetApp()->GetProfileInt("Theme", "sharpen_amount", 0);
 		if (sa < 0) sa = 0; else if (sa > 100) sa = 100;
 		g_sharpen_amount = sa;
+		int fc = AfxGetApp()->GetProfileInt("Theme", "fps_cap", 60);
+		if (fc < 1) fc = 1; else if (fc > 9999) fc = 9999;
+		g_fps_cap = fc;
 		int sf = AfxGetApp()->GetProfileInt("Theme", "size_format", size_auto);
 		if (sf != size_auto && sf != size_bytes) sf = size_auto;
 		g_size_fmt = static_cast<size_format>(sf);
@@ -120,6 +130,12 @@ namespace theme
 		int ns = AfxGetApp()->GetProfileInt("Theme", "vxl_normal_src", vxl_normals_computed);
 		if (ns != vxl_normals_computed && ns != vxl_normals_file) ns = vxl_normals_computed;
 		g_vxl_normal_src = static_cast<vxl_normal_source>(ns);
+		int nm = AfxGetApp()->GetProfileInt("Theme", "vxl_normal_method", vxl_method_basic);
+		if (nm < vxl_method_basic || nm > vxl_method_gradient) nm = vxl_method_basic;
+		g_vxl_normal_method = static_cast<vxl_normal_method>(nm);
+		int nk = AfxGetApp()->GetProfileInt("Theme", "vxl_normal_kernel", vxl_kernel_3);
+		if (nk != vxl_kernel_3 && nk != vxl_kernel_5) nk = vxl_kernel_3;
+		g_vxl_normal_kernel = static_cast<vxl_normal_kernel>(nk);
 		// Lighting parameters: stored as int * 1000 to preserve precision via
 		// the int-only WriteProfileInt API. Out-of-range values fall back to
 		// defaults so corrupted/manually-edited registry entries don't render
@@ -150,10 +166,13 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "use_external_programs", g_use_external_programs ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "interpolation", static_cast<int>(g_interp));
 		AfxGetApp()->WriteProfileInt("Theme", "sharpen_amount", g_sharpen_amount);
+		AfxGetApp()->WriteProfileInt("Theme", "fps_cap", g_fps_cap);
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_src", static_cast<int>(g_vxl_normal_src));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_method", static_cast<int>(g_vxl_normal_method));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_kernel", static_cast<int>(g_vxl_normal_kernel));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_az", static_cast<int>(g_vxl_light_az * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
@@ -229,12 +248,36 @@ namespace theme
 		save();
 	}
 
+	vxl_normal_method vxl_normals_method() { return g_vxl_normal_method; }
+	void set_vxl_normals_method(vxl_normal_method v)
+	{
+		if (g_vxl_normal_method == v) return;
+		g_vxl_normal_method = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	vxl_normal_kernel vxl_normals_kernel() { return g_vxl_normal_kernel; }
+	void set_vxl_normals_kernel(vxl_normal_kernel v)
+	{
+		if (g_vxl_normal_kernel == v) return;
+		g_vxl_normal_kernel = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+
 	float vxl_light_azimuth()   { return g_vxl_light_az; }
 	float vxl_light_elevation() { return g_vxl_light_el; }
 	float vxl_light_ambient()   { return g_vxl_light_ambient; }
 	float vxl_light_diffuse()   { return g_vxl_light_diffuse; }
 	int   vxl_lighting_version(){ return g_vxl_lighting_version; }
 
+	// All four lighting slider setters defer the registry save() — they only
+	// update memory + bump the version stamp + mark the save pending. The
+	// dialog flushes on slider release via flush_lighting_save(). Without
+	// this, a fast slider drag fires hundreds of save() calls per second,
+	// each writing ~22 registry keys via WriteProfileInt, which is what was
+	// pegging CPU/IO.
 	void set_vxl_light_azimuth(float v)
 	{
 		if (v < 0.0f) v = 0.0f;
@@ -242,7 +285,7 @@ namespace theme
 		if (g_vxl_light_az == v) return;
 		g_vxl_light_az = v;
 		g_vxl_lighting_version++;
-		save();
+		g_vxl_lighting_save_pending = true;
 	}
 	void set_vxl_light_elevation(float v)
 	{
@@ -251,7 +294,7 @@ namespace theme
 		if (g_vxl_light_el == v) return;
 		g_vxl_light_el = v;
 		g_vxl_lighting_version++;
-		save();
+		g_vxl_lighting_save_pending = true;
 	}
 	void set_vxl_light_ambient(float v)
 	{
@@ -260,7 +303,7 @@ namespace theme
 		if (g_vxl_light_ambient == v) return;
 		g_vxl_light_ambient = v;
 		g_vxl_lighting_version++;
-		save();
+		g_vxl_lighting_save_pending = true;
 	}
 	void set_vxl_light_diffuse(float v)
 	{
@@ -269,6 +312,13 @@ namespace theme
 		if (g_vxl_light_diffuse == v) return;
 		g_vxl_light_diffuse = v;
 		g_vxl_lighting_version++;
+		g_vxl_lighting_save_pending = true;
+	}
+
+	void flush_lighting_save()
+	{
+		if (!g_vxl_lighting_save_pending) return;
+		g_vxl_lighting_save_pending = false;
 		save();
 	}
 	void reset_vxl_lighting()
@@ -430,6 +480,15 @@ namespace theme
 		if (g_sharpen_amount == v)
 			return;
 		g_sharpen_amount = v;
+		save();
+	}
+
+	int frame_rate_cap() { return g_fps_cap; }
+	void set_frame_rate_cap(int v)
+	{
+		if (v < 1) v = 1; else if (v > 9999) v = 9999;
+		if (g_fps_cap == v) return;
+		g_fps_cap = v;
 		save();
 	}
 

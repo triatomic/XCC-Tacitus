@@ -62,7 +62,10 @@ string xcc_dirs::get_dir(t_game game)
 	case game_tw:
 		return tw_dir;
 	}
-	assert(false);
+	// Sentinel m_game = -1 (no game selected yet) takes this path during
+	// startup; release builds already silently returned "" here, debug used
+	// to assert. Match release behavior so the Debug config doesn't trip
+	// at startup before the user has picked a game.
 	return "";
 }
 

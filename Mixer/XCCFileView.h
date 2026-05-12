@@ -109,12 +109,62 @@ protected:
 	afx_msg void OnLoadPal();
 	afx_msg void OnPlayerGridSel();
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
+	afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS);
+	afx_msg void OnPaint();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
 	bool m_show_alpha_only = false;
 	int m_zoom_pct = 100;
+	// Frame-rate limiter state. m_last_paint_ms is GetTickCount() at the
+	// last actual CScrollView::OnPaint() pass-through. m_paint_pending is
+	// set when our OnPaint chose to defer because the cap window hadn't
+	// elapsed; the deferred-paint timer (TIMER_FRAME_LIMIT_ID) re-issues
+	// Invalidate() when it fires.
+	DWORD m_last_paint_ms = 0;
+	bool m_paint_pending = false;
+	bool m_timer_armed = false;
+	CRect m_pending_rect;
+	// Interactive low-SS flag. While the user is mid-drag (orbit/pan/slider),
+	// the splat renders at SS=1 to keep paints cheap. On drag end we clear
+	// the flag and trigger one final repaint at the user's chosen SS, so
+	// the still image is always full quality. Saves 16x..256x splat cost
+	// at SS=4..16 during interaction.
+	bool m_interactive_low_ss = false;
+	static const UINT_PTR TIMER_FRAME_LIMIT_ID = 7;
+public:
+	// Rate-limited invalidate. Coalesces invalidates within the cap window
+	// (theme::frame_rate_cap()) so high-poll mouse drags don't flood the
+	// message queue with WM_PAINT. Call this instead of InvalidateRect for
+	// any invalidate that can fire at high rate (mouse drags, slider ticks,
+	// timer-driven animation if you want it capped — animation already has
+	// its own fps).
+	void request_repaint(LPCRECT rect = nullptr);
+	// Input-rate throttle. Returns true if enough time has elapsed since the
+	// last accepted input event (using theme::frame_rate_cap()) so the
+	// caller should process this tick. Returns false if the caller should
+	// drop this tick. Shared between orbit-drag (1000Hz mouse) and any other
+	// high-rate input. The CXCCFileView instance also exposes this so the
+	// VXL Lighting dialog can use the same gate.
+	bool throttle_input_tick();
+	DWORD m_last_input_ms = 0;
+	// Set/clear the interactive low-SS flag from outside (e.g. the VXL
+	// Lighting dialog while a slider is being dragged). When clearing,
+	// callers should also issue a request_repaint() so the final full-SS
+	// frame paints.
+	void set_interactive_low_ss(bool on)
+	{
+		// On transition from interactive (SS=1) back to non-interactive,
+		// nuke the splat cache key so the next paint rebuilds at the
+		// user's full SS. Without this the cached SS=1 splat would be
+		// reused and the model would look blocky after drag release.
+		if (m_interactive_low_ss && !on)
+			m_vxl_splat.ss = -1;
+		m_interactive_low_ss = on;
+	}
+	bool is_interactive_low_ss() const { return m_interactive_low_ss; }
+protected:
 	bool m_zoomable_file = false;
 
 	bool is_playable_file() const;
@@ -343,11 +393,20 @@ private:
 		double pitch = 0.0;
 		int ss = 0;
 		bool shading = false;
-		int lighting_version = -1;	// theme::vxl_lighting_version() at build time
 		int cx_s = 0;
 		int cy_s = 0;
 		Cvirtual_binary buf;	// paletted supersample framebuffer (cx_s*cy_s bytes)
-		std::vector<unsigned char> shade;	// per-pixel shade factor; empty when shading off
+		std::vector<unsigned char> shade;	// per-pixel shade factor (after shading pass); empty when shading off
+		// Per-pixel camera-space normal (signed int8 per channel, [-127..127]
+		// representing [-1.0..1.0]). Written during splat, read by the
+		// lightweight shading pass to produce `shade` without rebuilding the
+		// splat. Empty when shading is off. Layout: 3 bytes per pixel
+		// (nx, ny, nz), row-major matching `buf`.
+		std::vector<signed char> cam_normal;
+		// Lighting version stamp the current `shade` was built from. Compared
+		// against theme::vxl_lighting_version() at paint time to decide
+		// whether the cheap shading pass needs to re-run. -1 = unbuilt.
+		int shade_lighting_version = -1;
 	};
 	vxl_splat_cache m_vxl_splat;
 

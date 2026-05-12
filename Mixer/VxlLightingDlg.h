@@ -28,6 +28,18 @@ protected:
 	afx_msg void OnReset();
 	afx_msg void OnNormalSrcComputed();
 	afx_msg void OnNormalSrcFile();
+	afx_msg void OnNormalMethodChanged();
+	afx_msg void OnNormalKernelChanged();
+	// Edit-box commit handlers. EN_KILLFOCUS fires when the user tabs away
+	// or clicks elsewhere; we also intercept Enter in PreTranslateMessage
+	// and route through commit_<field>() so committed-on-Enter feels
+	// natural. EN_CHANGE is intentionally NOT used — that would re-parse
+	// after every keystroke and snap the slider mid-typing, which feels
+	// wrong (typing "180" would jump to 1, 18, 180 in quick succession).
+	afx_msg void OnAzEditKillFocus();
+	afx_msg void OnElEditKillFocus();
+	afx_msg void OnAmbientEditKillFocus();
+	afx_msg void OnDiffuseEditKillFocus();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -43,9 +55,25 @@ private:
 	CSliderCtrl m_el;
 	CSliderCtrl m_ambient;
 	CSliderCtrl m_diffuse;
-	CStatic m_az_value;
-	CStatic m_el_value;
-	CStatic m_ambient_value;
-	CStatic m_diffuse_value;
+	CEdit m_az_value;
+	CEdit m_el_value;
+	CEdit m_ambient_value;
+	CEdit m_diffuse_value;
+	CComboBox m_method;
+	CComboBox m_kernel;
 	CToolTipCtrl m_tooltips;
+	// Reentrancy guard: set true while we're programmatically updating the
+	// edit-box text in response to a slider movement, so the EN_KILLFOCUS /
+	// commit handlers don't re-parse our own freshly-written text.
+	bool m_updating_ui = false;
+	// Enable/disable Method + Kernel combos based on current radio + method
+	// selection. Method combo is disabled when File is selected; Kernel combo
+	// is disabled when File is selected OR when Method != Smooth gradient.
+	void update_computed_combos_enable();
+	// Commit helpers: parse an edit's text, clamp to range, write to theme,
+	// snap the corresponding slider position, repaint the VXL view.
+	void commit_az_edit();
+	void commit_el_edit();
+	void commit_ambient_edit();
+	void commit_diffuse_edit();
 };

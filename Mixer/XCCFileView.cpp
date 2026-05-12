@@ -97,6 +97,8 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_LOAD_PAL, OnLoadPal)
 	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
 	ON_WM_DRAWITEM()
+	ON_WM_MEASUREITEM()
+	ON_WM_PAINT()
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -122,6 +124,7 @@ void CXCCFileView::OnLButtonDown(UINT nFlags, CPoint point)
 				m_vxl_drag_origin = point;
 				m_vxl_drag_yaw0 = m_vxl_yaw;
 				m_vxl_drag_pitch0 = m_vxl_pitch;
+				m_interactive_low_ss = true;
 				SetCapture();
 				// Clip the cursor to the image area so dragging doesn't drift onto
 				// other windows / the desktop while orbiting. Cleared on button up.
@@ -141,10 +144,16 @@ void CXCCFileView::OnLButtonUp(UINT nFlags, CPoint point)
 	if (m_vxl_dragging)
 	{
 		m_vxl_dragging = false;
+		m_interactive_low_ss = false;
+		// Force the splat cache to miss for the final paint so it
+		// re-rasterizes at the user's chosen supersample factor. Cheapest
+		// way is to nudge the cached ss to a sentinel value; the next
+		// paint's cache check will mismatch and rebuild.
+		m_vxl_splat.ss = -1;
 		ReleaseCapture();
 		::ClipCursor(NULL);
-		// Re-render with the user's chosen interpolation now that orbit
-		// stopped (drag-time used nearest for cheap StretchBlt).
+		// Re-render with the user's chosen interpolation + full SS now that
+		// orbit stopped.
 		CRect cr; GetClientRect(&cr);
 		cr.bottom -= player_band_h();
 		if (cr.bottom < cr.top) cr.bottom = cr.top;
@@ -172,6 +181,7 @@ void CXCCFileView::OnRButtonDown(UINT nFlags, CPoint point)
 			if (point.y < cr.bottom - player_band_h())
 			{
 				m_player_panning = true;
+				m_interactive_low_ss = true;
 				m_player_pan_origin = point;
 				m_player_pan_x0 = m_player_pan_x;
 				m_player_pan_y0 = m_player_pan_y;
@@ -193,9 +203,11 @@ void CXCCFileView::OnRButtonUp(UINT nFlags, CPoint point)
 	if (m_player_panning)
 	{
 		m_player_panning = false;
+		m_interactive_low_ss = false;
+		m_vxl_splat.ss = -1;	// force final paint to rebuild at user's SS
 		ReleaseCapture();
 		::ClipCursor(NULL);
-		// Same as orbit: bring back the full-quality interpolation.
+		// Same as orbit: bring back the full-quality interpolation + SS.
 		CRect cr; GetClientRect(&cr);
 		cr.bottom -= player_band_h();
 		if (cr.bottom < cr.top) cr.bottom = cr.top;
@@ -209,6 +221,13 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (m_vxl_dragging && (nFlags & MK_LBUTTON))
 	{
+		// Drop mouse moves that arrive within the cap window so we don't
+		// burn CPU on the orbit math + repaint plumbing at 1000Hz. The
+		// dropped events don't update m_vxl_drag_origin, so the next
+		// accepted event sees the cumulative delta — visually identical
+		// to processing every event.
+		if (!throttle_input_tick())
+			return;
 		// 3dsmax-style orbit: horizontal drag = yaw, vertical drag = pitch.
 		// ~0.4 deg per pixel feels right for the tiny VXL framebuffer.
 		// Incremental from the last mouse position rather than absolute from
@@ -246,11 +265,13 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 		{
 			m_vxl_drag_origin = point;
 		}
-		InvalidateRect(&cr, FALSE);
+		request_repaint(&cr);
 		return;
 	}
 	if (m_player_panning && (nFlags & MK_RBUTTON))
 	{
+		if (!throttle_input_tick())
+			return;
 		m_player_pan_x = m_player_pan_x0 + (point.x - m_player_pan_origin.x);
 		m_player_pan_y = m_player_pan_y0 + (point.y - m_player_pan_origin.y);
 		// Repaint the image area only (margins included). Skip the control
@@ -259,7 +280,7 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 		GetClientRect(&cr);
 		cr.bottom -= player_band_h();
 		if (cr.bottom < cr.top) cr.bottom = cr.top;
-		InvalidateRect(&cr, FALSE);
+		request_repaint(&cr);
 		return;
 	}
 	CScrollView::OnMouseMove(nFlags, point);
@@ -478,6 +499,13 @@ void CXCCFileView::OnMouseHWheel(UINT nFlags, short zDelta, CPoint pt)
 void CXCCFileView::OnInitialUpdate()
 {
 	CScrollView::OnInitialUpdate();
+	// Seed the scroll size before any WM_PAINT reaches CScrollView::OnPrepareDC.
+	// Without this, debug MFC asserts in viewscrl.cpp ("must call
+	// SetScrollSizes() ... before painting scroll view") because the first
+	// paint can arrive before OnDraw has assigned a per-format size.
+	// (1,1) is a placeholder; OnDraw / player_enter overwrite it with the
+	// real extent for the current file.
+	SetScrollSizes(MM_TEXT, CSize(1, 1));
 	test_brush.CreateSolidBrush(m_colour);
 	//m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Courier New");
 	m_font.CreateFont(12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Lucida Console");
@@ -2733,21 +2761,104 @@ void CXCCFileView::player_decode_frames()
 				}
 			}
 			// Pass 2: emit world-space voxels with normals.
-			// Two normal-source modes:
-			//   computed (default): local-space normal = sum of unit vectors
-			//     pointing toward each empty 6-neighbor; this picks out the
-			//     lit-able cube faces. Smooth and view-independent of disk
-			//     contents.
-			//   file: look up the on-disk normal_idx in the Westwood table
-			//     selected by st.unknown (= normal_type: 2 = TS 36-entry, else
-			//     RA2/YR 244-entry). Vengi-encoded direction vectors, already
-			//     decoded to floats in vxl_normals.h.
+			// Two normal sources, and for the Computed source three algorithms:
+			//   computed/basic    : 6-neighbor empty-side sum (legacy).
+			//   computed/weighted : 26-neighbor filled-side sum with face=1,
+			//                       edge=1/sqrt(2), corner=1/sqrt(3) weights.
+			//                       Vengi-style.
+			//   computed/gradient : central-difference gradient of a Gaussian-
+			//                       blurred density field. Smooth, continuous
+			//                       directions — best for curved hulls.
+			//   file              : Westwood normal-table lookup.
 			// Both paths then rotate by tm's 3x3 submatrix, flip Y to match
-			// the position flip, and renormalize. The fallback +Z (computed
-			// path) doesn't apply to file normals — the engine guarantees a
-			// valid table entry exists.
+			// the position flip, and renormalize. Fallback +Z when local
+			// normal length is below 1e-6 (fully surrounded voxel, etc.).
 			const theme::vxl_normal_source norm_src = theme::vxl_normal_src();
+			const theme::vxl_normal_method norm_method = theme::vxl_normals_method();
 			const unsigned char normal_type = static_cast<unsigned char>(st.unknown);
+			// Smooth-gradient pre-pass: build a separable-Gaussian-blurred
+			// float density field over the section's occupancy grid. Runs
+			// once per section, only when method == gradient. Kernel size is
+			// theme-driven; 3 (radius 1) keeps fine features, 5 (radius 2)
+			// gives a smoother overall shape at the cost of thin details.
+			std::vector<float> density_smooth;
+			if (norm_src == theme::vxl_normals_computed && norm_method == theme::vxl_method_gradient)
+			{
+				const int kernel_size = (theme::vxl_normals_kernel() == theme::vxl_kernel_5) ? 5 : 3;
+				const int radius = kernel_size / 2;
+				// Gaussian weights (normalized) — match Pascal's triangle row
+				// for radius=1 ([1,2,1]/4) and radius=2 ([1,4,6,4,1]/16). One
+				// switch keeps both kernels tight.
+				float w[5] = { 0 };
+				int kw = 0;
+				if (kernel_size == 3) { w[0] = 1.f/4; w[1] = 2.f/4; w[2] = 1.f/4; kw = 3; }
+				else                  { w[0] = 1.f/16; w[1] = 4.f/16; w[2] = 6.f/16; w[3] = 4.f/16; w[4] = 1.f/16; kw = 5; }
+				const size_t n_voxels = static_cast<size_t>(cx) * cy * cz;
+				std::vector<float> a(n_voxels), b(n_voxels);
+				// Seed `a` from occupancy.
+				#pragma omp parallel for schedule(static)
+				for (int idx = 0; idx < static_cast<int>(n_voxels); idx++)
+					a[idx] = occ[idx] ? 1.0f : 0.0f;
+				auto clamp_i = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
+				// Blur X: a -> b
+				#pragma omp parallel for schedule(static)
+				for (int z = 0; z < cz; z++)
+				{
+					for (int y = 0; y < cy; y++)
+					{
+						const size_t row_base = static_cast<size_t>(z) * cx * cy + static_cast<size_t>(y) * cx;
+						for (int x = 0; x < cx; x++)
+						{
+							float s = 0;
+							for (int k = 0; k < kw; k++)
+							{
+								int xs = clamp_i(x + k - radius, 0, cx - 1);
+								s += w[k] * a[row_base + xs];
+							}
+							b[row_base + x] = s;
+						}
+					}
+				}
+				// Blur Y: b -> a
+				#pragma omp parallel for schedule(static)
+				for (int z = 0; z < cz; z++)
+				{
+					const size_t plane_base = static_cast<size_t>(z) * cx * cy;
+					for (int y = 0; y < cy; y++)
+					{
+						for (int x = 0; x < cx; x++)
+						{
+							float s = 0;
+							for (int k = 0; k < kw; k++)
+							{
+								int ys = clamp_i(y + k - radius, 0, cy - 1);
+								s += w[k] * b[plane_base + static_cast<size_t>(ys) * cx + x];
+							}
+							a[plane_base + static_cast<size_t>(y) * cx + x] = s;
+						}
+					}
+				}
+				// Blur Z: a -> density_smooth
+				density_smooth.assign(n_voxels, 0.0f);
+				#pragma omp parallel for schedule(static)
+				for (int z = 0; z < cz; z++)
+				{
+					for (int y = 0; y < cy; y++)
+					{
+						const size_t row_base = static_cast<size_t>(y) * cx;
+						for (int x = 0; x < cx; x++)
+						{
+							float s = 0;
+							for (int k = 0; k < kw; k++)
+							{
+								int zs = clamp_i(z + k - radius, 0, cz - 1);
+								s += w[k] * a[static_cast<size_t>(zs) * cx * cy + row_base + x];
+							}
+							density_smooth[static_cast<size_t>(z) * cx * cy + row_base + x] = s;
+						}
+					}
+				}
+			}
 			m_vxl_cloud.reserve(m_vxl_cloud.size() + locals.size());
 			for (const auto& lv : locals)
 			{
@@ -2781,10 +2892,62 @@ void CXCCFileView::player_decode_frames()
 					xcc_vxl_normals::vec3f n = xcc_vxl_normals::lookup(normal_type, lv.normal_idx);
 					lnx = n.x; lny = n.y; lnz = n.z;
 				}
+				else if (norm_method == theme::vxl_method_gradient)
+				{
+					// Central-difference gradient of the smoothed density
+					// field, computed in the pre-pass above. Reads outside
+					// the volume clamp to the edge. The gradient points from
+					// high density (inside) toward low (outside), which is
+					// exactly the outward surface normal.
+					auto sample = [&](int xx, int yy, int zz) {
+						if (xx < 0) xx = 0; else if (xx >= cx) xx = cx - 1;
+						if (yy < 0) yy = 0; else if (yy >= cy) yy = cy - 1;
+						if (zz < 0) zz = 0; else if (zz >= cz) zz = cz - 1;
+						return density_smooth[static_cast<size_t>(zz) * cx * cy
+							+ static_cast<size_t>(yy) * cx + static_cast<size_t>(xx)];
+					};
+					lnx = sample(x - 1, y, z) - sample(x + 1, y, z);
+					lny = sample(x, y - 1, z) - sample(x, y + 1, z);
+					lnz = sample(x, y, z - 1) - sample(x, y, z + 1);
+					if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
+						lnz = 1.0f;
+				}
+				else if (norm_method == theme::vxl_method_weighted)
+				{
+					// Vengi-style 26-neighbor: sum *filled* neighbor offsets
+					// weighted by 1/distance (face=1, edge=1/sqrt(2),
+					// corner=1/sqrt(3)), then sign-flip so the result points
+					// outward. Resolves diagonals the 6-neighbor sum can't.
+					auto filled = [&](int xx, int yy, int zz) {
+						if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
+							return false;
+						return occ[occ_idx(xx, yy, zz)] != 0;
+					};
+					const float w_edge = 0.70710678f;	// 1/sqrt(2)
+					const float w_corner = 0.57735027f;	// 1/sqrt(3)
+					for (int dz = -1; dz <= 1; dz++)
+					{
+						for (int dy = -1; dy <= 1; dy++)
+						{
+							for (int dx = -1; dx <= 1; dx++)
+							{
+								if (dx == 0 && dy == 0 && dz == 0) continue;
+								if (!filled(x + dx, y + dy, z + dz)) continue;
+								const int abs_sum = std::abs(dx) + std::abs(dy) + std::abs(dz);
+								const float w = (abs_sum == 1) ? 1.0f
+									: (abs_sum == 2 ? w_edge : w_corner);
+								lnx -= dx * w;	// sign-flip: filled neighbors push normal away
+								lny -= dy * w;
+								lnz -= dz * w;
+							}
+						}
+					}
+					if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
+						lnz = 1.0f;
+				}
 				else
 				{
-					// Computed: 6-neighbor empty-side sum (cube faces exposed
-					// to empty cells). Fallback to +Z if fully surrounded.
+					// Basic: legacy 6-neighbor empty-side sum.
 					auto empty = [&](int xx, int yy, int zz) {
 						if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
 							return true;
@@ -3467,18 +3630,27 @@ void CXCCFileView::player_draw(CDC* pDC)
 	{
 		if (m_vxl_cloud.empty())
 			return;
-		const int ss = static_cast<int>(theme::vxl_supersample());
+		// Interactive low-SS: while the user is dragging (orbit/pan/slider),
+		// override the user's SS down to 1 so each paint is cheap. On drag
+		// end the flag clears and we trigger one final paint at the user's
+		// chosen SS, so the still image is always full quality.
+		const int ss = m_interactive_low_ss
+			? 1
+			: static_cast<int>(theme::vxl_supersample());
 		const bool shading = theme::vxl_shading();
 		const int lighting_version = theme::vxl_lighting_version();
 		vxl_ss_cx = m_player_cx * ss;
 		vxl_ss_cy = m_player_cy * ss;
+		// The splat cache no longer keys on lighting_version: lighting only
+		// affects shade[], which is rebuilt by a cheap separate pass below
+		// (consuming the per-pixel cam_normal[] buffer). So slider drags in
+		// the VXL Lighting dialog skip the splat rebuild entirely.
 		const bool cache_hit =
 			m_vxl_splat.token == m_open_token &&
 			m_vxl_splat.yaw == m_vxl_yaw &&
 			m_vxl_splat.pitch == m_vxl_pitch &&
 			m_vxl_splat.ss == ss &&
 			m_vxl_splat.shading == shading &&
-			m_vxl_splat.lighting_version == lighting_version &&
 			m_vxl_splat.cx_s == vxl_ss_cx &&
 			m_vxl_splat.cy_s == vxl_ss_cy &&
 			m_vxl_splat.buf.size() == static_cast<size_t>(vxl_ss_cx) * vxl_ss_cy;
@@ -3515,21 +3687,20 @@ void CXCCFileView::player_draw(CDC* pDC)
 			byte* d = m_vxl_splat.buf.write_start(c_pixels);
 			memset(d, 0, c_pixels);
 			vector<short> z_buf(c_pixels, SHRT_MIN);
-			// Camera-relative directional light. The viewer is camera-axis aligned
-			// (post-rotation rx,py,pz axes), so a fixed direction in this space
-			// effectively orbits with the user. We dot this with each voxel's
-			// camera-space normal. Direction + ambient/diffuse are user-
-			// configurable via the VXL Lighting dialog (theme:: accessors);
-			// changing any of them bumps theme::vxl_lighting_version() which
-			// is part of the splat cache key and forces a rebuild.
-			float light_x, light_y, light_z;
-			theme::vxl_light_direction(light_x, light_y, light_z);
-			const float ambient = theme::vxl_light_ambient();
-			const float diffuse = theme::vxl_light_diffuse();
+			// Splat writes the rotated camera-space normal per pixel into
+			// cam_normal[], not a pre-shaded byte. The lighting pass below
+			// converts cam_normal -> shade in a cheap second pass keyed on
+			// lighting_version. That way slider drags in the VXL Lighting
+			// dialog only redo the lighting pass, not the splat.
 			if (shading)
-				m_vxl_splat.shade.assign(c_pixels, 128);	// 128 = neutral 1.0
+			{
+				m_vxl_splat.cam_normal.assign(static_cast<size_t>(c_pixels) * 3, 0);
+			}
 			else
+			{
+				m_vxl_splat.cam_normal.clear();
 				m_vxl_splat.shade.clear();
+			}
 			// Parallelize the splat by partitioning *output rows*: each thread
 			// owns a contiguous row band [y_lo, y_hi) of the supersample
 			// framebuffer and iterates the entire voxel cloud, writing only when
@@ -3541,7 +3712,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// anyway. Voxel cloud is read-only, so no copies needed.
 			const int n_voxels = static_cast<int>(m_vxl_cloud.size());
 			const t_vxl_voxel* cloud = m_vxl_cloud.data();
-			unsigned char* shade_buf = shading ? m_vxl_splat.shade.data() : nullptr;
+			signed char* cam_n_buf = shading ? m_vxl_splat.cam_normal.data() : nullptr;
 			// Splat is intentionally serial. The previous output-row-banded
 			// OpenMP version made every thread iterate the whole voxel cloud
 			// and run the rotation math for each voxel, then reject ones
@@ -3562,7 +3733,12 @@ void CXCCFileView::player_draw(CDC* pDC)
 				int sx0 = static_cast<int>(rx * ss) + half_ss;
 				int sy0 = -static_cast<int>(py * ss) + half_ss;
 				short depth = static_cast<short>(pz);
-				unsigned char shade_byte = 128;
+				// Rotate the voxel's local-space normal into camera space.
+				// Stored quantized in cam_normal[] as i8 per channel so the
+				// shading pass can re-apply lighting without rebuilding the
+				// splat. Y is flipped to match the same post-transform Y flip
+				// applied to positions during decode.
+				signed char ni8x = 0, ni8y = 0, ni8z = 0;
 				if (shading)
 				{
 					float nrx = static_cast<float>(v.nx * cosY - v.ny * sinY);
@@ -3570,12 +3746,16 @@ void CXCCFileView::player_draw(CDC* pDC)
 					float nrz = static_cast<float>(v.nz);
 					float nry_p = static_cast<float>(nry * cosP - nrz * sinP);
 					float nrz_p = static_cast<float>(nry * sinP + nrz * cosP);
-					float ndotl = nrx * light_x + (-nry_p) * light_y + nrz_p * light_z;
-					if (ndotl < 0.0f) ndotl = 0.0f;
-					float shade = ambient + diffuse * ndotl;
-					int sb = static_cast<int>(shade * 128.0f + 0.5f);
-					if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
-					shade_byte = static_cast<unsigned char>(sb);
+					// Stored as: (nrx, -nry_p, nrz_p) so the lighting pass can
+					// just do dot(stored, light) without per-pixel sign-flips.
+					auto q = [](float v) -> signed char {
+						int i = static_cast<int>(v * 127.0f + (v >= 0 ? 0.5f : -0.5f));
+						if (i < -127) i = -127; else if (i > 127) i = 127;
+						return static_cast<signed char>(i);
+					};
+					ni8x = q(nrx);
+					ni8y = q(-nry_p);
+					ni8z = q(nrz_p);
 				}
 				// Splat the rotation-aware footprint (computed above) centered
 				// on the projected voxel position. Guarantees overlap with the
@@ -3595,8 +3775,11 @@ void CXCCFileView::player_draw(CDC* pDC)
 						{
 							z_buf[ofs] = depth;
 							d[ofs] = v.color;
-							if (shade_buf)
-								shade_buf[ofs] = shade_byte;
+							if (cam_n_buf)
+							{
+								signed char* p = cam_n_buf + 3 * ofs;
+								p[0] = ni8x; p[1] = ni8y; p[2] = ni8z;
+							}
 						}
 					}
 				}
@@ -3606,9 +3789,43 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.pitch = m_vxl_pitch;
 			m_vxl_splat.ss = ss;
 			m_vxl_splat.shading = shading;
-			m_vxl_splat.lighting_version = lighting_version;
 			m_vxl_splat.cx_s = vxl_ss_cx;
 			m_vxl_splat.cy_s = vxl_ss_cy;
+			// Force the shading pass to run on the fresh cam_normal buffer.
+			m_vxl_splat.shade_lighting_version = -1;
+		}
+		// Lighting pass: cheap. Runs whenever the splat just rebuilt OR
+		// theme::vxl_lighting_version() has bumped since shade was last built.
+		// Converts cam_normal[] -> shade[] via the same ambient + diffuse*max(0,
+		// dot(n, light)) formula the old in-splat shading used. Output range
+		// 0..255 where 128 = neutral 1.0 (matches downstream BGRA composite).
+		if (shading && m_vxl_splat.shade_lighting_version != lighting_version)
+		{
+			const int c_pixels_pass = vxl_ss_cx * vxl_ss_cy;
+			m_vxl_splat.shade.assign(c_pixels_pass, 128);
+			float light_x_pass, light_y_pass, light_z_pass;
+			theme::vxl_light_direction(light_x_pass, light_y_pass, light_z_pass);
+			const float ambient_pass = theme::vxl_light_ambient();
+			const float diffuse_pass = theme::vxl_light_diffuse();
+			const signed char* nbuf = m_vxl_splat.cam_normal.data();
+			const byte* dbuf = m_vxl_splat.buf.data();
+			unsigned char* sbuf = m_vxl_splat.shade.data();
+			#pragma omp parallel for schedule(static) if(c_pixels_pass >= 65536)
+			for (int i = 0; i < c_pixels_pass; i++)
+			{
+				if (dbuf[i] == 0) continue;	// empty pixel; leave at neutral
+				const signed char* p = nbuf + 3 * i;
+				float nx = p[0] / 127.0f;
+				float ny = p[1] / 127.0f;
+				float nz = p[2] / 127.0f;
+				float ndotl = nx * light_x_pass + ny * light_y_pass + nz * light_z_pass;
+				if (ndotl < 0.0f) ndotl = 0.0f;
+				float shade = ambient_pass + diffuse_pass * ndotl;
+				int sb = static_cast<int>(shade * 128.0f + 0.5f);
+				if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
+				sbuf[i] = static_cast<unsigned char>(sb);
+			}
+			m_vxl_splat.shade_lighting_version = lighting_version;
 		}
 		s = m_vxl_splat.buf.data();
 		vxl_shade_p = &m_vxl_splat.shade;
@@ -3791,7 +4008,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				vc.splat_pitch == m_vxl_splat.pitch &&
 				vc.splat_ss == m_vxl_splat.ss &&
 				vc.splat_shading == m_vxl_splat.shading &&
-				vc.splat_lighting_version == m_vxl_splat.lighting_version &&
+				vc.splat_lighting_version == m_vxl_splat.shade_lighting_version &&
 				vc.side == side &&
 				vc.custom_color == custom_color &&
 				vc.bg_on == show_bg &&
@@ -3815,8 +4032,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 		{
 		if (vxl)
 		{
-		// Serial. Buffer is the supersample canvas (~240x240 for typical
-		// VXLs); fork/join overhead exceeds the loop work at this size.
+		// Parallel for SS>1 — at SS=4..16 the supersample buffer is ~250 K to
+		// 4 M pixels and the composite (palette lookup + optional remap +
+		// shade multiply) is sizable enough to amortize the fork/join. At
+		// SS=1 (~57 K pixels) the gate falls back to serial like the SHP
+		// case below. This is the loop that runs every time the lighting
+		// pass invalidates the BGRA cache (slider drag), so its cost is
+		// what the user feels mid-drag.
+		#pragma omp parallel for schedule(static) if(n >= 65536)
 		for (int i = 0; i < n; i++)
 		{
 			byte idx = s[i];
@@ -3924,7 +4147,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vc.splat_pitch = m_vxl_splat.pitch;
 			vc.splat_ss = m_vxl_splat.ss;
 			vc.splat_shading = m_vxl_splat.shading;
-			vc.splat_lighting_version = m_vxl_splat.lighting_version;
+			vc.splat_lighting_version = m_vxl_splat.shade_lighting_version;
 			vc.side = m_vxl_side_idx;
 			vc.custom_color = m_vxl_side_custom_color;
 			vc.bg_on = m_player_bg_on;
@@ -3972,8 +4195,82 @@ void CXCCFileView::OnSize(UINT nType, int cx, int cy)
 	load_pal_btn_layout();
 }
 
+void CXCCFileView::OnPaint()
+{
+	// Rate-limit is enforced at the invalidate side (request_repaint) and
+	// at the input side (throttle_input_tick), so this just forwards.
+	CScrollView::OnPaint();
+}
+
+bool CXCCFileView::throttle_input_tick()
+{
+	// Input-rate gate that matches the paint cap. Drops mouse-move /
+	// slider-tick events that arrive within the cap window. At 15 fps that
+	// means at most ~15 accepted ticks/sec — the dropped 985 don't run any
+	// of the orbit math, request_repaint, or slider-side work. Mouse-poll
+	// rate (1000Hz) was the actual CPU eater, not the paints.
+	const int fps = theme::frame_rate_cap();
+	const DWORD min_ms = static_cast<DWORD>(1000 / (fps > 0 ? fps : 60));
+	const DWORD now = ::GetTickCount();
+	if (m_last_input_ms != 0 && (now - m_last_input_ms) < min_ms)
+		return false;
+	m_last_input_ms = now;
+	return true;
+}
+
+void CXCCFileView::request_repaint(LPCRECT rect)
+{
+	// Rate-limited invalidate. Multiple calls within the cap window are
+	// coalesced into a single deferred invalidate via TIMER_FRAME_LIMIT_ID
+	// so we don't even *queue* extra WM_PAINTs at high mouse-poll rates.
+	// Leading + trailing edge: the first call after a quiet period
+	// invalidates immediately; calls within the cap window mark the rect
+	// dirty in m_pending_rect and arm the timer.
+	const int fps = theme::frame_rate_cap();
+	const DWORD min_ms = static_cast<DWORD>(1000 / (fps > 0 ? fps : 60));
+	const DWORD now = ::GetTickCount();
+	const DWORD elapsed = now - m_last_paint_ms;
+	CRect r;
+	if (rect) r = *rect; else { GetClientRect(&r); }
+	if (m_last_paint_ms != 0 && elapsed < min_ms)
+	{
+		// Defer: union into the pending rect and arm the timer if not
+		// already armed.
+		if (m_paint_pending)
+			m_pending_rect.UnionRect(&m_pending_rect, &r);
+		else
+		{
+			m_pending_rect = r;
+			m_paint_pending = true;
+		}
+		if (!m_timer_armed)
+		{
+			DWORD remaining = (elapsed < min_ms) ? (min_ms - elapsed) : 1;
+			SetTimer(TIMER_FRAME_LIMIT_ID, remaining, NULL);
+			m_timer_armed = true;
+		}
+		return;
+	}
+	// Window open: invalidate now and update the timestamp.
+	m_last_paint_ms = now;
+	m_paint_pending = false;
+	InvalidateRect(&r, FALSE);
+}
+
 void CXCCFileView::OnTimer(UINT_PTR nIDEvent)
 {
+	if (nIDEvent == TIMER_FRAME_LIMIT_ID)
+	{
+		KillTimer(TIMER_FRAME_LIMIT_ID);
+		m_timer_armed = false;
+		if (m_paint_pending)
+		{
+			m_paint_pending = false;
+			m_last_paint_ms = ::GetTickCount();
+			InvalidateRect(&m_pending_rect, FALSE);
+		}
+		return;
+	}
 	if (nIDEvent == 1 && m_player_mode && m_player_playing && m_player_cf > 0)
 	{
 		int range = m_player_cf;
@@ -4156,6 +4453,31 @@ void CXCCFileView::reapply_player_theme()
 			if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
 		}
 	}
+}
+
+void CXCCFileView::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT mis)
+{
+	// Owner-draw combobox sends WM_MEASUREITEM at creation time. Without an
+	// override the default CComboBox::MeasureItem fires ASSERT(FALSE) in
+	// debug, and silently leaves items with the system default item height
+	// in release — which can cause repeated layout recomputes when the
+	// combo refreshes. Provide a stable height based on the player band's
+	// font metrics.
+	if (mis && nIDCtl == IDC_PLAYER_GRID_SEL && mis->CtlType == ODT_COMBOBOX)
+	{
+		// Use the player-band font's text height + a small vertical pad so
+		// items match the rest of the controls visually.
+		HDC hdc = ::GetDC(GetSafeHwnd());
+		HFONT hf = (HFONT)m_font.GetSafeHandle();
+		HGDIOBJ old = hf ? ::SelectObject(hdc, hf) : NULL;
+		TEXTMETRIC tm{};
+		::GetTextMetrics(hdc, &tm);
+		if (old) ::SelectObject(hdc, old);
+		::ReleaseDC(GetSafeHwnd(), hdc);
+		mis->itemHeight = tm.tmHeight + 4;
+		return;
+	}
+	CScrollView::OnMeasureItem(nIDCtl, mis);
 }
 
 void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)

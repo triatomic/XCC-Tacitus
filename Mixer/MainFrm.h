@@ -15,6 +15,10 @@
 
 class CVxlLightingDlg;
 
+// Prompt for a custom fps value (1..9999). Returns the entered value on OK,
+// -1 on cancel. Defined in MainFrm.cpp.
+int prompt_fps_value(CWnd* parent, int initial);
+
 struct t_pal_map_list_entry
 {
 	string name;
@@ -193,6 +197,8 @@ public:
 	// Trigger a repaint of the right-hand file-info pane. Used by the VXL
 	// Lighting dialog to refresh the splat after sliders change.
 	void invalidate_file_info_pane();
+	bool throttle_input_tick();
+	void set_file_view_interactive_low_ss(bool on);
 	// Drop+rebuild the VXL point cloud in the file-info pane. Used by the
 	// VXL Lighting dialog when normal source flips between Computed/File.
 	void invalidate_vxl_cloud_in_file_view();
@@ -313,6 +319,17 @@ protected:
 	afx_msg void OnUpdateThemeSharpen75(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeSharpen100(CCmdUI* pCmdUI);
 	void set_sharpen(int v);
+	afx_msg void OnThemeFps30();
+	afx_msg void OnThemeFps60();
+	afx_msg void OnThemeFps120();
+	afx_msg void OnThemeFpsUnlimited();
+	afx_msg void OnThemeFpsCustom();
+	afx_msg void OnUpdateThemeFps30(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeFps60(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeFps120(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeFpsUnlimited(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeFpsCustom(CCmdUI* pCmdUI);
+	void set_fps_cap(int v);
 	afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS);
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
@@ -320,6 +337,7 @@ protected:
 	void rebuild_menu_owner_draw();
 	afx_msg LRESULT OnThemeRebuildMenu(WPARAM wp, LPARAM lp);
 	afx_msg LRESULT OnPostPickerRetheme(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnDeferredAccelRebuild(WPARAM wp, LPARAM lp);
 	afx_msg void OnThemePanesOne();
 	afx_msg void OnThemePanesTwo();
 	afx_msg void OnUpdateThemePanesOne(CCmdUI* pCmdUI);

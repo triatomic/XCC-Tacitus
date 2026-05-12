@@ -23,6 +23,54 @@
 #include "xcc_log.h"
 #include "xste.h"
 
+// Custom-fps prompt: tiny modal with a single edit field.
+namespace {
+	class CFpsCustomDlg : public CDialog
+	{
+	public:
+		CFpsCustomDlg(int initial, CWnd* parent)
+			: CDialog(IDD_FPS_CUSTOM, parent), m_value(initial) {}
+		int m_value;
+	protected:
+		virtual void DoDataExchange(CDataExchange* pDX) override
+		{
+			CDialog::DoDataExchange(pDX);
+			DDX_Text(pDX, IDC_FPS_CUSTOM_EDIT, m_value);
+			DDV_MinMaxInt(pDX, m_value, 1, 9999);
+		}
+		virtual BOOL OnInitDialog() override
+		{
+			CDialog::OnInitDialog();
+			theme::apply_dialog(GetSafeHwnd());
+			// Pre-select the edit text so the user can type a replacement.
+			if (CEdit* e = (CEdit*)GetDlgItem(IDC_FPS_CUSTOM_EDIT))
+			{
+				e->SetFocus();
+				e->SetSel(0, -1);
+			}
+			return FALSE;	// FALSE = we manually set focus above
+		}
+		afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+		{
+			if (HBRUSH br = theme::on_ctl_color(pDC->GetSafeHdc(),
+				pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
+				return br;
+			return CDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+		}
+		DECLARE_MESSAGE_MAP()
+	};
+	BEGIN_MESSAGE_MAP(CFpsCustomDlg, CDialog)
+		ON_WM_CTLCOLOR()
+	END_MESSAGE_MAP()
+}
+
+int prompt_fps_value(CWnd* parent, int initial)
+{
+	CFpsCustomDlg dlg(initial, parent);
+	if (dlg.DoModal() != IDOK) return -1;
+	return dlg.m_value;
+}
+
 IMPLEMENT_DYNCREATE(CMainFrame, CFrameWnd)
 
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
@@ -127,12 +175,23 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_50,  OnUpdateThemeSharpen50)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_75,  OnUpdateThemeSharpen75)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_100, OnUpdateThemeSharpen100)
+	ON_COMMAND(ID_THEME_FPS_30,        OnThemeFps30)
+	ON_COMMAND(ID_THEME_FPS_60,        OnThemeFps60)
+	ON_COMMAND(ID_THEME_FPS_120,       OnThemeFps120)
+	ON_COMMAND(ID_THEME_FPS_UNLIMITED, OnThemeFpsUnlimited)
+	ON_COMMAND(ID_THEME_FPS_CUSTOM,    OnThemeFpsCustom)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FPS_30,        OnUpdateThemeFps30)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FPS_60,        OnUpdateThemeFps60)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FPS_120,       OnUpdateThemeFps120)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FPS_UNLIMITED, OnUpdateThemeFpsUnlimited)
+	ON_UPDATE_COMMAND_UI(ID_THEME_FPS_CUSTOM,    OnUpdateThemeFpsCustom)
 	ON_WM_MEASUREITEM()
 	ON_WM_DRAWITEM()
 	ON_WM_CTLCOLOR()
 	ON_WM_ERASEBKGND()
 	ON_MESSAGE(WM_USER + 0x101, &CMainFrame::OnThemeRebuildMenu)
 	ON_MESSAGE(WM_USER + 0x102, &CMainFrame::OnPostPickerRetheme)
+	ON_MESSAGE(WM_USER + 0x103, &CMainFrame::OnDeferredAccelRebuild)
 	ON_COMMAND(ID_THEME_PANES_ONE, OnThemePanesOne)
 	ON_COMMAND(ID_THEME_PANES_TWO, OnThemePanesTwo)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PANES_ONE, OnUpdateThemePanesOne)
@@ -198,11 +257,16 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	rebuild_menu_owner_draw();
-	// Load user-overridden keybinds from registry and rebuild the frame's
-	// accelerator table so customized shortcuts are live from the first key
-	// press, no restart required.
+	// Load user-overridden keybinds from registry; defer the accel table
+	// rebuild until after LoadFrame finishes. LoadFrame calls Create (which
+	// dispatches WM_CREATE -> this OnCreate) and *then* calls LoadAccelTable
+	// with IDR_MAINFRAME. If we replace m_hAccelTable here, the subsequent
+	// LoadAccelTable asserts in debug builds because m_hAccelTable != NULL.
+	// Posting WM_USER+0x103 means rebuild_accel runs after LoadFrame returns
+	// to the message loop, by which point MFC has already set the default
+	// accel and we can swap it cleanly.
 	keybinds::load_from_registry();
-	rebuild_accel();
+	PostMessage(WM_USER + 0x103);
 	refresh_menu_shortcuts();
 	// Suffix the frame caption with the mix-database source so the user can
 	// see at a glance whether names are coming from <data dir>\global mix
@@ -1573,6 +1637,15 @@ void CMainFrame::OnThemeDark()
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME);
 }
 
+LRESULT CMainFrame::OnDeferredAccelRebuild(WPARAM, LPARAM)
+{
+	// Posted from OnCreate. Runs after MFC's LoadFrame has installed the
+	// stock IDR_MAINFRAME accel via LoadAccelTable. rebuild_accel destroys
+	// that and swaps in our keybinds-driven table.
+	rebuild_accel();
+	return 0;
+}
+
 LRESULT CMainFrame::OnThemeRebuildMenu(WPARAM, LPARAM)
 {
 	rebuild_menu_owner_draw();
@@ -1708,6 +1781,40 @@ void CMainFrame::OnUpdateThemeSharpen50(CCmdUI* p)  { p->SetCheck(theme::sharpen
 void CMainFrame::OnUpdateThemeSharpen75(CCmdUI* p)  { p->SetCheck(theme::sharpen_amount() == 75); }
 void CMainFrame::OnUpdateThemeSharpen100(CCmdUI* p) { p->SetCheck(theme::sharpen_amount() == 100); }
 
+void CMainFrame::set_fps_cap(int v)
+{
+	theme::set_frame_rate_cap(v);
+	// No invalidate needed — the cap only affects future paints' pacing.
+}
+
+void CMainFrame::OnThemeFps30()        { set_fps_cap(30); }
+void CMainFrame::OnThemeFps60()        { set_fps_cap(60); }
+void CMainFrame::OnThemeFps120()       { set_fps_cap(120); }
+void CMainFrame::OnThemeFpsUnlimited() { set_fps_cap(theme::fps_unlimited_value); }
+
+void CMainFrame::OnThemeFpsCustom()
+{
+	// Tiny modal dialog with a single edit field, defined in the .rc as
+	// IDD_FPS_CUSTOM. Returns the user's chosen fps; -1 on cancel.
+	const int current = theme::frame_rate_cap();
+	int v = prompt_fps_value(this, current);
+	if (v > 0) set_fps_cap(v);
+}
+
+void CMainFrame::OnUpdateThemeFps30(CCmdUI* p)        { p->SetCheck(theme::frame_rate_cap() == 30); }
+void CMainFrame::OnUpdateThemeFps60(CCmdUI* p)        { p->SetCheck(theme::frame_rate_cap() == 60); }
+void CMainFrame::OnUpdateThemeFps120(CCmdUI* p)       { p->SetCheck(theme::frame_rate_cap() == 120); }
+void CMainFrame::OnUpdateThemeFpsUnlimited(CCmdUI* p) { p->SetCheck(theme::frame_rate_cap() == theme::fps_unlimited_value); }
+void CMainFrame::OnUpdateThemeFpsCustom(CCmdUI* p)
+{
+	// Show a check next to "Custom..." whenever the active value isn't one
+	// of the four presets, so the user can tell at a glance which mode they're
+	// in.
+	const int v = theme::frame_rate_cap();
+	const bool is_preset = (v == 30 || v == 60 || v == 120 || v == theme::fps_unlimited_value);
+	p->SetCheck(is_preset ? FALSE : TRUE);
+}
+
 void CMainFrame::set_pane_layout(bool two)
 {
 	if (!m_wndSplitter.GetSafeHwnd())
@@ -1822,9 +1929,31 @@ void CMainFrame::OnThemeVxlLighting()
 
 void CMainFrame::invalidate_file_info_pane()
 {
+	// Route through request_repaint so high-rate callers (slider drag) are
+	// rate-limited at the invalidate source rather than producing a flood
+	// of WM_PAINT dispatches that the OnPaint cap then has to swallow.
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
-		m_file_info_pane->Invalidate(FALSE);
+		m_file_info_pane->request_repaint(nullptr);
 }
+
+bool CMainFrame::throttle_input_tick()
+{
+	// Forward to the file view's throttle so the lighting dialog (and any
+	// other high-rate input source) can use the same gate as orbit drag.
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		return m_file_info_pane->throttle_input_tick();
+	return true;
+}
+
+void CMainFrame::set_file_view_interactive_low_ss(bool on)
+{
+	// Toggle the file view's interactive low-SS flag. Called by the VXL
+	// Lighting dialog so slider drag renders at SS=1 (cheap), and the
+	// final release paints at the user's chosen SS.
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->set_interactive_low_ss(on);
+}
+
 
 void CMainFrame::invalidate_vxl_cloud_in_file_view()
 {

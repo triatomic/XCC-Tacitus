@@ -121,6 +121,13 @@ namespace theme
 	// splat cache so changing lighting invalidates without explicit flushes.
 	int vxl_lighting_version();
 
+	// Flush deferred lighting writes to the registry. The four slider setters
+	// (azimuth/elevation/ambient/diffuse) update the in-memory value + bump
+	// the lighting version but skip the per-call save() so rapid slider
+	// drags don't drown the registry. The dialog calls this on slider release
+	// (TB_ENDTRACK / OnLButtonUp).
+	void flush_lighting_save();
+
 	// Source of per-voxel normals for the shading dot product:
 	// - computed (0, default): 6-neighbor occupancy at file load
 	//   (lit-able cube faces). Smooth, view-independent of disk contents.
@@ -136,6 +143,35 @@ namespace theme
 	};
 	vxl_normal_source vxl_normal_src();
 	void set_vxl_normal_src(vxl_normal_source v);
+
+	// Algorithm used to derive normals when vxl_normal_src() == computed.
+	// Cheaper -> better:
+	//   basic    = legacy 6-neighbor empty-side sum (~7 unique directions).
+	//   weighted = Vengi-style 26-neighbor filled-neighbor sum at
+	//              face/edge/corner weights (~26 distinct directions, less
+	//              faceting on diagonals).
+	//   gradient = central-difference gradient of a separable-Gaussian-blurred
+	//              occupancy field; continuous directions, smooth on curved
+	//              hulls. The industry-standard volume-viz normal.
+	enum vxl_normal_method
+	{
+		vxl_method_basic    = 0,
+		vxl_method_weighted = 1,
+		vxl_method_gradient = 2,
+	};
+	vxl_normal_method vxl_normals_method();
+	void set_vxl_normals_method(vxl_normal_method v);
+
+	// Kernel size for the Gaussian blur in vxl_method_gradient. 3^3 keeps
+	// fine features (antennas, barrels) crisp; 5^3 smooths blocky hulls more
+	// aggressively at the cost of softening thin features.
+	enum vxl_normal_kernel
+	{
+		vxl_kernel_3 = 0,
+		vxl_kernel_5 = 1,
+	};
+	vxl_normal_kernel vxl_normals_kernel();
+	void set_vxl_normals_kernel(vxl_normal_kernel v);
 	// Resolve azimuth/elevation into a unit direction vector in camera space.
 	void vxl_light_direction(float& x, float& y, float& z);
 
@@ -210,6 +246,16 @@ namespace theme
 	// no-op identity convolution.
 	int sharpen_amount();             // 0..100
 	void set_sharpen_amount(int v);
+
+	// Global frame-rate cap for CXCCFileView paints. Coalesces rapid
+	// invalidates (slider drag, orbit drag) into at most N paints per
+	// second. Stored as a plain int so the user can pick any value via a
+	// "Custom..." menu item; presets at 30/60/120/666 are exposed in the
+	// Theme menu. 666 == the "Unlimited" preset (soft cap). Default 60.
+	// Persisted as "Theme\\fps_cap". Clamped to 1..9999 on load/set.
+	int frame_rate_cap();
+	void set_frame_rate_cap(int v);
+	constexpr int fps_unlimited_value = 1000;
 	// Stretch-blit src onto dst using the configured interpolation. Source must
 	// be a 32bpp top-down DIB; src_bits is the linear pixel array (only used
 	// for the Lanczos path — others read from src_dc).
