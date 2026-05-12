@@ -115,13 +115,19 @@ void CXCCFileView::OnLButtonDown(UINT nFlags, CPoint point)
 			// Only start orbit drag in the image area, not over the controls band.
 			CRect cr;
 			GetClientRect(&cr);
-			if (point.y < cr.bottom - 32)
+			if (point.y < cr.bottom - player_band_h())
 			{
 				m_vxl_dragging = true;
 				m_vxl_drag_origin = point;
 				m_vxl_drag_yaw0 = m_vxl_yaw;
 				m_vxl_drag_pitch0 = m_vxl_pitch;
 				SetCapture();
+				// Clip the cursor to the image area so dragging doesn't drift onto
+				// other windows / the desktop while orbiting. Cleared on button up.
+				CRect clip = cr;
+				clip.bottom -= player_band_h();
+				ClientToScreen(&clip);
+				::ClipCursor(&clip);
 				return;
 			}
 		}
@@ -135,6 +141,7 @@ void CXCCFileView::OnLButtonUp(UINT nFlags, CPoint point)
 	{
 		m_vxl_dragging = false;
 		ReleaseCapture();
+		::ClipCursor(NULL);
 		// Re-render with the user's chosen interpolation now that orbit
 		// stopped (drag-time used nearest for cheap StretchBlt).
 		CRect cr; GetClientRect(&cr);
@@ -169,6 +176,10 @@ void CXCCFileView::OnRButtonDown(UINT nFlags, CPoint point)
 				m_player_pan_y0 = m_player_pan_y;
 				SetCapture();
 				::SetCursor(::LoadCursor(NULL, IDC_SIZEALL));
+				CRect clip = cr;
+				clip.bottom -= player_band_h();
+				ClientToScreen(&clip);
+				::ClipCursor(&clip);
 				return;
 			}
 		}
@@ -182,6 +193,7 @@ void CXCCFileView::OnRButtonUp(UINT nFlags, CPoint point)
 	{
 		m_player_panning = false;
 		ReleaseCapture();
+		::ClipCursor(NULL);
 		// Same as orbit: bring back the full-quality interpolation.
 		CRect cr; GetClientRect(&cr);
 		cr.bottom -= player_band_h();
@@ -198,17 +210,41 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 	{
 		// 3dsmax-style orbit: horizontal drag = yaw, vertical drag = pitch.
 		// ~0.4 deg per pixel feels right for the tiny VXL framebuffer.
+		// Incremental from the last mouse position rather than absolute from
+		// the click origin: lets us warp the cursor back when it hits the
+		// clip edge so the user can keep dragging in the same direction
+		// indefinitely (Blender/3dsmax-style infinite orbit).
 		const double k = 0.4 * 3.14159265358979323846 / 180.0;
-		m_vxl_yaw = m_vxl_drag_yaw0 + (point.x - m_vxl_drag_origin.x) * k;
-		m_vxl_pitch = m_vxl_drag_pitch0 + (point.y - m_vxl_drag_origin.y) * k;
-		// Clamp pitch so the camera doesn't flip past straight up/down.
-		const double lim = 89.0 * 3.14159265358979323846 / 180.0;
-		if (m_vxl_pitch > lim) m_vxl_pitch = lim;
-		if (m_vxl_pitch < -lim) m_vxl_pitch = -lim;
+		int dx = point.x - m_vxl_drag_origin.x;
+		int dy = point.y - m_vxl_drag_origin.y;
+		if (dx == 0 && dy == 0)
+			return;
+		m_vxl_yaw   += dx * k;
+		m_vxl_pitch += dy * k;
 		CRect cr;
 		GetClientRect(&cr);
-		cr.bottom -= 32;
+		const int band = player_band_h();
+		cr.bottom -= band;
 		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		// If the cursor is near an edge of the image area, warp it back to
+		// the center of the area so the next move has full travel in any
+		// direction. ClipCursor keeps it inside; this prevents getting
+		// stuck against an edge.
+		const int margin = 8;
+		bool near_edge =
+			point.x <= cr.left + margin || point.x >= cr.right - margin ||
+			point.y <= cr.top  + margin || point.y >= cr.bottom - margin;
+		if (near_edge)
+		{
+			CPoint c((cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2);
+			m_vxl_drag_origin = c;
+			ClientToScreen(&c);
+			::SetCursorPos(c.x, c.y);
+		}
+		else
+		{
+			m_vxl_drag_origin = point;
+		}
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
@@ -3410,6 +3446,28 @@ void CXCCFileView::player_draw(CDC* pDC)
 			const double sinY = std::sin(m_vxl_yaw);
 			const double cosP = std::cos(m_vxl_pitch);
 			const double sinP = std::sin(m_vxl_pitch);
+			// Each voxel projects to a parallelogram (the rotated unit cube),
+			// not an axis-aligned square. Fixed ss x ss splats leave diagonal
+			// gaps under arbitrary rotation. Compute the screen-space bounding
+			// box of a projected unit cube under this (yaw, pitch) and use
+			// that as the splat footprint. Adjacent voxels along any local
+			// axis then overlap by construction. The +1 ceil + extra pixel
+			// guards against int truncation drift between neighbors.
+			auto absd = [](double v) { return v < 0 ? -v : v; };
+			const double ex_x = absd(cosY);                    // x-edge -> rx
+			const double ey_x = absd(-sinY);                   // y-edge -> rx
+			// z-edge contributes 0 to rx.
+			const double ex_y = absd(sinY * sinP);             // x-edge -> py (via ry*cosP - rz*sinP; ry = x*sinY)
+			const double ey_y = absd(cosY * sinP);             // y-edge -> py (ry = y*cosY)
+			const double ez_y = absd(-cosP);                   // z-edge -> py (rz=z, so -z*sinP... wait sign: py = ry*cosP - rz*sinP; z-edge: rz=1 -> py contribution = -sinP). Use abs.
+			const double fpx_d = (ex_x + ey_x) * ss;
+			const double fpy_d = (ex_y + ey_y + ez_y) * ss;
+			const int fp_x = static_cast<int>(fpx_d) + 2;
+			const int fp_y = static_cast<int>(fpy_d) + 2;
+			// Center the footprint on the projected voxel so the splat is
+			// symmetric instead of biased toward +x/+y.
+			const int fp_x_off = fp_x / 2;
+			const int fp_y_off = fp_y / 2;
 			byte* d = m_vxl_splat.buf.write_start(c_pixels);
 			memset(d, 0, c_pixels);
 			vector<short> z_buf(c_pixels, SHRT_MIN);
@@ -3475,13 +3533,18 @@ void CXCCFileView::player_draw(CDC* pDC)
 					if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
 					shade_byte = static_cast<unsigned char>(sb);
 				}
-				for (int dy = 0; dy < ss; dy++)
+				// Splat the rotation-aware footprint (computed above) centered
+				// on the projected voxel position. Guarantees overlap with the
+				// projected neighbor along any local axis, eliminating diagonal
+				// gaps that an axis-aligned ss x ss square leaves under
+				// arbitrary yaw/pitch. Z-buffer keeps real occlusions correct.
+				for (int dy = 0; dy < fp_y; dy++)
 				{
-					int sy_pix = sy0 + dy;
+					int sy_pix = sy0 + dy - fp_y_off;
 					if (sy_pix < 0 || sy_pix >= vxl_ss_cy) continue;
-					for (int dx = 0; dx < ss; dx++)
+					for (int dx = 0; dx < fp_x; dx++)
 					{
-						int sx_pix = sx0 + dx;
+						int sx_pix = sx0 + dx - fp_x_off;
 						if (sx_pix < 0 || sx_pix >= vxl_ss_cx) continue;
 						int ofs = sx_pix + vxl_ss_cx * sy_pix;
 						if (depth > z_buf[ofs])
@@ -4009,6 +4072,8 @@ void CXCCFileView::reapply_player_theme()
 		m_player_bg.GetSafeHwnd(),
 		m_player_iso_grid.GetSafeHwnd(),
 		m_player_side_custom.GetSafeHwnd(),
+		m_vxl_hva_load.GetSafeHwnd(),
+		m_vxl_hva_loop.GetSafeHwnd(),
 	};
 	for (HWND h : ctrls)
 		if (h)

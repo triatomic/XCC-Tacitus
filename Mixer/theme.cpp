@@ -42,6 +42,7 @@ namespace theme
 		bool g_use_checkerboard = true;
 		bool g_use_external_programs = false;
 		interpolation g_interp = interp_nearest;
+		int g_sharpen_amount = 0;   // 0..100, post-pass strength on non-nearest stretch_image paths
 
 		// Cached brushes — recreated when the mode flips.
 		HBRUSH g_brush_bg = NULL;
@@ -104,6 +105,9 @@ namespace theme
 		// Out-of-range falls back to nearest (covers stale interp_ewa=4 values).
 		if (iv < interp_nearest || iv > interp_lanczos) iv = interp_nearest;
 		g_interp = static_cast<interpolation>(iv);
+		int sa = AfxGetApp()->GetProfileInt("Theme", "sharpen_amount", 0);
+		if (sa < 0) sa = 0; else if (sa > 100) sa = 100;
+		g_sharpen_amount = sa;
 		int sf = AfxGetApp()->GetProfileInt("Theme", "size_format", size_auto);
 		if (sf != size_auto && sf != size_bytes) sf = size_auto;
 		g_size_fmt = static_cast<size_format>(sf);
@@ -141,6 +145,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "use_external_programs", g_use_external_programs ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "interpolation", static_cast<int>(g_interp));
+		AfxGetApp()->WriteProfileInt("Theme", "sharpen_amount", g_sharpen_amount);
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
@@ -400,6 +405,16 @@ namespace theme
 		save();
 	}
 
+	int sharpen_amount() { return g_sharpen_amount; }
+	void set_sharpen_amount(int v)
+	{
+		if (v < 0) v = 0; else if (v > 100) v = 100;
+		if (g_sharpen_amount == v)
+			return;
+		g_sharpen_amount = v;
+		save();
+	}
+
 	namespace
 	{
 		// Reusable scratch buffers — kept across paints to avoid per-frame
@@ -408,16 +423,18 @@ namespace theme
 		std::vector<DWORD> g_scratch_out;
 		std::vector<float> g_scratch_tmp;
 
-		// Lanczos-3 kernel, single-precision. sinc(x) * sinc(x/a), a = 3,
-		// zero outside [-a, a].
+		// Lanczos-2 kernel, single-precision. sinc(x) * sinc(x/a), a = 2,
+		// zero outside [-a, a]. a=2 (vs a=3) gives a crisper result at the
+		// cost of slightly more aliasing on high-contrast edges. User picked
+		// this over a=3 because the previous default looked too soft on VXL.
 		inline float lanczos_kernel(float x)
 		{
 			if (x == 0.0f) return 1.0f;
 			if (x < 0) x = -x;
-			if (x >= 3.0f) return 0.0f;
+			if (x >= 2.0f) return 0.0f;
 			const float pi = 3.14159265358979323846f;
 			float px = pi * x;
-			return (std::sin(px) * std::sin(px / 3.0f)) / (px * px / 3.0f);
+			return (std::sin(px) * std::sin(px / 2.0f)) / (px * px / 2.0f);
 		}
 
 		// Bilinear resample of a 32bpp BGRA top-down image. For each output
@@ -488,7 +505,7 @@ namespace theme
 		{
 			if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
 				return;
-			const int a = 3;
+			const int a = 2;
 			const float scale_x = static_cast<float>(sw) / dw;
 			const float scale_y = static_cast<float>(sh) / dh;
 			// When upscaling we sample the source kernel at unit width; when
@@ -591,6 +608,65 @@ namespace theme
 		}
 	}
 
+	namespace
+	{
+		// 3x3 unsharp mask on a 32bpp BGRA top-down buffer, in-place.
+		// kernel = pixel + amount * (pixel - blur(pixel)), where blur is a
+		// box-3 average. amount = sharpen_amount / 100 mapped to [0..1.5] so
+		// the slider has a useful top end without going completely cartoon.
+		// Edges replicate (clamp), not wrap. Per-channel clamp to [0,255].
+		void unsharp_mask(DWORD* buf, int w, int h)
+		{
+			const int sa = g_sharpen_amount;
+			if (sa <= 0 || w < 3 || h < 3) return;
+			// amount in [0..1.5] — 1.5 at sa=100 is firmly "crisp" without
+			// going past the point where halos dominate.
+			const float amount = (sa / 100.0f) * 1.5f;
+			// Out-of-place pass so the OpenMP rows don't race on shared
+			// reads/writes of buf. Sizes are bounded by viewport area, which
+			// is small relative to anything that'd justify pooling.
+			std::vector<DWORD> out(static_cast<size_t>(w) * h);
+			#pragma omp parallel for schedule(static) if(w * h >= 65536)
+			for (int y = 0; y < h; y++)
+			{
+				const int ym = (y == 0)     ? 0     : y - 1;
+				const int yp = (y == h - 1) ? h - 1 : y + 1;
+				const DWORD* r0 = buf + static_cast<size_t>(ym) * w;
+				const DWORD* r1 = buf + static_cast<size_t>(y)  * w;
+				const DWORD* r2 = buf + static_cast<size_t>(yp) * w;
+				DWORD* drow = out.data() + static_cast<size_t>(y) * w;
+				for (int x = 0; x < w; x++)
+				{
+					const int xm = (x == 0)     ? 0     : x - 1;
+					const int xp = (x == w - 1) ? w - 1 : x + 1;
+					DWORD c = r1[x];
+					// Per-channel box-3 average and sharpen.
+					int out_b = 0, out_g = 0, out_r = 0;
+					for (int shift = 0, ch = 0; ch < 3; ch++, shift += 8)
+					{
+						int sum =
+							 ((r0[xm] >> shift) & 0xff) + ((r0[x] >> shift) & 0xff) + ((r0[xp] >> shift) & 0xff)
+							+((r1[xm] >> shift) & 0xff) + ((r1[x] >> shift) & 0xff) + ((r1[xp] >> shift) & 0xff)
+							+((r2[xm] >> shift) & 0xff) + ((r2[x] >> shift) & 0xff) + ((r2[xp] >> shift) & 0xff);
+						const float blur = sum * (1.0f / 9.0f);
+						const float center = static_cast<float>((c >> shift) & 0xff);
+						float v = center + amount * (center - blur);
+						int iv = static_cast<int>(v + 0.5f);
+						if (iv < 0) iv = 0; else if (iv > 255) iv = 255;
+						if (ch == 0) out_b = iv;
+						else if (ch == 1) out_g = iv;
+						else out_r = iv;
+					}
+					drow[x] = static_cast<DWORD>(out_b)
+						| (static_cast<DWORD>(out_g) << 8)
+						| (static_cast<DWORD>(out_r) << 16)
+						| (c & 0xff000000);
+				}
+			}
+			std::memcpy(buf, out.data(), sizeof(DWORD) * static_cast<size_t>(w) * h);
+		}
+	}
+
 	void stretch_image(CDC* dst, int dx, int dy, int dw, int dh,
 		CDC* src_dc, HBITMAP src_dib, const DWORD* src_bits, int sw, int sh)
 	{
@@ -603,10 +679,34 @@ namespace theme
 	{
 		if (!dst || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0)
 			return;
-		// 1:1 → BitBlt regardless of mode (no scaling, no filter).
-		if (dw == sw && dh == sh && src_dc)
+		// 1:1 fast path: if there's no scaling AND no sharpen pass to apply
+		// AND the mode is nearest (or no src_bits available for a sharpen
+		// post-pass), BitBlt and bail. Otherwise we fall into the resampler
+		// switch below so the unsharp post-pass still runs even at 1:1.
+		const bool sharpen_on = g_sharpen_amount > 0 && mode != interp_nearest && src_bits;
+		if (dw == sw && dh == sh && src_dc && !sharpen_on)
 		{
 			dst->BitBlt(dx, dy, dw, dh, src_dc, 0, 0, SRCCOPY);
+			return;
+		}
+		// 1:1 with sharpen: copy src_bits to scratch, run unsharp, blit. We
+		// reach here only when sharpen_on AND dw==sw AND dh==sh.
+		if (dw == sw && dh == sh && sharpen_on)
+		{
+			const size_t need = static_cast<size_t>(dw) * dh;
+			if (g_scratch_out.size() < need) g_scratch_out.resize(need);
+			DWORD* out_buf = g_scratch_out.data();
+			std::memcpy(out_buf, src_bits, sizeof(DWORD) * need);
+			unsharp_mask(out_buf, dw, dh);
+			BITMAPINFO bmi{};
+			bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+			bmi.bmiHeader.biWidth = dw;
+			bmi.bmiHeader.biHeight = -dh;
+			bmi.bmiHeader.biPlanes = 1;
+			bmi.bmiHeader.biBitCount = 32;
+			bmi.bmiHeader.biCompression = BI_RGB;
+			::SetDIBitsToDevice(dst->GetSafeHdc(), dx, dy, dw, dh, 0, 0, 0, dh,
+				out_buf, &bmi, DIB_RGB_COLORS);
 			return;
 		}
 		switch (mode)
@@ -618,6 +718,7 @@ namespace theme
 				if (g_scratch_out.size() < need) g_scratch_out.resize(need);
 				DWORD* out_buf = g_scratch_out.data();
 				bilinear_resample(src_bits, sw, sh, out_buf, dw, dh);
+				if (g_sharpen_amount > 0) unsharp_mask(out_buf, dw, dh);
 				BITMAPINFO bmi{};
 				bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 				bmi.bmiHeader.biWidth = dw;
@@ -633,6 +734,51 @@ namespace theme
 		case interp_bicubic:
 			if (src_dib)
 			{
+				if (g_sharpen_amount > 0)
+				{
+					// Route the bicubic resample through an offscreen GDI+
+					// bitmap so we can run unsharp_mask on the result before
+					// blitting to the destination. Without this detour the
+					// direct DrawImage-to-DC path skips the post-pass.
+					Gdiplus::Bitmap out_bmp(dw, dh, PixelFormat32bppARGB);
+					{
+						Gdiplus::Graphics g(&out_bmp);
+						g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+						g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+						Gdiplus::Bitmap bmp(src_dib, NULL);
+						g.DrawImage(&bmp, Gdiplus::Rect(0, 0, dw, dh), 0, 0, sw, sh, Gdiplus::UnitPixel);
+					}
+					Gdiplus::Rect lock_r(0, 0, dw, dh);
+					Gdiplus::BitmapData bd;
+					if (out_bmp.LockBits(&lock_r, Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite,
+						PixelFormat32bppARGB, &bd) == Gdiplus::Ok)
+					{
+						// GDI+ may return a stride > dw*4; copy row-by-row into
+						// our packed scratch buffer if so.
+						const size_t need = static_cast<size_t>(dw) * dh;
+						if (g_scratch_out.size() < need) g_scratch_out.resize(need);
+						DWORD* out_buf = g_scratch_out.data();
+						const int stride_dwords = bd.Stride / 4;
+						const DWORD* src_p = static_cast<const DWORD*>(bd.Scan0);
+						for (int y = 0; y < dh; y++)
+							std::memcpy(out_buf + static_cast<size_t>(y) * dw,
+								src_p + static_cast<size_t>(y) * stride_dwords,
+								sizeof(DWORD) * dw);
+						out_bmp.UnlockBits(&bd);
+						unsharp_mask(out_buf, dw, dh);
+						BITMAPINFO bmi{};
+						bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+						bmi.bmiHeader.biWidth = dw;
+						bmi.bmiHeader.biHeight = -dh;
+						bmi.bmiHeader.biPlanes = 1;
+						bmi.bmiHeader.biBitCount = 32;
+						bmi.bmiHeader.biCompression = BI_RGB;
+						::SetDIBitsToDevice(dst->GetSafeHdc(), dx, dy, dw, dh, 0, 0, 0, dh,
+							out_buf, &bmi, DIB_RGB_COLORS);
+						return;
+					}
+					// Lock failure: fall through to the direct path.
+				}
 				Gdiplus::Graphics g(dst->GetSafeHdc());
 				g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
 				g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
@@ -648,6 +794,7 @@ namespace theme
 				if (g_scratch_out.size() < need) g_scratch_out.resize(need);
 				DWORD* out_buf = g_scratch_out.data();
 				lanczos_resample(src_bits, sw, sh, out_buf, dw, dh);
+				if (g_sharpen_amount > 0) unsharp_mask(out_buf, dw, dh);
 				BITMAPINFO bmi{};
 				bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 				bmi.bmiHeader.biWidth = dw;

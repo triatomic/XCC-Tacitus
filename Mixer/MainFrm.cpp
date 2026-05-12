@@ -117,6 +117,16 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BILINEAR, OnUpdateThemeInterpBilinear)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BICUBIC,  OnUpdateThemeInterpBicubic)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_LANCZOS,  OnUpdateThemeInterpLanczos)
+	ON_COMMAND(ID_THEME_SHARPEN_0,   OnThemeSharpen0)
+	ON_COMMAND(ID_THEME_SHARPEN_25,  OnThemeSharpen25)
+	ON_COMMAND(ID_THEME_SHARPEN_50,  OnThemeSharpen50)
+	ON_COMMAND(ID_THEME_SHARPEN_75,  OnThemeSharpen75)
+	ON_COMMAND(ID_THEME_SHARPEN_100, OnThemeSharpen100)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_0,   OnUpdateThemeSharpen0)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_25,  OnUpdateThemeSharpen25)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_50,  OnUpdateThemeSharpen50)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_75,  OnUpdateThemeSharpen75)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHARPEN_100, OnUpdateThemeSharpen100)
 	ON_WM_MEASUREITEM()
 	ON_WM_DRAWITEM()
 	ON_WM_CTLCOLOR()
@@ -1678,6 +1688,25 @@ void CMainFrame::OnUpdateThemeInterpNearest(CCmdUI* p)  { p->SetCheck(theme::int
 void CMainFrame::OnUpdateThemeInterpBilinear(CCmdUI* p) { p->SetCheck(theme::interp() == theme::interp_bilinear); }
 void CMainFrame::OnUpdateThemeInterpBicubic(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_bicubic); }
 void CMainFrame::OnUpdateThemeInterpLanczos(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_lanczos); }
+
+void CMainFrame::set_sharpen(int v)
+{
+	theme::set_sharpen_amount(v);
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
+}
+
+void CMainFrame::OnThemeSharpen0()   { set_sharpen(0); }
+void CMainFrame::OnThemeSharpen25()  { set_sharpen(25); }
+void CMainFrame::OnThemeSharpen50()  { set_sharpen(50); }
+void CMainFrame::OnThemeSharpen75()  { set_sharpen(75); }
+void CMainFrame::OnThemeSharpen100() { set_sharpen(100); }
+
+void CMainFrame::OnUpdateThemeSharpen0(CCmdUI* p)   { p->SetCheck(theme::sharpen_amount() == 0); }
+void CMainFrame::OnUpdateThemeSharpen25(CCmdUI* p)  { p->SetCheck(theme::sharpen_amount() == 25); }
+void CMainFrame::OnUpdateThemeSharpen50(CCmdUI* p)  { p->SetCheck(theme::sharpen_amount() == 50); }
+void CMainFrame::OnUpdateThemeSharpen75(CCmdUI* p)  { p->SetCheck(theme::sharpen_amount() == 75); }
+void CMainFrame::OnUpdateThemeSharpen100(CCmdUI* p) { p->SetCheck(theme::sharpen_amount() == 100); }
 
 void CMainFrame::set_pane_layout(bool two)
 {

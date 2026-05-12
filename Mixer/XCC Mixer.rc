@@ -190,7 +190,15 @@ BEGIN
                 MENUITEM "&Nearest (Sharp Pixels)",     ID_THEME_INTERP_NEAREST
                 MENUITEM "&Bilinear",                   ID_THEME_INTERP_BILINEAR
                 MENUITEM "B&icubic",                    ID_THEME_INTERP_BICUBIC
-                MENUITEM "&Lanczos-3",                  ID_THEME_INTERP_LANCZOS
+                MENUITEM "&Lanczos-2",                  ID_THEME_INTERP_LANCZOS
+            END
+            POPUP "S&harpen"
+            BEGIN
+                MENUITEM "&Off",                        ID_THEME_SHARPEN_0
+                MENUITEM "&25%",                        ID_THEME_SHARPEN_25
+                MENUITEM "&50%",                        ID_THEME_SHARPEN_50
+                MENUITEM "&75%",                        ID_THEME_SHARPEN_75
+                MENUITEM "&100%",                       ID_THEME_SHARPEN_100
             END
             POPUP "&VXL Supersampling"
             BEGIN

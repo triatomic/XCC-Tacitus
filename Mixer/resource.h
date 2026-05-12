@@ -1468,6 +1468,11 @@
 #define IDC_LOAD_PAL                      1168
 #define ID_THEME_VXL_LIGHTING             41025
 #define ID_THEME_VXL_FULL_HIER            41026
+#define ID_THEME_SHARPEN_0                41027
+#define ID_THEME_SHARPEN_25               41028
+#define ID_THEME_SHARPEN_50               41029
+#define ID_THEME_SHARPEN_75               41030
+#define ID_THEME_SHARPEN_100              41031
 
 #define IDD_KEYBINDS                      145
 #define IDD_KEY_CAPTURE                   146

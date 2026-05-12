@@ -184,6 +184,16 @@ namespace theme
 	};
 	interpolation interp();
 	void set_interp(interpolation v);
+
+	// Unsharp-mask amount applied as a post-pass to the non-nearest
+	// interpolation paths in stretch_image. 0 = off (current behavior),
+	// 100 = full strength. Lets the user dial in crispness independently
+	// of which kernel they pick — also makes the interpolation menu have
+	// a visible effect at zooms where source and destination sizes match
+	// (e.g. SHP/WSA at Native), where the kernel would otherwise be a
+	// no-op identity convolution.
+	int sharpen_amount();             // 0..100
+	void set_sharpen_amount(int v);
 	// Stretch-blit src onto dst using the configured interpolation. Source must
 	// be a 32bpp top-down DIB; src_bits is the linear pixel array (only used
 	// for the Lanczos path — others read from src_dc).

@@ -299,6 +299,17 @@ protected:
 	afx_msg void OnUpdateThemeInterpBicubic(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeInterpLanczos(CCmdUI* pCmdUI);
 	void set_interp(theme::interpolation v);
+	afx_msg void OnThemeSharpen0();
+	afx_msg void OnThemeSharpen25();
+	afx_msg void OnThemeSharpen50();
+	afx_msg void OnThemeSharpen75();
+	afx_msg void OnThemeSharpen100();
+	afx_msg void OnUpdateThemeSharpen0(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeSharpen25(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeSharpen50(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeSharpen75(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeSharpen100(CCmdUI* pCmdUI);
+	void set_sharpen(int v);
 	afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMIS);
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
