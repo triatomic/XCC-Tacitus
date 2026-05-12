@@ -46,6 +46,7 @@
 #include <voc_file.h>
 #include <vqa_file.h>
 #include <vxl_file.h>
+#include <vxl_normals.h>
 #include <wav_file.h>
 #include <wsa_dune2_file.h>
 #include <wsa_file.h>
@@ -2698,9 +2699,12 @@ void CXCCFileView::player_decode_frames()
 			// single byte per cell suffices; 1 = occupied.
 			std::vector<unsigned char> occ(static_cast<size_t>(cx) * cy * cz, 0);
 			auto occ_idx = [cx, cy](int x, int y, int z) { return x + cx * (y + cy * z); };
-			// Pass 1: parse spans into a parallel scratch list of (lx,ly,lz,color)
-			// and populate the occupancy grid.
-			struct local_voxel { int lx, ly, lz; unsigned char color; };
+			// Pass 1: parse spans into a parallel scratch list of
+			// (lx,ly,lz,color,normal_idx) and populate the occupancy grid.
+			// normal_idx is the on-disk Westwood normal-table index — only
+			// used when theme::vxl_normal_src() == vxl_normals_file (Pass 2
+			// branches on that). Computed-normals path ignores normal_idx.
+			struct local_voxel { int lx, ly, lz; unsigned char color; unsigned char normal_idx; };
 			std::vector<local_voxel> locals;
 			int j = 0;
 			for (int y = 0; y < cy; y++)
@@ -2717,23 +2721,33 @@ void CXCCFileView::player_decode_frames()
 						int c = *r++;
 						while (c--)
 						{
-							locals.push_back({ x, y, z, *r });
+							const unsigned char color_byte = *r++;
+							const unsigned char normal_byte = *r++;
+							locals.push_back({ x, y, z, color_byte, normal_byte });
 							if (x >= 0 && x < cx && y >= 0 && y < cy && z >= 0 && z < cz)
 								occ[occ_idx(x, y, z)] = 1;
-							r += 2;
 							z++;
 						}
 						r++;
 					}
 				}
 			}
-			// Pass 2: emit world-space voxels with neighbor-derived normals.
-			// Local-space normal is the sum of unit vectors pointing toward each
-			// empty 6-neighbor; this picks out the lit-able cube faces. Y is
-			// flipped to match the position flip below. Then rotate by the 3x3
-			// rotation submatrix of st.transform (translation column doesn't
-			// apply to directions). Renormalize, with a fallback +Z if the voxel
-			// is fully surrounded (no visible faces).
+			// Pass 2: emit world-space voxels with normals.
+			// Two normal-source modes:
+			//   computed (default): local-space normal = sum of unit vectors
+			//     pointing toward each empty 6-neighbor; this picks out the
+			//     lit-able cube faces. Smooth and view-independent of disk
+			//     contents.
+			//   file: look up the on-disk normal_idx in the Westwood table
+			//     selected by st.unknown (= normal_type: 2 = TS 36-entry, else
+			//     RA2/YR 244-entry). Vengi-encoded direction vectors, already
+			//     decoded to floats in vxl_normals.h.
+			// Both paths then rotate by tm's 3x3 submatrix, flip Y to match
+			// the position flip, and renormalize. The fallback +Z (computed
+			// path) doesn't apply to file normals — the engine guarantees a
+			// valid table entry exists.
+			const theme::vxl_normal_source norm_src = theme::vxl_normal_src();
+			const unsigned char normal_type = static_cast<unsigned char>(st.unknown);
 			m_vxl_cloud.reserve(m_vxl_cloud.size() + locals.size());
 			for (const auto& lv : locals)
 			{
@@ -2758,22 +2772,33 @@ void CXCCFileView::player_decode_frames()
 				// their authored axes — important so HVA matrices compose
 				// correctly with sibling sections.
 				wy = -wy;
-				// Local-space normal from empty-neighbor sides (cube faces
-				// exposed to empty cells). Then rotated by tm's 3x3 submatrix.
+				// Local-space normal — branches on user's preference.
 				float lnx = 0.0f, lny = 0.0f, lnz = 0.0f;
-				auto empty = [&](int xx, int yy, int zz) {
-					if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
-						return true;
-					return occ[occ_idx(xx, yy, zz)] == 0;
-				};
-				if (empty(x - 1, y, z)) lnx -= 1.0f;
-				if (empty(x + 1, y, z)) lnx += 1.0f;
-				if (empty(x, y - 1, z)) lny -= 1.0f;
-				if (empty(x, y + 1, z)) lny += 1.0f;
-				if (empty(x, y, z - 1)) lnz -= 1.0f;
-				if (empty(x, y, z + 1)) lnz += 1.0f;
-				if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
-					lnz = 1.0f;
+				if (norm_src == theme::vxl_normals_file)
+				{
+					// Westwood normal-table lookup. Pre-decoded direction
+					// vectors already in voxel-local space.
+					xcc_vxl_normals::vec3f n = xcc_vxl_normals::lookup(normal_type, lv.normal_idx);
+					lnx = n.x; lny = n.y; lnz = n.z;
+				}
+				else
+				{
+					// Computed: 6-neighbor empty-side sum (cube faces exposed
+					// to empty cells). Fallback to +Z if fully surrounded.
+					auto empty = [&](int xx, int yy, int zz) {
+						if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
+							return true;
+						return occ[occ_idx(xx, yy, zz)] == 0;
+					};
+					if (empty(x - 1, y, z)) lnx -= 1.0f;
+					if (empty(x + 1, y, z)) lnx += 1.0f;
+					if (empty(x, y - 1, z)) lny -= 1.0f;
+					if (empty(x, y + 1, z)) lny += 1.0f;
+					if (empty(x, y, z - 1)) lnz -= 1.0f;
+					if (empty(x, y, z + 1)) lnz += 1.0f;
+					if (lnx == 0.0f && lny == 0.0f && lnz == 0.0f)
+						lnz = 1.0f;
+				}
 				float wnx = tm[0][0] * lnx + tm[0][1] * lny + tm[0][2] * lnz;
 				float wny = tm[1][0] * lnx + tm[1][1] * lny + tm[1][2] * lnz;
 				float wnz = tm[2][0] * lnx + tm[2][1] * lny + tm[2][2] * lnz;
@@ -3366,6 +3391,25 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 					dst[i] = line;
 			}
 		}
+	}
+}
+
+void CXCCFileView::invalidate_vxl_cloud()
+{
+	// Drop the cached point cloud; next paint will rebuild it via
+	// player_decode_frames(). Bump the token so the splat cache (keyed on
+	// it) also rebuilds. Only meaningful in VXL player mode; harmless to
+	// call otherwise.
+	if (m_ft == ft_vxl && m_player_mode)
+	{
+		m_vxl_cloud.clear();
+		player_decode_frames();
+		m_open_token++;
+		CRect cr;
+		GetClientRect(&cr);
+		cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
 	}
 }
 

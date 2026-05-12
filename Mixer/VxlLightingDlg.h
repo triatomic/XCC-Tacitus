@@ -26,6 +26,8 @@ protected:
 
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnReset();
+	afx_msg void OnNormalSrcComputed();
+	afx_msg void OnNormalSrcFile();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg);

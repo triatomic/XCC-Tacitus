@@ -193,6 +193,9 @@ public:
 	// Trigger a repaint of the right-hand file-info pane. Used by the VXL
 	// Lighting dialog to refresh the splat after sliders change.
 	void invalidate_file_info_pane();
+	// Drop+rebuild the VXL point cloud in the file-info pane. Used by the
+	// VXL Lighting dialog when normal source flips between Computed/File.
+	void invalidate_vxl_cloud_in_file_view();
 
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);

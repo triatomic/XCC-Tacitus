@@ -44,6 +44,11 @@ public:
 	// timer-driven repaints during the first animation loop don't trigger
 	// per-frame conversion bursts.
 	void player_prefill_bgra_cache();
+	// Drop the cached VXL point cloud and force the next paint to re-run
+	// player_decode_frames(). Called from the VXL Lighting dialog when the
+	// user flips between Computed and File normals — those choices change the
+	// per-voxel normal at decode time, so the splat cache alone isn't enough.
+	void invalidate_vxl_cloud();
 	bool can_auto_select();
 	void auto_select();
 	void close_f();

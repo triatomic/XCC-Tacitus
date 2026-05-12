@@ -431,6 +431,7 @@
     <ClInclude Include="..\misc\vqa_file.h" />
     <ClInclude Include="..\misc\vqp_file.h" />
     <ClInclude Include="..\misc\vxl_file.h" />
+    <ClInclude Include="..\misc\vxl_normals.h" />
     <ClInclude Include="..\misc\w3d_file.h" />
     <ClInclude Include="..\misc\wav_file.h" />
     <ClInclude Include="..\misc\wav_header.h" />

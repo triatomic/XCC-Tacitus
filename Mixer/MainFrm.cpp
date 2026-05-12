@@ -1826,6 +1826,12 @@ void CMainFrame::invalidate_file_info_pane()
 		m_file_info_pane->Invalidate(FALSE);
 }
 
+void CMainFrame::invalidate_vxl_cloud_in_file_view()
+{
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->invalidate_vxl_cloud();
+}
+
 void CMainFrame::OnThemeParallelExtract()
 {
 	theme::set_parallel_extract(!theme::parallel_extract());

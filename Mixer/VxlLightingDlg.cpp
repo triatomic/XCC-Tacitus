@@ -47,6 +47,12 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_WM_HSCROLL()
 	ON_BN_CLICKED(IDC_VXL_LIGHT_RESET, OnReset)
+	ON_BN_CLICKED(IDC_VXL_NORMAL_SRC_COMPUTED, OnNormalSrcComputed)
+	ON_BN_CLICKED(IDC_VXL_NORMAL_SRC_FILE, OnNormalSrcFile)
+	// Clicks on the label statics route into the same radio handlers, after
+	// flipping the matching radio's check state (statics don't auto-track).
+	ON_STN_CLICKED(IDC_VXL_NORMAL_SRC_COMPUTED_LABEL, OnNormalSrcComputed)
+	ON_STN_CLICKED(IDC_VXL_NORMAL_SRC_FILE_LABEL, OnNormalSrcFile)
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -83,6 +89,13 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"at ambient + diffuse. Default: 0.85.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_RESET),
 		"Restore all four sliders to their default values.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_SRC_COMPUTED),
+		"Compute normals from voxel neighborhood (6-neighbor empty sides). "
+		"Smooth, view-independent of the file's stored normals.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_SRC_FILE),
+		"Use the on-disk Westwood normal index per voxel (TS uses 36 normals, "
+		"RA2/YR uses 244). The same normals the original engine used to shade "
+		"these units. Will rebuild the voxel cloud when switched.");
 	m_tooltips.Activate(TRUE);
 
 	theme::apply_dialog(GetSafeHwnd());
@@ -102,6 +115,10 @@ void CVxlLightingDlg::load_from_theme()
 	m_el.SetPos(scale_el(theme::vxl_light_elevation()));
 	m_ambient.SetPos(scale_unit(theme::vxl_light_ambient()));
 	m_diffuse.SetPos(scale_unit(theme::vxl_light_diffuse()));
+	// Sync the normal-source radios with the persisted value.
+	const bool is_file = theme::vxl_normal_src() == theme::vxl_normals_file;
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, is_file ? BST_UNCHECKED : BST_CHECKED);
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     is_file ? BST_CHECKED   : BST_UNCHECKED);
 	update_value_labels();
 }
 
@@ -162,6 +179,30 @@ void CVxlLightingDlg::OnReset()
 	theme::reset_vxl_lighting();
 	load_from_theme();
 	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnNormalSrcComputed()
+{
+	// Sync radio visual state (no-op when called from the radio itself;
+	// needed when the label static fires STN_CLICKED, since statics don't
+	// auto-track sibling radios).
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, BST_CHECKED);
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     BST_UNCHECKED);
+	theme::set_vxl_normal_src(theme::vxl_normals_computed);
+	// Normal source affects the voxel cloud itself (not just the splat
+	// cache), so we have to drop+rebuild the cloud rather than just
+	// invalidate the splat.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnNormalSrcFile()
+{
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, BST_UNCHECKED);
+	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     BST_CHECKED);
+	theme::set_vxl_normal_src(theme::vxl_normals_file);
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
 }
 
 void CVxlLightingDlg::OnOK()

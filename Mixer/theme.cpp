@@ -21,6 +21,7 @@ namespace theme
 		size_format g_size_fmt = size_auto;
 		vxl_ss g_vxl_ss = vxl_ss_4;
 		bool g_vxl_shading = false;
+		vxl_normal_source g_vxl_normal_src = vxl_normals_computed;
 		// Defaults below match the original hand-tuned constants in
 		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
 		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
@@ -116,6 +117,9 @@ namespace theme
 			ss = vxl_ss_4;
 		g_vxl_ss = static_cast<vxl_ss>(ss);
 		g_vxl_shading = AfxGetApp()->GetProfileInt("Theme", "vxl_shading", 0) != 0;
+		int ns = AfxGetApp()->GetProfileInt("Theme", "vxl_normal_src", vxl_normals_computed);
+		if (ns != vxl_normals_computed && ns != vxl_normals_file) ns = vxl_normals_computed;
+		g_vxl_normal_src = static_cast<vxl_normal_source>(ns);
 		// Lighting parameters: stored as int * 1000 to preserve precision via
 		// the int-only WriteProfileInt API. Out-of-range values fall back to
 		// defaults so corrupted/manually-edited registry entries don't render
@@ -149,6 +153,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_src", static_cast<int>(g_vxl_normal_src));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_az", static_cast<int>(g_vxl_light_az * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
@@ -208,6 +213,19 @@ namespace theme
 		if (g_vxl_shading == v)
 			return;
 		g_vxl_shading = v;
+		save();
+	}
+
+	vxl_normal_source vxl_normal_src() { return g_vxl_normal_src; }
+	void set_vxl_normal_src(vxl_normal_source v)
+	{
+		if (g_vxl_normal_src == v)
+			return;
+		g_vxl_normal_src = v;
+		// Bump lighting version so the splat cache invalidates. The cloud
+		// itself also needs to rebuild — the dialog handler that calls this
+		// is responsible for bumping the view's m_open_token.
+		g_vxl_lighting_version++;
 		save();
 	}
 

@@ -120,6 +120,22 @@ namespace theme
 	// Bumped on every lighting setter; used as a cheap cache key by the VXL
 	// splat cache so changing lighting invalidates without explicit flushes.
 	int vxl_lighting_version();
+
+	// Source of per-voxel normals for the shading dot product:
+	// - computed (0, default): 6-neighbor occupancy at file load
+	//   (lit-able cube faces). Smooth, view-independent of disk contents.
+	// - file (1): the on-disk Westwood normal index looked up into the
+	//   per-section table (TS = 36 entries, RA2/YR = 244). What the engine
+	//   itself used to shade these units.
+	// Changing this requires a *cloud* rebuild (not just splat cache), so
+	// the dialog handler also bumps the file view's m_open_token.
+	enum vxl_normal_source
+	{
+		vxl_normals_computed = 0,
+		vxl_normals_file = 1,
+	};
+	vxl_normal_source vxl_normal_src();
+	void set_vxl_normal_src(vxl_normal_source v);
 	// Resolve azimuth/elevation into a unit direction vector in camera space.
 	void vxl_light_direction(float& x, float& y, float& z);
 
