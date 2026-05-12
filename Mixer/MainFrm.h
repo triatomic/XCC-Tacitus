@@ -333,6 +333,8 @@ protected:
 	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLimitVxlCpu();
 	afx_msg void OnUpdateThemeLimitVxlCpu(CCmdUI* pCmdUI);
+	afx_msg void OnThemeVxlFullHier();
+	afx_msg void OnUpdateThemeVxlFullHier(CCmdUI* pCmdUI);
 	afx_msg void OnKeybindsConfigure();
 
 	// Replace the frame's accelerator table with one built from current

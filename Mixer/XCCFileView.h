@@ -59,6 +59,11 @@ public:
 	void open_f(int id, Cmix_file& mix_f, t_game game, t_palette palette);
 	void open_f(const string& name);
 	void post_open(Ccc_file& f);
+	// Re-open the currently-displayed file (used by Theme toggles that change
+	// what post_open should do — currently Load Full Hierarchy). No-op when
+	// nothing is open. Picks the original source: MIX path if m_source_mix is
+	// non-null, disk path otherwise.
+	void reload_current();
 
 	//{{AFX_VIRTUAL(CXCCFileView)
 protected:
@@ -195,6 +200,13 @@ public:
 	// every post_open of a VXL (HVA is paired with one VXL only).
 	Cvirtual_binary m_hva_data;
 	bool m_hva_loaded = false;
+	// Cached worst-case half-extent across all HVA keyframes (0 = not computed
+	// yet). Stabilizes the auto-fit scale during playback: without it, m_vxl_half
+	// would be recomputed each frame from the rotated cloud's max radius, and
+	// auto-fit would pulse as rotors/turrets swing off-axis (their OBB grows when
+	// rotated, shrinks when aligned). Computed once when HVA loads; reset to 0 on
+	// HVA unload or VXL switch so the next decode rebuilds it.
+	int m_hva_vxl_half = 0;
 	CButton m_vxl_hva_load;
 	CButton m_vxl_hva_loop;
 	bool m_hva_loop = true;
@@ -203,6 +215,37 @@ public:
 	// open_f(string). Used by Load HVA so the user can pick from the MIX's
 	// own .hva entries before falling back to a disk browse.
 	Cmix_file* m_source_mix = nullptr;
+
+	// Directory the current file was loaded from on disk. Empty when the file
+	// came from a MIX. Set by open_f(string) so VXL full-hierarchy lookup can
+	// resolve sibling tur/barl files in the same folder (mirrors Vengi's
+	// cachingArchive). m_fname is basename-only so we can't reconstruct from it.
+	string m_disk_dir;
+
+	// Auto-loaded sibling parts for VXLs (turret + barrel), populated by
+	// post_open when theme::vxl_full_hierarchy() is on and matching files
+	// exist in the source MIX, the opposite pane's MIX, or the same folder.
+	// Each entry's bytes feed an additional Cvxl_file in player_decode_frames
+	// which appends its voxels to the merged m_vxl_cloud. Each part can have
+	// its own exact-name HVA (e.g. apoctur.hva for apoctur.vxl) driving its
+	// motion independently of the body's HVA.
+	struct t_vxl_part
+	{
+		Cvirtual_binary vxl_data;
+		Cvirtual_binary hva_data;
+		bool hva_loaded = false;
+		string name;
+	};
+	vector<t_vxl_part> m_vxl_parts;
+
+	// Try to find `name` (case-insensitive) in: (1) the source MIX of the
+	// currently-open file, (2) the other Mixer pane's MIX, (3) the same disk
+	// folder. Returns an empty Cvirtual_binary when not found.
+	Cvirtual_binary find_in_sources(const string& name);
+	// Populate m_vxl_parts for the currently-open VXL by attempting to load
+	// `<base>tur.vxl` and `<base>barl.vxl` (+ matching .hva for each) via
+	// find_in_sources. Called from post_open when the toggle is on.
+	void vxl_load_parts();
 
 	// Persistent "Load PAL..." button. Unlike the HVA button, this lives
 	// across the whole view lifetime (created in OnInitialUpdate) so it can

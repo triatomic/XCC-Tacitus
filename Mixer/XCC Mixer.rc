@@ -203,6 +203,7 @@ BEGIN
             MENUITEM "VXL &Shading",                    ID_THEME_VXL_SHADING
             MENUITEM "VXL &Lighting...\tCtrl+L",        ID_THEME_VXL_LIGHTING
             MENUITEM "&Limit VXL CPU",                  ID_THEME_LIMIT_VXL_CPU
+            MENUITEM "Load &Full Hierarchy",            ID_THEME_VXL_FULL_HIER
         END
     END
     POPUP "&Keybinds"

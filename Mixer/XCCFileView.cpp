@@ -2251,6 +2251,7 @@ void CXCCFileView::open_f(int id, Cmix_file& mix_f, t_game game, t_palette palet
 		m_palette = palette;
 	}
 	m_source_mix = &mix_f;
+	m_disk_dir.clear();
 	post_open(f);
 }
 
@@ -2266,7 +2267,25 @@ void CXCCFileView::open_f(const string& name)
 		m_palette = NULL;
 	}
 	m_source_mix = nullptr;
+	m_disk_dir = Cfname(name).get_path();
 	post_open(f);
+}
+
+void CXCCFileView::reload_current()
+{
+	if (!m_is_open)
+		return;
+	if (m_source_mix)
+	{
+		Cmix_file* src = m_source_mix;
+		int id = m_id;
+		t_game game = m_game;
+		open_f(id, *src, game, m_palette);
+	}
+	else if (!m_disk_dir.empty())
+	{
+		open_f(m_disk_dir + m_fname);
+	}
 }
 
 void CXCCFileView::post_open(Ccc_file& f)
@@ -2296,6 +2315,10 @@ void CXCCFileView::post_open(Ccc_file& f)
 		// starts clean. The button can re-load on demand.
 		m_hva_loaded = false;
 		m_hva_data.clear();
+		m_hva_vxl_half = 0;
+		// Drop any auto-loaded sibling parts from a previous VXL; the new file's
+		// parts are populated below if it's a VXL and the toggle is on.
+		m_vxl_parts.clear();
 		m_is_open = true;
 		m_zoom_pct = 100;
 		m_zoomable_file =
@@ -2305,6 +2328,13 @@ void CXCCFileView::post_open(Ccc_file& f)
 			m_ft == ft_pcx || m_ft == ft_pcx_single ||
 			m_ft == ft_tga || m_ft == ft_tga_single ||
 			m_ft == ft_bmp;
+		// VXL full-hierarchy auto-load: when opening a body VXL, look for the
+		// turret/barrel siblings (and their HVAs) in the same MIX, the opposite
+		// pane's MIX, or — for disk-loaded files — the same folder. Mirrors
+		// Vengi's VXLFormat (basename + "tur.vxl"/"barl.vxl"). Each part with
+		// its exact-name <part>.hva auto-paired.
+		if (m_ft == ft_vxl && theme::vxl_full_hierarchy())
+			vxl_load_parts();
 	}
 	if (m_player_mode)
 		player_exit();
@@ -2491,65 +2521,83 @@ void CXCCFileView::player_decode_frames()
 	}
 	else if (m_ft == ft_vxl)
 	{
-		Cvxl_file f;
-		f.load(m_data);
-		load_color_table(get_default_palette(), true);
-
-		// HVA overlay: when loaded, look up the per-section transform for the
-		// current m_player_frame and use it in place of the VXL section's
-		// static transform. Matched by 16-byte section id (HVA names mirror
-		// VXL section headers). Frame index is clamped against HVA's frame
-		// count, which also drives m_player_cf below.
-		// HVA = keyframed animation. Each HVA "frame" is a keyframe; the
-		// engine interpolates between consecutive keyframes (Vengi spaces them
-		// 6 timeline-frames apart and slerps rotation / lerps translation —
-		// see SceneGraph::transformForFrame). We expose the timeline as
-		// m_player_cf = c_keyframes * c_HVA_INTER (so a 2-keyframe HVA
-		// becomes c_HVA_INTER timeline steps from kf0 to kf1, then another
-		// c_HVA_INTER back when looping). m_player_frame is the timeline
-		// position; we resolve it to (kf_start, kf_end, t) here.
-		Chva_file hva;
-		bool hva_ok = false;
-		int kf_start = 0;
-		int kf_end = 0;
-		float kf_t = 0.0f; // 0..1 between kf_start and kf_end
+		// Source list: the body's VXL + bytes + optional HVA, followed by any
+		// auto-loaded sibling parts (turret/barrel). Each source contributes
+		// sections to a single merged m_vxl_cloud. Each source has its own
+		// independent HVA timeline; lengths can differ, and shorter HVAs clamp
+		// at their last keyframe while longer ones keep playing.
+		struct vxl_source
+		{
+			Cvxl_file vxl;
+			Cvirtual_binary hva_bytes;
+			Chva_file hva;
+			bool hva_ok = false;
+		};
+		std::vector<vxl_source> sources(1 + m_vxl_parts.size());
+		sources[0].vxl.load(m_data);
 		if (m_hva_loaded && m_hva_data.size() > 0)
 		{
-			hva.load(m_hva_data);
-			if (hva.is_valid() && hva.get_c_frames() > 0)
+			sources[0].hva_bytes = m_hva_data;
+			sources[0].hva.load(sources[0].hva_bytes);
+			if (sources[0].hva.is_valid() && sources[0].hva.get_c_frames() > 0)
+				sources[0].hva_ok = true;
+		}
+		for (size_t pi = 0; pi < m_vxl_parts.size(); pi++)
+		{
+			auto& s = sources[1 + pi];
+			s.vxl.load(m_vxl_parts[pi].vxl_data);
+			if (m_vxl_parts[pi].hva_loaded && m_vxl_parts[pi].hva_data.size() > 0)
 			{
-				hva_ok = true;
-				const int n_kf = hva.get_c_frames();
-				if (n_kf == 1)
-				{
-					kf_start = kf_end = 0;
-					kf_t = 0.0f;
-				}
-				else
-				{
-					// Snap-wrap: timeline only spans the n_kf-1 forward gaps,
-					// plus one extra slot to land exactly on the last keyframe.
-					// No kf_last -> kf_0 interpolation; OnTimer instead resets
-					// m_player_frame to 0 at the end. Avoids the shortest-arc
-					// slerp reversing rotation each cycle.
-					int tl = m_player_frame;
-					const int span = c_HVA_INTER;
-					const int total = (n_kf - 1) * span + 1;
-					if (tl < 0) tl = 0;
-					if (tl >= total) tl = total - 1;
-					int k0 = tl / span;
-					int rem = tl - k0 * span;
-					if (k0 >= n_kf - 1) { k0 = n_kf - 1; rem = 0; }
-					kf_start = k0;
-					kf_end = (k0 + 1 < n_kf) ? (k0 + 1) : k0;
-					kf_t = static_cast<float>(rem) / static_cast<float>(span);
-				}
+				s.hva_bytes = m_vxl_parts[pi].hva_data;
+				s.hva.load(s.hva_bytes);
+				if (s.hva.is_valid() && s.hva.get_c_frames() > 0)
+					s.hva_ok = true;
 			}
 		}
+
+		load_color_table(get_default_palette(), true);
+
+		// Resolve the timeline position to (kf_start, kf_end, kf_t) for one
+		// source. HVA = keyframed animation; the engine interpolates between
+		// consecutive keyframes spaced c_HVA_INTER timeline steps apart
+		// (rotation slerped, translation lerped). Timeline length per source
+		// = (n_kf - 1) * c_HVA_INTER + 1. The pane-wide m_player_cf is the
+		// **max** across sources (computed below); a source with fewer
+		// keyframes clamps at its last keyframe while longer animations keep
+		// playing.
+		auto resolve_kf = [this](const Chva_file& hva, int& kf_start, int& kf_end, float& kf_t) {
+			const int n_kf = hva.get_c_frames();
+			if (n_kf <= 1)
+			{
+				kf_start = kf_end = 0;
+				kf_t = 0.0f;
+				return;
+			}
+			int tl = m_player_frame;
+			const int span = c_HVA_INTER;
+			const int total = (n_kf - 1) * span + 1;
+			if (tl < 0) tl = 0;
+			if (tl >= total) tl = total - 1;
+			int k0 = tl / span;
+			int rem = tl - k0 * span;
+			if (k0 >= n_kf - 1) { k0 = n_kf - 1; rem = 0; }
+			kf_start = k0;
+			kf_end = (k0 + 1 < n_kf) ? (k0 + 1) : k0;
+			kf_t = static_cast<float>(rem) / static_cast<float>(span);
+		};
 
 		// Build the object-space point cloud once. The viewer rasterizes it
 		// per frame at the current m_vxl_yaw/m_vxl_pitch.
 		m_vxl_cloud.clear();
+		for (auto& src : sources)
+		{
+			Cvxl_file& f = src.vxl;
+			Chva_file& hva = src.hva;
+			const bool hva_ok = src.hva_ok;
+			int kf_start = 0, kf_end = 0;
+			float kf_t = 0.0f;
+			if (hva_ok)
+				resolve_kf(hva, kf_start, kf_end, kf_t);
 		const int n_sections = f.get_c_section_headers();
 		for (int i = 0; i < n_sections; i++)
 		{
@@ -2701,27 +2749,128 @@ void CXCCFileView::player_decode_frames()
 				m_vxl_cloud.push_back(v);
 			}
 		}
+		} // end for (auto& src : sources)
 
 		if (m_vxl_cloud.empty())
 			return;
 
-		double max_r2 = 0;
-		for (const auto& v : m_vxl_cloud)
+		// Are any sources HVA-driven? If so the cloud rebuilds per frame and
+		// we need the worst-case bound across all keyframes of every source,
+		// otherwise the auto-fit scale would pulse as rotated bounding spheres
+		// expand/contract. With no HVA anywhere the cloud is static — use the
+		// quick max-radius walk over the merged cloud (still covers multi-part
+		// turret-on-body geometry).
+		bool any_hva = false;
+		for (const auto& s : sources) if (s.hva_ok) { any_hva = true; break; }
+
+		if (any_hva && m_hva_vxl_half == 0)
 		{
-			double r2 = v.x * v.x + v.y * v.y + v.z * v.z;
-			if (r2 > max_r2) max_r2 = r2;
+			double worst_r2 = 0;
+			for (auto& src : sources)
+			{
+				Cvxl_file& f = src.vxl;
+				const int n_sections = f.get_c_section_headers();
+				// For non-HVA sources in a mixed scene, the bound contribution
+				// is just the static pose (single "keyframe" at identity tm).
+				const int n_kf = src.hva_ok ? src.hva.get_c_frames() : 1;
+				for (int kf = 0; kf < n_kf; kf++)
+				{
+					for (int i = 0; i < n_sections; i++)
+					{
+						const t_vxl_section_tailer& st = *f.get_section_tailer(i);
+						const int cx = st.cx, cy = st.cy, cz = st.cz;
+						double sx = (st.x_max_scale - st.x_min_scale) / std::max(1, cx);
+						double sy = (st.y_max_scale - st.y_min_scale) / std::max(1, cy);
+						double sz = (st.z_max_scale - st.z_min_scale) / std::max(1, cz);
+						float tm[3][4];
+						memcpy(tm, st.transform, sizeof(tm));
+						if (src.hva_ok)
+						{
+							int hs_match = -1;
+							const char* vid = f.get_section_header(i)->id;
+							for (int hs = 0; hs < src.hva.get_c_sections(); hs++)
+							{
+								if (!strncmp(src.hva.get_section_id(hs), vid, 16))
+								{
+									hs_match = hs;
+									break;
+								}
+							}
+							if (hs_match < 0 && i < src.hva.get_c_sections())
+								hs_match = i;
+							if (hs_match >= 0)
+							{
+								const float* m = src.hva.get_transform_matrix(hs_match, kf);
+								memcpy(tm, m, sizeof(tm));
+								tm[0][3] *= st.scale;
+								tm[1][3] *= st.scale;
+								tm[2][3] *= st.scale;
+							}
+						}
+						// Walk spans to find each occupied voxel's local coord
+						// and project through tm. Skip empty cells.
+						int j = 0;
+						for (int y = 0; y < cy; y++)
+						{
+							for (int x = 0; x < cx; x++)
+							{
+								const byte* r = f.get_span_data(i, j++);
+								if (!r) continue;
+								int z = 0;
+								while (z < cz)
+								{
+									z += *r++;
+									int c = *r++;
+									while (c--)
+									{
+										double lx = st.x_min_scale + (x + 0.5) * sx;
+										double ly = st.y_min_scale + (y + 0.5) * sy;
+										double lz = st.z_min_scale + (z + 0.5) * sz;
+										double wx = tm[0][0] * lx + tm[0][1] * ly + tm[0][2] * lz + tm[0][3];
+										double wy = tm[1][0] * lx + tm[1][1] * ly + tm[1][2] * lz + tm[1][3];
+										double wz = tm[2][0] * lx + tm[2][1] * ly + tm[2][2] * lz + tm[2][3];
+										wy = -wy;
+										double r2 = wx * wx + wy * wy + wz * wz;
+										if (r2 > worst_r2) worst_r2 = r2;
+										r += 2;
+										z++;
+									}
+									r++;
+								}
+							}
+						}
+					}
+				}
+			}
+			const double bound = std::sqrt(worst_r2);
+			m_hva_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
 		}
-		const double bound = std::sqrt(max_r2);
-		m_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
+
+		if (any_hva)
+		{
+			m_vxl_half = m_hva_vxl_half;
+		}
+		else
+		{
+			double max_r2 = 0;
+			for (const auto& v : m_vxl_cloud)
+			{
+				double r2 = v.x * v.x + v.y * v.y + v.z * v.z;
+				if (r2 > max_r2) max_r2 = r2;
+			}
+			const double bound = std::sqrt(max_r2);
+			m_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
+		}
 		m_player_cx = 2 * m_vxl_half;
 		m_player_cy = 2 * m_vxl_half;
-		// VXL is normally a single interactive frame; with HVA loaded the
-		// timeline expands so each adjacent pair of keyframes is split into
-		// c_HVA_INTER interpolated steps. A 2-keyframe HVA -> 2*c_HVA_INTER
-		// timeline frames (kf0 -> kf1 -> back to kf0 when wrapping).
-		m_player_cf = hva_ok
-			? (hva.get_c_frames() <= 1 ? 1 : (hva.get_c_frames() - 1) * c_HVA_INTER + 1)
-			: 1;
+		// Timeline length = max across all sources. A part with fewer keyframes
+		// than the timeline clamps at its last keyframe (handled inside
+		// resolve_kf above), so a static turret over an animated body works
+		// (and vice versa).
+		int n_kf_max = 0;
+		for (const auto& s : sources)
+			if (s.hva_ok) n_kf_max = std::max(n_kf_max, s.hva.get_c_frames());
+		m_player_cf = (n_kf_max <= 1) ? 1 : (n_kf_max - 1) * c_HVA_INTER + 1;
 	}
 }
 
@@ -4099,6 +4248,120 @@ void CXCCFileView::OnVxlSideCustom()
 	InvalidateRect(&cr, FALSE);
 }
 
+Cvirtual_binary CXCCFileView::find_in_sources(const string& name)
+{
+	Cvirtual_binary out;
+	if (name.empty())
+		return out;
+
+	auto search_mix = [&](Cmix_file* mix) -> bool {
+		if (!mix) return false;
+		// Cmix_file::get_id is name-hashed, so a direct query would work in
+		// principle — but the hashing is case- and game-specific, and we
+		// already know the entry's name. Walk the index and compare strings
+		// case-insensitively, mirroring OnVxlHvaLoad's HVA enumeration.
+		for (size_t i = 0; i < mix->get_c_files(); i++)
+		{
+			const int id = mix->get_id(static_cast<int>(i));
+			string entry = mix->get_name(id);
+			if (entry.size() != name.size())
+				continue;
+			bool eq = true;
+			for (size_t k = 0; k < entry.size(); k++)
+			{
+				char a = static_cast<char>(tolower(static_cast<unsigned char>(entry[k])));
+				char b = static_cast<char>(tolower(static_cast<unsigned char>(name[k])));
+				if (a != b) { eq = false; break; }
+			}
+			if (!eq) continue;
+			Cvirtual_binary bytes = mix->get_vdata(id);
+			if (bytes.size() > 0)
+			{
+				out = bytes;
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// 1. Body's source MIX.
+	if (search_mix(m_source_mix))
+		return out;
+
+	// 2. Opposite Mixer pane's MIX (if different from #1).
+	if (CMainFrame* mf = GetMainFrame())
+	{
+		Cmix_file* left = mf->left_mix_pane() ? mf->left_mix_pane()->current_mix() : nullptr;
+		Cmix_file* right = mf->right_mix_pane() ? mf->right_mix_pane()->current_mix() : nullptr;
+		if (left && left != m_source_mix && search_mix(left))
+			return out;
+		if (right && right != m_source_mix && right != left && search_mix(right))
+			return out;
+	}
+
+	// 3. Same folder on disk (only when body came from disk).
+	if (!m_disk_dir.empty())
+	{
+		const string path = m_disk_dir + name;
+		Cvirtual_binary bytes;
+		if (!bytes.load(path) && bytes.size() > 0)
+			out = bytes;
+	}
+
+	return out;
+}
+
+void CXCCFileView::vxl_load_parts()
+{
+	// Derive base = lowercase basename without extension. Used to compose
+	// <base>tur.vxl / <base>barl.vxl and their .hva siblings.
+	string base = Cfname(m_fname).get_ftitle();
+	for (auto& c : base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+	if (base.empty())
+		return;
+
+	// Skip if the body itself is already a turret/barrel — we don't want to
+	// recursively load apoctur.vxl's "tur" by appending another "tur". A simple
+	// suffix check on the body's basename catches it.
+	auto ends_with = [](const string& s, const string& suf) {
+		return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+	};
+	if (ends_with(base, "tur") || ends_with(base, "barl"))
+		return;
+
+	auto try_part = [&](const string& suffix) {
+		const string vxl_name = base + suffix + ".vxl";
+		const string hva_name = base + suffix + ".hva";
+		Cvirtual_binary vxl_bytes = find_in_sources(vxl_name);
+		if (vxl_bytes.size() == 0)
+			return;
+		// Validate before storing — a name match could resolve to garbage if
+		// somehow another file uses the same name.
+		Cvxl_file probe;
+		probe.load(vxl_bytes);
+		if (!probe.is_valid())
+			return;
+		t_vxl_part p;
+		p.vxl_data = vxl_bytes;
+		p.name = vxl_name;
+		Cvirtual_binary hva_bytes = find_in_sources(hva_name);
+		if (hva_bytes.size() > 0)
+		{
+			Chva_file hva_probe;
+			hva_probe.load(hva_bytes);
+			if (hva_probe.is_valid() && hva_probe.get_c_frames() > 0 && hva_probe.get_c_sections() > 0)
+			{
+				p.hva_data = hva_bytes;
+				p.hva_loaded = true;
+			}
+		}
+		m_vxl_parts.push_back(std::move(p));
+	};
+
+	try_part("tur");
+	try_part("barl");
+}
+
 void CXCCFileView::OnVxlHvaLoad()
 {
 	if (m_ft != ft_vxl)
@@ -4212,6 +4475,7 @@ void CXCCFileView::OnVxlHvaLoad()
 	}
 	m_hva_data = data;
 	m_hva_loaded = true;
+	m_hva_vxl_half = 0;
 	// Re-enter the player so the transport row / slider rebind to the new
 	// frame count. player_enter calls player_decode_frames which now sees
 	// m_hva_loaded and produces m_player_cf = HVA frame count.

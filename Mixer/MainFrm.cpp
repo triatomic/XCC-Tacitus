@@ -148,6 +148,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
 	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
 	ON_UPDATE_COMMAND_UI(ID_THEME_LIMIT_VXL_CPU, OnUpdateThemeLimitVxlCpu)
+	ON_COMMAND(ID_THEME_VXL_FULL_HIER, OnThemeVxlFullHier)
+	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_FULL_HIER, OnUpdateThemeVxlFullHier)
 	ON_COMMAND(ID_KEYBINDS_CONFIGURE, OnKeybindsConfigure)
 END_MESSAGE_MAP()
 
@@ -1808,6 +1810,19 @@ void CMainFrame::OnThemeLimitVxlCpu()
 }
 
 void CMainFrame::OnUpdateThemeLimitVxlCpu(CCmdUI* p) { p->SetCheck(theme::limit_vxl_cpu()); p->Enable(FALSE); }
+
+void CMainFrame::OnThemeVxlFullHier()
+{
+	theme::set_vxl_full_hierarchy(!theme::vxl_full_hierarchy());
+	// Reload any currently-displayed VXL so post_open's part-discovery runs (or
+	// doesn't) under the new setting. m_vxl_parts is populated only in
+	// post_open, so without a reload the user would have to manually re-open
+	// to see the change.
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->reload_current();
+}
+
+void CMainFrame::OnUpdateThemeVxlFullHier(CCmdUI* p) { p->SetCheck(theme::vxl_full_hierarchy() ? 1 : 0); }
 
 // Owner-draw menu data: text + a flag for whether the item lives directly on
 // the menu bar (top-level) vs inside a popup. The bar-vs-popup distinction

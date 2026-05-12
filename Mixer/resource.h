@@ -1467,6 +1467,7 @@
 #define IDC_INCLUDE_GAME_MIXES            1167
 #define IDC_LOAD_PAL                      1168
 #define ID_THEME_VXL_LIGHTING             41025
+#define ID_THEME_VXL_FULL_HIER            41026
 
 #define IDD_KEYBINDS                      145
 #define IDD_KEY_CAPTURE                   146

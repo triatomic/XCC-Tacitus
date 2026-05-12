@@ -229,6 +229,11 @@ protected:
 public:
 	bool nav_go_up();
 	bool nav_go_forward();
+	// Returns the MIX currently open in this pane (NULL when the pane is
+	// browsing a filesystem directory). Used for cross-pane lookups, e.g.
+	// VXL full-hierarchy auto-load checking the opposite pane's MIX for a
+	// sibling `<base>tur.vxl` that's missing from the body's source MIX.
+	Cmix_file* current_mix() const { return m_mix_f; }
 private:
 	struct t_nav_entry
 	{

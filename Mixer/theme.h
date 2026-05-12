@@ -132,6 +132,14 @@ namespace theme
 	bool limit_vxl_cpu();
 	void set_limit_vxl_cpu(bool v);
 
+	// When on, opening a VXL body (e.g. apoc.vxl) also auto-loads sibling
+	// parts apoctur.vxl (turret) and apocbarl.vxl (barrel) from the same MIX,
+	// the opposite Mixer pane's MIX, or — for disk-loaded VXLs — the same
+	// folder. Each part auto-pairs with its exact-name .hva. Matches Vengi's
+	// behavior (VXLFormat.cpp). Default on.
+	bool vxl_full_hierarchy();
+	void set_vxl_full_hierarchy(bool v);
+
 	// Parallel batch extract: when on, right-click → Extract / Extract
 	// preserving structure reads each selected entry's bytes serially on the
 	// UI thread (the MIX file handle isn't thread-safe — Ccc_file shares the

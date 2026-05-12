@@ -35,6 +35,7 @@ namespace theme
 		float g_vxl_light_diffuse = k_default_diffuse;
 		int g_vxl_lighting_version = 0;
 		bool g_limit_vxl_cpu = false;
+		bool g_vxl_full_hierarchy = true;
 		bool g_parallel_extract = true;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
@@ -126,6 +127,7 @@ namespace theme
 		g_vxl_light_ambient = load_f("vxl_light_ambient", k_default_ambient, 0.0f, 1.0f);
 		g_vxl_light_diffuse = load_f("vxl_light_diffuse", k_default_diffuse, 0.0f, 1.0f);
 		g_limit_vxl_cpu = AfxGetApp()->GetProfileInt("Theme", "limit_vxl_cpu", 0) != 0;
+		g_vxl_full_hierarchy = AfxGetApp()->GetProfileInt("Theme", "vxl_full_hierarchy", 1) != 0;
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
 		create_brushes();
 	}
@@ -147,6 +149,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_diffuse", static_cast<int>(g_vxl_light_diffuse * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "limit_vxl_cpu", g_limit_vxl_cpu ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_full_hierarchy", g_vxl_full_hierarchy ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
 	}
 
@@ -285,6 +288,16 @@ namespace theme
 		if (g_parallel_extract == v)
 			return;
 		g_parallel_extract = v;
+		save();
+	}
+
+	bool vxl_full_hierarchy() { return g_vxl_full_hierarchy; }
+
+	void set_vxl_full_hierarchy(bool v)
+	{
+		if (g_vxl_full_hierarchy == v)
+			return;
+		g_vxl_full_hierarchy = v;
 		save();
 	}
 
