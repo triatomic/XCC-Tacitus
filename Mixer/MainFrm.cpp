@@ -2192,43 +2192,39 @@ const char* theme::menu_item_label(ULONG_PTR data, bool* out_is_bar)
 	return reinterpret_cast<const char*>(p + sizeof(theme_menu_data));
 }
 
-static void apply_menu_background_recursive(HMENU hm, HBRUSH hbr)
-{
-	if (!hm)
-		return;
-	MENUINFO mi = {};
-	mi.cbSize = sizeof(mi);
-	mi.fMask = MIM_BACKGROUND;
-	mi.hbrBack = hbr;
-	::SetMenuInfo(hm, &mi);
-	int n = ::GetMenuItemCount(hm);
-	for (int i = 0; i < n; i++)
-	{
-		MENUITEMINFOA mii = {};
-		mii.cbSize = sizeof(mii);
-		mii.fMask = MIIM_SUBMENU;
-		if (::GetMenuItemInfoA(hm, i, TRUE, &mii) && mii.hSubMenu)
-			apply_menu_background_recursive(mii.hSubMenu, hbr);
-	}
-}
-
 void CMainFrame::rebuild_menu_owner_draw()
 {
 	HWND h = GetSafeHwnd();
 	HMENU hm = ::GetMenu(h);
 	if (!hm)
 		return;
-	set_menu_owner_draw(hm, theme::is_dark());
-	// Set the menu bar background brush via MENUINFO::hbrBack on the bar AND
-	// every popup explicitly. MIM_APPLYTOSUBMENUS with a NULL hbrBack does not
-	// reliably clear the brush previously stored on already-attached popups on
-	// all Windows builds — leaving a dark brush on the Theme popup after a
-	// dark→light switch caused white-on-white rendering until a second toggle.
-	// Walking the tree manually guarantees the brush state matches the mode.
-	HBRUSH hbr = theme::is_dark() ? theme::menu_bg_brush() : NULL;
-	apply_menu_background_recursive(hm, hbr);
-	// Force uxtheme to drop any cached popup theme data that was built while
-	// items were owner-draw in the previous mode.
+	// Notepad++-style menu painting:
+	//   * Bar strip is painted by our UAH window subclass (theme.cpp). The
+	//     subclass is window-lifetime, idempotent, and a no-op when light.
+	//   * Popups are drawn natively by Windows in whichever palette
+	//     SetPreferredAppMode + FlushMenuThemes have configured.
+	// We do NOT flip items to MFT_OWNERDRAW anymore. But existing users may
+	// have stale MFT_OWNERDRAW items from previous Mixer builds, so always
+	// run the "unflip" pass to scrub them. set_menu_owner_draw(false)
+	// rewrites every owner-draw item back to MFT_STRING and frees its
+	// dwItemData blob — see definition above. Safe on already-string items.
+	theme::install_uah_menu_subclass(h);
+	set_menu_owner_draw(hm, false);
+	// Clear any stale MENUINFO::hbrBack on the bar itself (previous builds
+	// set this to the dark brush, which Windows would draw under the items
+	// where UAH doesn't reach). Popups need no brush — native dark theme
+	// paints them.
+	{
+		MENUINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		mi.fMask = MIM_BACKGROUND;
+		mi.hbrBack = NULL;
+		::SetMenuInfo(hm, &mi);
+	}
+	// Force uxtheme to drop any cached popup theme data so Windows
+	// re-queries SetPreferredAppMode on the next popup open. Without this,
+	// dark→light leaves popups stuck on the previous palette until next
+	// activation.
 	HMODULE uxtheme = ::GetModuleHandleW(L"uxtheme.dll");
 	if (uxtheme)
 	{
@@ -2237,11 +2233,10 @@ void CMainFrame::rebuild_menu_owner_draw()
 			::GetProcAddress(uxtheme, MAKEINTRESOURCEA(136)));
 		if (p) p();
 	}
-	// DrawMenuBar alone doesn't force Windows to recompute cached menu-bar
-	// item widths after MFT_OWNERDRAW <-> MFT_STRING flips, so the previous
-	// mode's measurements stick around (e.g. dark→light keeps the wider
-	// owner-draw widths until the user toggles again). Detaching and
-	// reattaching the menu invalidates the cache.
+	// Detach/reattach so Windows discards any cached bar widths from the
+	// previous owner-draw run. Without this, the first dark→light toggle
+	// after upgrading from an owner-draw build can leave the bar at the
+	// wider measurements until the user toggles again.
 	::SetMenu(h, NULL);
 	::SetMenu(h, hm);
 	::DrawMenuBar(h);
@@ -2302,6 +2297,18 @@ void CMainFrame::apply_theme_to_children()
 	{
 		theme::apply_window(m_wndSplitter.GetSafeHwnd());
 		::RedrawWindow(m_wndSplitter.GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
+	// Re-theme any modeless dialogs that outlive the theme flip. apply_dialog
+	// walks every descendant + InvalidateRect's the dialog so slider tracks,
+	// edits, group boxes, and combo dropdowns all repaint in the new palette.
+	// Without this, opening VXL Lighting in dark then switching to light (or
+	// vice versa) left the dialog half-flipped: body honored the new mode
+	// via WM_CTLCOLOR but children kept their original SetWindowTheme state.
+	if (m_vxl_lighting_dlg && m_vxl_lighting_dlg->GetSafeHwnd()
+		&& ::IsWindow(m_vxl_lighting_dlg->GetSafeHwnd()))
+	{
+		theme::apply_dialog(m_vxl_lighting_dlg->GetSafeHwnd());
+		::RedrawWindow(m_vxl_lighting_dlg->GetSafeHwnd(), NULL, NULL, inv_flags);
 	}
 }
 

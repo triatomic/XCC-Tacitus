@@ -327,4 +327,21 @@ namespace theme
 	const char* menu_item_label(ULONG_PTR data, bool* out_is_bar);
 	// Paint over the gray strip between the menu bar and the client area.
 	void paint_menu_bar_background(HWND h_frame);
+
+	// Install a window subclass on the top-level frame that intercepts
+	// UAH menu-bar messages (WM_UAHDRAWMENU / WM_UAHDRAWMENUITEM) so the
+	// menu-bar strip paints in the dark palette. Idempotent — calling more
+	// than once is a no-op. Popups themselves are rendered natively by
+	// Windows (via SetPreferredAppMode + FlushMenuThemes); UAH only covers
+	// the strip behind the top-level items.
+	void install_uah_menu_subclass(HWND h_frame);
+
+	// Install a window subclass on a Win32 ComboBox so it paints in dark
+	// mode using the Notepad++ ComboBoxSubclass pattern: WM_PAINT draws the
+	// closed-state field + dropdown arrow + frame against the theme palette
+	// in dark, and falls through to the system painter in light. Works for
+	// CBS_DROPDOWN and CBS_DROPDOWNLIST. Idempotent. Safe to call on a
+	// ComboBox that also has CBS_HASSTRINGS — must NOT be combined with
+	// CBS_OWNERDRAWFIXED/VARIABLE (the subclass owns WM_PAINT itself).
+	void subclass_combobox(HWND h_combo);
 }

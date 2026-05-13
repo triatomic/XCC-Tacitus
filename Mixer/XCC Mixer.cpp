@@ -14,6 +14,46 @@
 #include "xcc_dirs.h"
 #include "xcc_log.h"
 
+// Self-relaunch shim: force OMP_WAIT_POLICY=PASSIVE into the process env
+// before vcomp140 caches it during DLL init. MSVC's vcomp140 defaults to
+// active-spin, so the OpenMP worker pool busy-loops on SwitchToThread
+// between parallel regions once warmed — VS profiler caught it burning
+// ~76% CPU during SHP playback. Setting the env var from a .CRT$XCU
+// initializer or from InitInstance is too late; vcomp has already cached
+// the policy. The env var is only honored when it's present at process
+// creation. So on first launch we re-spawn ourselves with the var set in
+// our env block (children inherit), tagged with a sentinel so the second
+// instance knows not to recurse, and exit immediately. One extra process
+// spawn on first launch, invisible to the user.
+//
+// Lives in a .CRT$XCU initializer so it runs before WinMain.
+static int xcc_omp_relaunch_if_needed()
+{
+	if (::GetEnvironmentVariableA("XCC_OMP_RELAUNCHED", NULL, 0) != 0)
+		return 0; // Already the relaunched child — proceed normally.
+	::SetEnvironmentVariableA("OMP_WAIT_POLICY", "PASSIVE");
+	::SetEnvironmentVariableA("XCC_OMP_RELAUNCHED", "1");
+	wchar_t exe[MAX_PATH];
+	::GetModuleFileNameW(NULL, exe, MAX_PATH);
+	// Pass the original command line through so file-association launches
+	// (double-clicking a .mix in Explorer) still see their args.
+	LPWSTR cmd = ::GetCommandLineW();
+	STARTUPINFOW si = { sizeof(si) };
+	PROCESS_INFORMATION pi = {};
+	if (::CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+	{
+		::CloseHandle(pi.hThread);
+		::CloseHandle(pi.hProcess);
+		::ExitProcess(0); // Parent exits; child takes over.
+	}
+	// CreateProcess failed — best-effort fall through and run anyway. Worst
+	// case the user sees the CPU spike they had before this fix.
+	return 0;
+}
+#pragma section(".CRT$XCU", read)
+__declspec(allocate(".CRT$XCU"))
+static int (*xcc_omp_relaunch_p)() = xcc_omp_relaunch_if_needed;
+
 // Bridge between the Library's CListCtrlEx custom-draw and the Mixer's theme
 // module. Installed once at startup so every CListCtrlEx instance — across
 // all Mixer dialogs — pulls dark-mode row colors from the same source.

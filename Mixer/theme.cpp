@@ -4,9 +4,13 @@
 #include <cmath>
 #include <vector>
 
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <gdiplus.h>
 #include <uxtheme.h>
+#include <vsstyle.h>
+
+#include "UAHMenuBar.h"
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "gdiplus.lib")
@@ -1348,6 +1352,11 @@ namespace theme
 			if ((style & 0xF) == BS_GROUPBOX)
 				install_dark_groupbox_subclass(h);
 		}
+		// ComboBoxes get the Notepad++-style WM_PAINT subclass for proper
+		// dark/light transition. subclass_combobox is idempotent and
+		// refuses owner-draw combos (their parents handle painting).
+		if (_stricmp(cls, "ComboBox") == 0)
+			subclass_combobox(h);
 		// Force redraw so any cached non-client decoration repaints with the
 		// new theme.
 		::InvalidateRect(h, NULL, TRUE);
@@ -1494,27 +1503,95 @@ namespace theme
 		bool is_bar = false;
 		const char* text_a = menu_item_label(dis->itemData, &is_bar);
 
-		// The popup gutter holds the checkmark glyph; menu-bar items have no
-		// checkmark and use a flush-left text rect instead.
+		// The popup gutter holds the check/bullet glyph; menu-bar items have
+		// no check and use a flush-left text rect instead.
 		const int gutter = 24;
 		const bool checked = !is_bar && (dis->itemState & ODS_CHECKED) != 0;
+		// Radio vs check: ODS_CHECKED is set for both MF_CHECKED and
+		// MF_RADIOCHECK items. To distinguish, query MIIM_FTYPE on the parent
+		// HMENU (dis->hwndItem is the HMENU for ODT_MENU). MFT_RADIOCHECK in
+		// the type flags → draw bullet; otherwise draw checkmark.
+		bool is_radio = false;
+		if (checked && dis->hwndItem)
+		{
+			MENUITEMINFO mii = {};
+			mii.cbSize = sizeof(mii);
+			mii.fMask = MIIM_FTYPE;
+			if (::GetMenuItemInfo(reinterpret_cast<HMENU>(dis->hwndItem),
+				dis->itemID, FALSE, &mii))
+			{
+				is_radio = (mii.fType & MFT_RADIOCHECK) != 0;
+			}
+		}
 		if (checked)
 		{
-			// Win11-ish thin tick: 3-segment polyline through the gutter
-			// midpoint. Stroke color follows text color so disabled items dim.
-			COLORREF mark = disabled ? text_dim() : text();
-			HPEN pen = ::CreatePen(PS_SOLID, 2, mark);
-			HGDIOBJ old_pen = ::SelectObject(hdc, pen);
-			int cx = r.left + gutter / 2;
-			int cy = (r.top + r.bottom) / 2;
-			POINT pts[3] = {
-				{ cx - 5, cy + 0 },
-				{ cx - 1, cy + 4 },
-				{ cx + 6, cy - 4 },
-			};
-			::Polyline(hdc, pts, 3);
-			::SelectObject(hdc, old_pen);
-			::DeleteObject(pen);
+			// Try the OS theme engine first — gives pixel-accurate Win11
+			// check/bullet glyphs. Fall back to GDI primitives if the theme
+			// handle or DrawThemeBackground fails (older Windows / safe mode).
+			int cx_mid = r.left + gutter / 2;
+			int cy_mid = (r.top + r.bottom) / 2;
+			HTHEME hth = ::OpenThemeData(NULL, L"DarkMode_Menu::Menu");
+			if (!hth)
+				hth = ::OpenThemeData(NULL, L"Menu");
+
+			bool drawn = false;
+			if (hth)
+			{
+				int part = MENU_POPUPCHECK;
+				int state;
+				if (is_radio)
+					state = disabled ? MC_BULLETDISABLED : MC_BULLETNORMAL;
+				else
+					state = disabled ? MC_CHECKMARKDISABLED : MC_CHECKMARKNORMAL;
+
+				SIZE sz = { 16, 16 };
+				::GetThemePartSize(hth, hdc, part, state, NULL, TS_DRAW, &sz);
+				if (sz.cx <= 0 || sz.cy <= 0)
+				{
+					sz.cx = 16;
+					sz.cy = 16;
+				}
+				RECT cr;
+				cr.left   = cx_mid - sz.cx / 2;
+				cr.top    = cy_mid - sz.cy / 2;
+				cr.right  = cr.left + sz.cx;
+				cr.bottom = cr.top  + sz.cy;
+				if (::DrawThemeBackground(hth, hdc, part, state, &cr, NULL) == S_OK)
+					drawn = true;
+				::CloseThemeData(hth);
+			}
+
+			if (!drawn)
+			{
+				COLORREF mark = disabled ? text_dim() : text();
+				if (is_radio)
+				{
+					HBRUSH br = ::CreateSolidBrush(mark);
+					HGDIOBJ old_br = ::SelectObject(hdc, br);
+					HPEN pen = ::CreatePen(PS_SOLID, 1, mark);
+					HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+					::Ellipse(hdc, cx_mid - 3, cy_mid - 3, cx_mid + 4, cy_mid + 4);
+					::SelectObject(hdc, old_pen);
+					::SelectObject(hdc, old_br);
+					::DeleteObject(pen);
+					::DeleteObject(br);
+				}
+				else
+				{
+					// Win11-ish thin tick: 3-segment polyline through the gutter
+					// midpoint. Stroke color follows text color so disabled items dim.
+					HPEN pen = ::CreatePen(PS_SOLID, 2, mark);
+					HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+					POINT pts[3] = {
+						{ cx_mid - 5, cy_mid + 0 },
+						{ cx_mid - 1, cy_mid + 4 },
+						{ cx_mid + 6, cy_mid - 4 },
+					};
+					::Polyline(hdc, pts, 3);
+					::SelectObject(hdc, old_pen);
+					::DeleteObject(pen);
+				}
+			}
 		}
 
 		if (text_a)
@@ -1578,6 +1655,761 @@ namespace theme
 		// in the frame fills it.
 		::SetWindowPos(h_frame, NULL, 0, 0, 0, 0,
 			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+	}
+
+	// ---------- UAH menu-bar subclass ----------
+	//
+	// Notepad++ pattern: Windows draws the popup menus natively (we already
+	// call SetPreferredAppMode + FlushMenuThemes via theme::apply_app_mode);
+	// the menu-BAR strip is custom-drawn via undocumented UAH messages.
+	//
+	// The subclass consumes only WM_UAHDRAWMENU / WM_UAHDRAWMENUITEM /
+	// WM_NCDESTROY plus a theme-cache refresh on WM_THEMECHANGED. Every
+	// other message falls through to DefSubclassProc, which lets MFC's
+	// CFrameWnd::WindowProc see WM_COMMAND, WM_NOTIFY, WM_DRAWITEM,
+	// WM_MEASUREITEM, WM_CTLCOLOR*, WM_TIMER, WM_HSCROLL, etc. as before —
+	// the player band (CXCCFileView), splitter, status bar, accelerators
+	// all continue to work unchanged.
+
+	namespace
+	{
+		struct UAHMenuThemeCache
+		{
+			HTHEME h_theme = NULL;
+			HTHEME ensure(HWND h)
+			{
+				if (!h_theme)
+					h_theme = ::OpenThemeData(h, VSCLASS_MENU);
+				return h_theme;
+			}
+			void close()
+			{
+				if (h_theme)
+				{
+					::CloseThemeData(h_theme);
+					h_theme = NULL;
+				}
+			}
+		};
+
+		constexpr UINT_PTR k_uah_subclass_id = 0x58444D55u; // 'UMDX'
+
+		void draw_uah_menu_bar(HWND h, HDC hdc)
+		{
+			// Fill the bar rect with the menu background brush. The DC
+			// passed in WM_UAHDRAWMENU is already clipped to the bar.
+			MENUBARINFO mbi = {};
+			mbi.cbSize = sizeof(mbi);
+			if (!::GetMenuBarInfo(h, OBJID_MENU, 0, &mbi))
+				return;
+			RECT win;
+			::GetWindowRect(h, &win);
+			RECT bar = mbi.rcBar;
+			::OffsetRect(&bar, -win.left, -win.top);
+			bar.top -= 1; // include the hairline below the bar
+			::FillRect(hdc, &bar, menu_bg_brush());
+		}
+
+		void draw_uah_menu_item(UAHDRAWMENUITEM& udmi, HTHEME h_theme)
+		{
+			// Resolve label width from MIIM_STRING. Windows' UAH path passes
+			// the bar HMENU + iPosition; itemID in dis is not populated for
+			// bar items.
+			wchar_t buf[256] = {};
+			MENUITEMINFOW mii = {};
+			mii.cbSize = sizeof(mii);
+			mii.fMask = MIIM_STRING;
+			mii.dwTypeData = buf;
+			mii.cch = (sizeof(buf) / sizeof(buf[0])) - 1;
+			::GetMenuItemInfoW(udmi.um.hmenu, static_cast<UINT>(udmi.umi.iPosition), TRUE, &mii);
+
+			DWORD dt_flags = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
+			if ((udmi.dis.itemState & ODS_NOACCEL) != 0)
+				dt_flags |= DT_HIDEPREFIX;
+
+			int text_state;
+			int bg_state;
+			if ((udmi.dis.itemState & ODS_SELECTED) != 0)
+			{
+				text_state = MBI_PUSHED;
+				bg_state   = MBI_PUSHED;
+			}
+			else if ((udmi.dis.itemState & ODS_HOTLIGHT) != 0)
+			{
+				text_state = ((udmi.dis.itemState & ODS_INACTIVE) != 0) ? MBI_DISABLEDHOT : MBI_HOT;
+				bg_state   = MBI_HOT;
+			}
+			else if ((udmi.dis.itemState & (ODS_GRAYED | ODS_DISABLED | ODS_INACTIVE)) != 0)
+			{
+				text_state = MBI_DISABLED;
+				bg_state   = MBI_DISABLED;
+			}
+			else
+			{
+				text_state = MBI_NORMAL;
+				bg_state   = MBI_NORMAL;
+			}
+
+			// Background: fill with theme brush regardless of state — we
+			// don't trust Windows' MENU_BARITEM background in dark mode.
+			HBRUSH bg_brush;
+			switch (bg_state)
+			{
+				case MBI_HOT:
+				case MBI_DISABLEDHOT:
+					bg_brush = menu_hot_brush();
+					break;
+				default:
+					bg_brush = menu_bg_brush();
+					break;
+			}
+			::FillRect(udmi.um.hdc, &udmi.dis.rcItem, bg_brush);
+
+			DTTOPTS dtt = {};
+			dtt.dwSize = sizeof(dtt);
+			dtt.dwFlags = DTT_TEXTCOLOR;
+			switch (text_state)
+			{
+				case MBI_DISABLED:
+				case MBI_DISABLEDHOT:
+				case MBI_DISABLEDPUSHED:
+					dtt.crText = text_dim();
+					break;
+				default:
+					dtt.crText = text();
+					break;
+			}
+			if (h_theme)
+			{
+				::DrawThemeTextEx(h_theme, udmi.um.hdc, MENU_BARITEM, text_state,
+					buf, static_cast<int>(mii.cch), dt_flags, &udmi.dis.rcItem, &dtt);
+			}
+			else
+			{
+				// Fallback if theme handle failed: GDI draw.
+				::SetBkMode(udmi.um.hdc, TRANSPARENT);
+				::SetTextColor(udmi.um.hdc, dtt.crText);
+				::DrawTextW(udmi.um.hdc, buf, static_cast<int>(mii.cch),
+					&udmi.dis.rcItem, dt_flags);
+			}
+		}
+
+		void draw_uah_nc_bottom_line(HWND h)
+		{
+			// Windows paints a 1-px white line below the menu bar in the
+			// non-client area; Notepad++ overpaints it with the dark brush.
+			MENUBARINFO mbi = {};
+			mbi.cbSize = sizeof(mbi);
+			if (!::GetMenuBarInfo(h, OBJID_MENU, 0, &mbi))
+				return;
+			RECT cli;
+			::GetClientRect(h, &cli);
+			::MapWindowPoints(h, NULL, reinterpret_cast<POINT*>(&cli), 2);
+			RECT win;
+			::GetWindowRect(h, &win);
+			::OffsetRect(&cli, -win.left, -win.top);
+			RECT line = cli;
+			line.bottom = line.top;
+			line.top--;
+			HDC hdc = ::GetWindowDC(h);
+			if (!hdc) return;
+			::FillRect(hdc, &line, menu_bg_brush());
+			::ReleaseDC(h, hdc);
+		}
+
+		LRESULT CALLBACK uah_menu_subclass(
+			HWND h, UINT msg, WPARAM wp, LPARAM lp,
+			UINT_PTR id_subclass, DWORD_PTR ref_data)
+		{
+			UAHMenuThemeCache* cache = reinterpret_cast<UAHMenuThemeCache*>(ref_data);
+
+			// In light mode (or while theme is unresolved) we still need to
+			// service WM_NCDESTROY for cleanup, but we want every other
+			// message to fall straight through. Don't even try to paint.
+			if (msg != WM_NCDESTROY && !is_dark())
+				return ::DefSubclassProc(h, msg, wp, lp);
+
+			switch (msg)
+			{
+				case WM_NCDESTROY:
+				{
+					::RemoveWindowSubclass(h, uah_menu_subclass, id_subclass);
+					delete cache;
+					break; // fall through to DefSubclassProc
+				}
+				case WM_THEMECHANGED:
+				case WM_DPICHANGED:
+				{
+					if (cache) cache->close();
+					break; // fall through so MFC sees it too
+				}
+				case WM_UAHDRAWMENU:
+				{
+					UAHMENU* p = reinterpret_cast<UAHMENU*>(lp);
+					if (p) draw_uah_menu_bar(h, p->hdc);
+					return 0;
+				}
+				case WM_UAHDRAWMENUITEM:
+				{
+					UAHDRAWMENUITEM* p = reinterpret_cast<UAHDRAWMENUITEM*>(lp);
+					if (p)
+					{
+						HTHEME ht = cache ? cache->ensure(h) : NULL;
+						draw_uah_menu_item(*p, ht);
+					}
+					return 0;
+				}
+				case WM_NCACTIVATE:
+				case WM_NCPAINT:
+				{
+					LRESULT lr = ::DefSubclassProc(h, msg, wp, lp);
+					draw_uah_nc_bottom_line(h);
+					return lr;
+				}
+				default:
+					break;
+			}
+			return ::DefSubclassProc(h, msg, wp, lp);
+		}
+
+		// ---------- Combobox subclass (Notepad++ pattern) ----------
+		//
+		// Ports NppDarkMode::ComboBoxSubclass + paintCombobox. The subclass
+		// owns WM_PAINT in dark mode and draws:
+		//   * closed-state field with theme background
+		//   * dropdown arrow via DrawThemeBackground(VSCLASS_COMBOBOX,
+		//     CP_DROPDOWNBUTTONRIGHT) — falls back to a Unicode chevron if
+		//     theme open fails
+		//   * 1px frame around the whole combobox using edge color (hot edge
+		//     when hovered/focused, disabled edge when grayed)
+		//   * selected item text via DrawThemeTextEx(CP_DROPDOWNITEM)
+		// Light mode: every message except WM_NCDESTROY falls through to
+		// DefSubclassProc — the system painter draws the combobox as normal.
+		//
+		// MFC safety: WM_COMMAND (CBN_SELCHANGE/CBN_DROPDOWN/CBN_CLOSEUP),
+		// WM_NOTIFY, WM_CTLCOLOR*, WM_KEYDOWN, WM_MOUSE* all fall through to
+		// DefSubclassProc → MFC's CDialog/CFormView reflection. We only
+		// touch WM_PAINT/WM_ERASEBKGND/WM_THEMECHANGED/WM_NCDESTROY/WM_ENABLE.
+
+		constexpr UINT_PTR k_combo_subclass_id = 0x58434243u; // 'CBCX'
+		constexpr int k_combo_win11_corner = 4;
+
+		// Combobox edge / fill colors. Hot edge tracks accent; normal edge is
+		// the same border color list-views use for their grid. Control bg is
+		// our existing bg_alt() (slight lift over the dialog bg).
+		inline COLORREF combo_edge_color()          { return border(); }
+		inline COLORREF combo_hot_edge_color()      { return accent(); }
+		inline COLORREF combo_disabled_edge_color() { return RGB(0x55, 0x55, 0x55); }
+		inline COLORREF combo_disabled_text_color() { return text_dim(); }
+
+		struct ComboboxThemeCache
+		{
+			HTHEME h_theme = NULL;
+			LONG_PTR cb_style = CBS_SIMPLE; // CBS_DROPDOWN or CBS_DROPDOWNLIST
+			HDC mem_dc = NULL;
+			HBITMAP mem_bmp = NULL;
+			int mem_w = 0;
+			int mem_h = 0;
+
+			HTHEME ensure(HWND h)
+			{
+				if (!h_theme)
+					h_theme = ::OpenThemeData(h, VSCLASS_COMBOBOX);
+				return h_theme;
+			}
+			void close()
+			{
+				if (h_theme)
+				{
+					::CloseThemeData(h_theme);
+					h_theme = NULL;
+				}
+			}
+			bool ensure_buffer(HDC ref, const RECT& rc)
+			{
+				int w = rc.right - rc.left;
+				int h = rc.bottom - rc.top;
+				if (w <= 0 || h <= 0) return false;
+				if (mem_dc && (w != mem_w || h != mem_h))
+				{
+					::DeleteObject(mem_bmp);
+					::DeleteDC(mem_dc);
+					mem_dc = NULL;
+					mem_bmp = NULL;
+				}
+				if (!mem_dc)
+				{
+					mem_dc = ::CreateCompatibleDC(ref);
+					if (!mem_dc) return false;
+					mem_bmp = ::CreateCompatibleBitmap(ref, w, h);
+					if (!mem_bmp)
+					{
+						::DeleteDC(mem_dc);
+						mem_dc = NULL;
+						return false;
+					}
+					::SelectObject(mem_dc, mem_bmp);
+					mem_w = w;
+					mem_h = h;
+				}
+				return true;
+			}
+			~ComboboxThemeCache()
+			{
+				close();
+				if (mem_bmp) ::DeleteObject(mem_bmp);
+				if (mem_dc)  ::DeleteDC(mem_dc);
+			}
+		};
+
+		void paint_round_frame_rect(HDC hdc, const RECT& rc, HPEN pen, int rx = 0, int ry = 0)
+		{
+			HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+			HGDIOBJ old_br  = ::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+			::RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, rx, ry);
+			::SelectObject(hdc, old_br);
+			::SelectObject(hdc, old_pen);
+		}
+
+		void paint_combobox(HWND h, HDC hdc, ComboboxThemeCache& cache)
+		{
+			HTHEME h_theme = cache.ensure(h);
+
+			COMBOBOXINFO cbi = {};
+			cbi.cbSize = sizeof(cbi);
+			::GetComboBoxInfo(h, &cbi);
+
+			RECT rc;
+			::GetClientRect(h, &rc);
+
+			POINT cursor;
+			::GetCursorPos(&cursor);
+			::ScreenToClient(h, &cursor);
+
+			const bool is_disabled = ::IsWindowEnabled(h) == FALSE;
+			const bool is_hot      = !is_disabled && ::PtInRect(&rc, cursor) == TRUE;
+			bool has_focus = false;
+
+			::SelectObject(hdc, reinterpret_cast<HFONT>(::SendMessage(h, WM_GETFONT, 0, 0)));
+			::SetBkMode(hdc, TRANSPARENT);
+
+			RECT rc_arrow = cbi.rcButton;
+			rc_arrow.left -= 1;
+
+			HBRUSH bg_brush_sel = is_disabled ? bg_brush()
+				: (is_hot ? menu_hot_brush() : bg_alt_brush());
+
+			// CBS_DROPDOWNLIST: we draw the selected text. CBS_DROPDOWN's edit
+			// child paints itself (WM_CTLCOLOREDIT in the parent handles colors).
+			if (cache.cb_style == CBS_DROPDOWNLIST)
+			{
+				::FillRect(hdc, &rc, bg_brush_sel);
+
+				int idx = static_cast<int>(::SendMessage(h, CB_GETCURSEL, 0, 0));
+				if (idx != CB_ERR)
+				{
+					// Use ANSI vs Unicode message variant based on the actual
+					// window type. Mixer creates combos via MFC's ANSI build
+					// (CComboBox::Create + AddString narrow overload), so the
+					// internal item storage is ANSI — sending CB_GETLBTEXT
+					// (which routes via IsWindowUnicode here) returns wide
+					// chars only on Unicode combos. Reading ANSI bytes as
+					// wchar_t* renders as random CJK glyphs.
+					const bool is_unicode = ::IsWindowUnicode(h) != FALSE;
+					RECT rc_text = cbi.rcItem;
+					::InflateRect(&rc_text, -2, 0);
+					const DWORD dt_flags = DT_NOPREFIX | DT_LEFT | DT_VCENTER | DT_SINGLELINE;
+					const COLORREF text_color = is_disabled ? combo_disabled_text_color() : text();
+
+					if (is_unicode)
+					{
+						int len = static_cast<int>(::SendMessageW(h, CB_GETLBTEXTLEN, idx, 0));
+						if (len > 0 && len < 1024)
+						{
+							std::vector<wchar_t> buf(static_cast<size_t>(len) + 1, L'\0');
+							::SendMessageW(h, CB_GETLBTEXT, idx, reinterpret_cast<LPARAM>(buf.data()));
+							if (h_theme)
+							{
+								DTTOPTS dtt = {};
+								dtt.dwSize = sizeof(dtt);
+								dtt.dwFlags = DTT_TEXTCOLOR;
+								dtt.crText = text_color;
+								const int CP_DROPDOWNITEM = 9;
+								::DrawThemeTextEx(h_theme, hdc, CP_DROPDOWNITEM,
+									is_disabled ? CBXSR_DISABLED : CBXSR_NORMAL,
+									buf.data(), -1, dt_flags, &rc_text, &dtt);
+							}
+							else
+							{
+								::SetTextColor(hdc, text_color);
+								::DrawTextW(hdc, buf.data(), -1, &rc_text, dt_flags);
+							}
+						}
+					}
+					else
+					{
+						int len = static_cast<int>(::SendMessageA(h, CB_GETLBTEXTLEN, idx, 0));
+						if (len > 0 && len < 1024)
+						{
+							std::vector<char> buf(static_cast<size_t>(len) + 1, '\0');
+							::SendMessageA(h, CB_GETLBTEXT, idx, reinterpret_cast<LPARAM>(buf.data()));
+							// DrawThemeTextEx is wide-only — promote ANSI to
+							// UTF-16 via the active code page so theme path
+							// still works on ANSI combos.
+							if (h_theme)
+							{
+								int wlen = ::MultiByteToWideChar(CP_ACP, 0, buf.data(), len, NULL, 0);
+								if (wlen > 0)
+								{
+									std::vector<wchar_t> wbuf(static_cast<size_t>(wlen) + 1, L'\0');
+									::MultiByteToWideChar(CP_ACP, 0, buf.data(), len, wbuf.data(), wlen);
+									DTTOPTS dtt = {};
+									dtt.dwSize = sizeof(dtt);
+									dtt.dwFlags = DTT_TEXTCOLOR;
+									dtt.crText = text_color;
+									const int CP_DROPDOWNITEM = 9;
+									::DrawThemeTextEx(h_theme, hdc, CP_DROPDOWNITEM,
+										is_disabled ? CBXSR_DISABLED : CBXSR_NORMAL,
+										wbuf.data(), wlen, dt_flags, &rc_text, &dtt);
+								}
+							}
+							else
+							{
+								::SetTextColor(hdc, text_color);
+								::DrawTextA(hdc, buf.data(), -1, &rc_text, dt_flags);
+							}
+						}
+					}
+				}
+
+				has_focus = ::GetFocus() == h;
+				// Skip DrawFocusRect: it's XOR-based and lands as a solid
+				// white block over our dark fill instead of the dotted gray
+				// it produces on light backgrounds. The hot-edge frame color
+				// already signals focus visually.
+			}
+			else if (cache.cb_style == CBS_DROPDOWN && cbi.hwndItem)
+			{
+				has_focus = ::GetFocus() == cbi.hwndItem;
+				::FillRect(hdc, &rc_arrow, bg_brush_sel);
+			}
+
+			COLORREF edge_color = is_disabled ? combo_disabled_edge_color()
+				: ((is_hot || has_focus) ? combo_hot_edge_color() : combo_edge_color());
+			HPEN frame_pen = ::CreatePen(PS_SOLID, 1, edge_color);
+			HGDIOBJ old_pen = ::SelectObject(hdc, frame_pen);
+
+			// Dropdown arrow. Theme path is preferred; falls back to a small
+			// Unicode chevron if uxtheme can't open VSCLASS_COMBOBOX.
+			if (cache.cb_style != CBS_SIMPLE)
+			{
+				if (h_theme)
+				{
+					RECT rc_themed_arrow = { rc_arrow.left, rc_arrow.top - 1, rc_arrow.right, rc_arrow.bottom - 1 };
+					::DrawThemeBackground(h_theme, hdc, CP_DROPDOWNBUTTONRIGHT,
+						is_disabled ? CBXSR_DISABLED : CBXSR_NORMAL, &rc_themed_arrow, NULL);
+				}
+				else
+				{
+					COLORREF arrow_color = is_disabled ? combo_disabled_text_color()
+						: (is_hot ? text() : text_dim());
+					::SetTextColor(hdc, arrow_color);
+					wchar_t arrow[] = L"˅"; // small down chevron
+					::DrawTextW(hdc, arrow, -1, &rc_arrow,
+						DT_NOPREFIX | DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
+				}
+			}
+
+			// Exclude the inner area we've already drawn so the round-rect
+			// frame doesn't overwrite our text/arrow.
+			if (cache.cb_style == CBS_DROPDOWNLIST)
+			{
+				RECT rc_inner = rc;
+				::InflateRect(&rc_inner, -1, -1);
+				::ExcludeClipRect(hdc, rc_inner.left, rc_inner.top, rc_inner.right, rc_inner.bottom);
+			}
+			else if (cache.cb_style == CBS_DROPDOWN)
+			{
+				POINT edge[] = {
+					{ rc_arrow.left - 1, rc_arrow.top    },
+					{ rc_arrow.left - 1, rc_arrow.bottom }
+				};
+				::Polyline(hdc, edge, 2);
+				::ExcludeClipRect(hdc, cbi.rcItem.left, cbi.rcItem.top, cbi.rcItem.right, cbi.rcItem.bottom);
+				::ExcludeClipRect(hdc, rc_arrow.left - 1, rc_arrow.top, rc_arrow.right, rc_arrow.bottom);
+
+				HPEN inner_pen = ::CreatePen(PS_SOLID, 1, is_disabled ? bg() : bg_alt());
+				RECT rc_inner = rc;
+				::InflateRect(&rc_inner, -1, -1);
+				rc_inner.right = rc_arrow.left - 1;
+				paint_round_frame_rect(hdc, rc_inner, inner_pen);
+				::DeleteObject(inner_pen);
+				::InflateRect(&rc_inner, -1, -1);
+				::FillRect(hdc, &rc_inner, is_disabled ? bg_brush() : bg_alt_brush());
+			}
+
+			// Detect Win11 via build number for slight corner rounding.
+			OSVERSIONINFOEXW os = {};
+			os.dwOSVersionInfoSize = sizeof(os);
+			::GetVersionExW(reinterpret_cast<OSVERSIONINFOW*>(&os));
+			int round_r = (os.dwBuildNumber >= 22000) ? k_combo_win11_corner : 0;
+
+			paint_round_frame_rect(hdc, rc, frame_pen, round_r, round_r);
+
+			::SelectObject(hdc, old_pen);
+			::DeleteObject(frame_pen);
+		}
+
+		LRESULT CALLBACK combobox_subclass(
+			HWND h, UINT msg, WPARAM wp, LPARAM lp,
+			UINT_PTR id_subclass, DWORD_PTR ref_data)
+		{
+			ComboboxThemeCache* cache = reinterpret_cast<ComboboxThemeCache*>(ref_data);
+
+			switch (msg)
+			{
+				case WM_NCDESTROY:
+				{
+					::RemoveWindowSubclass(h, combobox_subclass, id_subclass);
+					delete cache;
+					break;
+				}
+				case WM_THEMECHANGED:
+				case WM_DPICHANGED:
+				{
+					if (cache) cache->close();
+					break;
+				}
+				case WM_ERASEBKGND:
+				{
+					if (is_dark() && cache && cache->ensure(h))
+						return TRUE;
+					break;
+				}
+				case WM_PAINT:
+				{
+					if (!is_dark() || !cache)
+						break;
+					PAINTSTRUCT ps = {};
+					HDC hdc = ::BeginPaint(h, &ps);
+					if (!hdc) return 0;
+
+					if (cache->cb_style != CBS_DROPDOWN)
+					{
+						// Double-buffer to avoid flicker on dropdown-list combos.
+						RECT rc;
+						::GetClientRect(h, &rc);
+						if (cache->ensure_buffer(hdc, rc))
+						{
+							int saved = ::SaveDC(cache->mem_dc);
+							::IntersectClipRect(cache->mem_dc,
+								ps.rcPaint.left, ps.rcPaint.top,
+								ps.rcPaint.right, ps.rcPaint.bottom);
+							paint_combobox(h, cache->mem_dc, *cache);
+							::RestoreDC(cache->mem_dc, saved);
+							::BitBlt(hdc,
+								ps.rcPaint.left, ps.rcPaint.top,
+								ps.rcPaint.right - ps.rcPaint.left,
+								ps.rcPaint.bottom - ps.rcPaint.top,
+								cache->mem_dc,
+								ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+						}
+					}
+					else
+					{
+						// CBS_DROPDOWN has a live edit child; double-buffer
+						// would flicker the caret.
+						paint_combobox(h, hdc, *cache);
+					}
+					::EndPaint(h, &ps);
+					return 0;
+				}
+				case WM_ENABLE:
+				{
+					if (!is_dark()) break;
+					LRESULT lr = ::DefSubclassProc(h, msg, wp, lp);
+					::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE);
+					return lr;
+				}
+			}
+			return ::DefSubclassProc(h, msg, wp, lp);
+		}
+	}
+
+	void install_uah_menu_subclass(HWND h_frame)
+	{
+		if (!h_frame)
+			return;
+		// Idempotent: GetWindowSubclass returns TRUE when already installed.
+		if (::GetWindowSubclass(h_frame, uah_menu_subclass, k_uah_subclass_id, NULL))
+			return;
+		UAHMenuThemeCache* cache = new UAHMenuThemeCache();
+		if (!::SetWindowSubclass(h_frame, uah_menu_subclass, k_uah_subclass_id,
+			reinterpret_cast<DWORD_PTR>(cache)))
+		{
+			delete cache;
+		}
+	}
+
+	// Subclass for a combobox's dropdown listbox ("ComboLBox"). In dark mode
+	// uxtheme leaves the listbox selection bar painted with COLOR_HIGHLIGHT
+	// (white in our process — confirmed handle 002D090A on the Game Grid
+	// combo), making the dark-on-dark item text invisible behind it. We own
+	// WM_PAINT in dark mode and paint each visible row ourselves; in light
+	// mode we fall through to system painting.
+	constexpr UINT_PTR k_combolbox_subclass_id = 0x584C4243u; // 'CBLX'
+
+	struct ComboLBoxState
+	{
+		int last_sel = -2; // -2 = never sampled; -1 = no selection
+	};
+
+	LRESULT CALLBACK combolbox_subclass(
+		HWND h, UINT msg, WPARAM wp, LPARAM lp,
+		UINT_PTR id_subclass, DWORD_PTR ref_data)
+	{
+		ComboLBoxState* state = reinterpret_cast<ComboLBoxState*>(ref_data);
+
+		switch (msg)
+		{
+		case WM_NCDESTROY:
+			::RemoveWindowSubclass(h, combolbox_subclass, id_subclass);
+			delete state;
+			break;
+		case WM_MOUSEMOVE:
+			// Combobox dropdowns retarget LB_GETCURSEL to follow the mouse as
+			// the user hovers; uxtheme then paints the moved selection bar in
+			// COLOR_HIGHLIGHT (white) on top of our WM_PAINT. To overwrite
+			// it, we invalidate — but only on actual selection-row change.
+			// Mouse hardware delivers WM_MOUSEMOVE at ~1000 Hz; without this
+			// gate the listbox burns a full CPU core during any hover and
+			// floods the message loop with paints, which is what caused the
+			// "100% CPU while SHP playing" regression.
+			if (is_dark() && state)
+			{
+				LRESULT lr = ::DefSubclassProc(h, msg, wp, lp);
+				const int sel = static_cast<int>(::SendMessageW(h, LB_GETCURSEL, 0, 0));
+				if (sel != state->last_sel)
+				{
+					state->last_sel = sel;
+					::InvalidateRect(h, NULL, FALSE);
+				}
+				return lr;
+			}
+			break;
+		case WM_ERASEBKGND:
+			if (is_dark())
+			{
+				HDC hdc = reinterpret_cast<HDC>(wp);
+				RECT rc;
+				::GetClientRect(h, &rc);
+				::FillRect(hdc, &rc, bg_brush());
+				return TRUE;
+			}
+			break;
+		case WM_PAINT:
+		{
+			if (!is_dark())
+				break;
+			PAINTSTRUCT ps = {};
+			HDC hdc = ::BeginPaint(h, &ps);
+			if (!hdc)
+				return 0;
+			RECT rc;
+			::GetClientRect(h, &rc);
+			::FillRect(hdc, &rc, bg_brush());
+
+			HFONT hf = reinterpret_cast<HFONT>(::SendMessageW(h, WM_GETFONT, 0, 0));
+			HGDIOBJ old_font = hf ? ::SelectObject(hdc, hf) : NULL;
+			::SetBkMode(hdc, TRANSPARENT);
+
+			const int count = static_cast<int>(::SendMessageW(h, LB_GETCOUNT, 0, 0));
+			const int cur_sel = static_cast<int>(::SendMessageW(h, LB_GETCURSEL, 0, 0));
+			const int top_idx = static_cast<int>(::SendMessageW(h, LB_GETTOPINDEX, 0, 0));
+
+			for (int i = (top_idx > 0 ? top_idx : 0); i < count; i++)
+			{
+				RECT ir = {};
+				if (::SendMessageW(h, LB_GETITEMRECT, i, reinterpret_cast<LPARAM>(&ir)) == LB_ERR)
+					continue;
+				if (ir.top >= ps.rcPaint.bottom)
+					break;
+				if (ir.bottom <= ps.rcPaint.top)
+					continue;
+
+				const bool sel = (i == cur_sel);
+				::FillRect(hdc, &ir, sel ? menu_hot_brush() : bg_brush());
+				::SetTextColor(hdc, sel ? accent_text() : text());
+
+				wchar_t buf[256] = {};
+				const int len = static_cast<int>(::SendMessageW(h, LB_GETTEXTLEN, i, 0));
+				if (len > 0 && len < static_cast<int>(_countof(buf)))
+				{
+					::SendMessageW(h, LB_GETTEXT, i, reinterpret_cast<LPARAM>(buf));
+					RECT tr = ir;
+					tr.left += 4;
+					::DrawTextW(hdc, buf, -1, &tr,
+						DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+				}
+			}
+
+			if (old_font) ::SelectObject(hdc, old_font);
+			::EndPaint(h, &ps);
+			return 0;
+		}
+		}
+		return ::DefSubclassProc(h, msg, wp, lp);
+	}
+
+	void subclass_combolbox(HWND h_list)
+	{
+		if (!h_list)
+			return;
+		if (::GetWindowSubclass(h_list, combolbox_subclass, k_combolbox_subclass_id, NULL))
+			return;
+		ComboLBoxState* state = new ComboLBoxState();
+		if (::SetWindowSubclass(h_list, combolbox_subclass, k_combolbox_subclass_id,
+			reinterpret_cast<DWORD_PTR>(state)))
+		{
+			::InvalidateRect(h_list, NULL, TRUE);
+		}
+		else
+		{
+			delete state;
+		}
+	}
+
+	void subclass_combobox(HWND h_combo)
+	{
+		if (!h_combo)
+			return;
+		// Refuse owner-draw combos — the subclass owns WM_PAINT and would
+		// fight the parent's WM_DRAWITEM handler. Callers must drop
+		// CBS_OWNERDRAWFIXED/VARIABLE before reaching here.
+		LONG_PTR style = ::GetWindowLongPtrW(h_combo, GWL_STYLE);
+		if ((style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) != 0)
+			return;
+		if (::GetWindowSubclass(h_combo, combobox_subclass, k_combo_subclass_id, NULL))
+			return;
+		ComboboxThemeCache* cache = new ComboboxThemeCache();
+		cache->cb_style = (style & CBS_DROPDOWNLIST) ? CBS_DROPDOWNLIST
+			: ((style & CBS_DROPDOWN) ? CBS_DROPDOWN : CBS_SIMPLE);
+		if (!::SetWindowSubclass(h_combo, combobox_subclass, k_combo_subclass_id,
+			reinterpret_cast<DWORD_PTR>(cache)))
+		{
+			delete cache;
+		}
+		else
+		{
+			::InvalidateRect(h_combo, NULL, TRUE);
+		}
+		// Dark-paint the dropdown listbox too. The combobox subclass above
+		// only owns the closed-state field + arrow; the popup list is a
+		// separate HWND (hwndList in COMBOBOXINFO).
+		COMBOBOXINFO cbi = {};
+		cbi.cbSize = sizeof(cbi);
+		if (::GetComboBoxInfo(h_combo, &cbi) && cbi.hwndList)
+			subclass_combolbox(cbi.hwndList);
 	}
 }
 

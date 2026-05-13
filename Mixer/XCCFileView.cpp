@@ -3224,12 +3224,13 @@ void CXCCFileView::player_enter()
 			m_player_side[i].Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE0 + i);
 		}
 		m_player_side_custom.Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE_CUSTOM);
-		// Owner-draw: the system combobox refused to paint dark even with
-		// styles matching a known-working app's combo. Owner-draw is the
-		// pragmatic fix — paint it ourselves in WM_DRAWITEM and we get
-		// guaranteed theming with no uxtheme dependency.
+		// Game Grid combobox: plain CBS_DROPDOWNLIST + CBS_HASSTRINGS. Dark
+		// theming comes from theme::subclass_combobox (Notepad++ pattern,
+		// owns WM_PAINT in dark mode, falls through to system painting in
+		// light). Previously CBS_OWNERDRAWFIXED with hand painting in
+		// OnDrawItem — that bugged out on dark→light transitions.
 		m_player_iso_grid.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
-			| CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
+			| CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
 			r, this, IDC_PLAYER_GRID_SEL);
 		m_player_iso_grid.AddString("No Grid");
 		m_player_iso_grid.AddString("TS Grid");
@@ -3241,6 +3242,7 @@ void CXCCFileView::player_enter()
 		theme::apply_window(m_player_shadows.GetSafeHwnd());
 		theme::apply_window(m_player_bg.GetSafeHwnd());
 		theme::apply_window(m_player_iso_grid.GetSafeHwnd());
+		theme::subclass_combobox(m_player_iso_grid.GetSafeHwnd());
 		// Combobox internals: theme the dropdown listbox + edit field too,
 		// otherwise the dropped-down list paints white in dark mode.
 		{
@@ -4575,6 +4577,10 @@ void CXCCFileView::reapply_player_theme()
 	// dropdown also paints dark.
 	if (HWND h = m_player_iso_grid.GetSafeHwnd())
 	{
+		// Reinstall subclass if missing (idempotent) and force a repaint —
+		// theme flips don't tear down the subclass, but bumping the cache
+		// lets the new mode's WM_PAINT branch take effect immediately.
+		theme::subclass_combobox(h);
 		COMBOBOXINFO cbi = {};
 		cbi.cbSize = sizeof(cbi);
 		if (::GetComboBoxInfo(h, &cbi))
@@ -4592,63 +4598,11 @@ void CXCCFileView::reapply_player_theme()
 
 void CXCCFileView::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT mis)
 {
-	// Owner-draw combobox sends WM_MEASUREITEM at creation time. Without an
-	// override the default CComboBox::MeasureItem fires ASSERT(FALSE) in
-	// debug, and silently leaves items with the system default item height
-	// in release — which can cause repeated layout recomputes when the
-	// combo refreshes. Provide a stable height based on the player band's
-	// font metrics.
-	if (mis && nIDCtl == IDC_PLAYER_GRID_SEL && mis->CtlType == ODT_COMBOBOX)
-	{
-		// Use the player-band font's text height + a small vertical pad so
-		// items match the rest of the controls visually.
-		HDC hdc = ::GetDC(GetSafeHwnd());
-		HFONT hf = (HFONT)m_font.GetSafeHandle();
-		HGDIOBJ old = hf ? ::SelectObject(hdc, hf) : NULL;
-		TEXTMETRIC tm{};
-		::GetTextMetrics(hdc, &tm);
-		if (old) ::SelectObject(hdc, old);
-		::ReleaseDC(GetSafeHwnd(), hdc);
-		mis->itemHeight = tm.tmHeight + 4;
-		return;
-	}
 	CScrollView::OnMeasureItem(nIDCtl, mis);
 }
 
 void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)
 {
-	// Owner-draw Game Grid combobox: paint dark in dark mode, system colors
-	// otherwise. Same handler covers the closed-state field and each
-	// dropped-down item (CtlType=ODT_COMBOBOX in both cases, itemID =
-	// current sel for the closed state, item index for dropdown items).
-	if (dis && nIDCtl == IDC_PLAYER_GRID_SEL && dis->CtlType == ODT_COMBOBOX)
-	{
-		HDC hdc = dis->hDC;
-		RECT r = dis->rcItem;
-		const bool dark = theme::is_dark();
-		const bool selected = (dis->itemState & ODS_SELECTED) != 0;
-		COLORREF bk = dark
-			? (selected ? theme::accent() : theme::bg())
-			: (selected ? ::GetSysColor(COLOR_HIGHLIGHT) : ::GetSysColor(COLOR_WINDOW));
-		COLORREF fg = dark
-			? (selected ? theme::accent_text() : theme::text())
-			: (selected ? ::GetSysColor(COLOR_HIGHLIGHTTEXT) : ::GetSysColor(COLOR_WINDOWTEXT));
-		HBRUSH bkbr = ::CreateSolidBrush(bk);
-		::FillRect(hdc, &r, bkbr);
-		::DeleteObject(bkbr);
-		if (static_cast<int>(dis->itemID) >= 0)
-		{
-			char buf[64] = {};
-			m_player_iso_grid.GetLBText(dis->itemID, buf);
-			::SetBkMode(hdc, TRANSPARENT);
-			::SetTextColor(hdc, fg);
-			RECT tr = r; tr.left += 4;
-			::DrawTextA(hdc, buf, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-		}
-		if (dis->itemState & ODS_FOCUS)
-			::DrawFocusRect(hdc, &r);
-		return;
-	}
 	const bool is_preset = dis && nIDCtl >= IDC_PLAYER_SIDE0 && nIDCtl <= IDC_PLAYER_SIDE7;
 	const bool is_custom = dis && nIDCtl == IDC_PLAYER_SIDE_CUSTOM;
 	const bool is_vxl_preset = dis && nIDCtl >= IDC_VXL_SIDE0 && nIDCtl <= IDC_VXL_SIDE7;
