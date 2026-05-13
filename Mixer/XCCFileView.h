@@ -4,6 +4,7 @@
 #include <mix_file.h>
 #include <mix_file_rd.h>
 #include <palette.h>
+#include <vpl_file.h>
 #include "palette_filter.h"
 
 struct t_text_cache_entry
@@ -106,6 +107,8 @@ protected:
 	afx_msg void OnVxlSideCustom();
 	afx_msg void OnVxlHvaLoad();
 	afx_msg void OnVxlHvaLoop();
+	afx_msg void OnVxlVplLoad();
+	void try_auto_load_vpl();
 	afx_msg void OnLoadPal();
 	afx_msg void OnPlayerGridSel();
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDIS);
@@ -174,6 +177,9 @@ protected:
 	void player_set_frame(int f);
 	void player_layout_controls();
 	void player_update_label();
+	void player_update_bg_label();
+	void update_player_hover_help(CWnd* pWnd);
+	const char* m_last_hover_help = nullptr;
 	int player_total_frames() const;
 	void player_decode_frames();
 	void player_draw(CDC* pDC);
@@ -219,7 +225,9 @@ protected:
 	CButton m_player_side_custom;   // 9th swatch — opens color picker
 	CComboBox m_player_iso_grid;    // Game Grid: None / TS / RA2
 	bool m_player_shadows_on = false;
-	bool m_player_bg_on = true;     // default = show background (matches ASE)
+	// BG cycle: 0 = palette color 0, 1 = alpha checker, 2 = pane bg (theme).
+	// Default 0 = show palette background (matches ASE).
+	int m_player_bg_mode = 0;
 	int m_player_side_idx = -1;     // -1 = no remap; 0..7 = preset; 8 = custom
 	COLORREF m_player_side_custom_color = RGB(0xff, 0xff, 0xff);
 	int m_player_grid_mode = 0;     // 0 = none, 1 = TS (48px), 2 = RA2 (60px)
@@ -234,7 +242,7 @@ protected:
 
 	// VXL interactive 3D viewer state. When the file is a .vxl, player mode
 	// becomes a 3dsmax-style orbit viewer instead of an animation player.
-	struct t_vxl_voxel { double x, y, z; unsigned char color; float nx, ny, nz; };
+	struct t_vxl_voxel { double x, y, z; unsigned char color; unsigned char normal_idx; float nx, ny, nz; };
 	vector<t_vxl_voxel> m_vxl_cloud;
 	int m_vxl_half = 0;
 	double m_vxl_yaw = 0.0;
@@ -265,6 +273,18 @@ protected:
 	CButton m_vxl_hva_load;
 	CButton m_vxl_hva_loop;
 	bool m_hva_loop = true;
+
+	// VPL ("voxels.vpl") — Westwood per-game voxel lighting LUT. When loaded,
+	// the splat replaces v.color with vpl[section][v.color] where section is
+	// chosen by dot(rotated_normal, light_dir). Replaces the synthetic
+	// ambient+diffuse shading for these voxels with engine-faithful shading.
+	// Auto-loaded on VXL open by searching the source MIX, opposite pane's
+	// MIX, and m_disk_dir for "voxels.vpl"; user can override via Load VPL.
+	Cvirtual_binary m_vpl_data;
+	Cvpl_file m_vpl_file;
+	bool m_vpl_loaded = false;
+	string m_vpl_name;
+	CButton m_vxl_vpl_load;
 	// Non-owning pointer to the MIX the current file came from (NULL when
 	// browsing the filesystem). Set by open_f(int, Cmix_file&) and cleared by
 	// open_f(string). Used by Load HVA so the user can pick from the MIX's
@@ -393,6 +413,14 @@ private:
 		double pitch = 0.0;
 		int ss = 0;
 		bool shading = false;
+		// VPL key fields: when vpl_active is true the splat baked
+		// vpl[section][color] into buf using vpl_lighting_version's light
+		// direction. Lighting slider commits change vpl_lighting_version
+		// and force a splat rebuild — unlike the synthetic-shading path,
+		// VPL section selection is baked into buf and can't be re-shaded
+		// cheaply after the fact.
+		bool vpl_active = false;
+		int vpl_lighting_version = -1;
 		int cx_s = 0;
 		int cy_s = 0;
 		Cvirtual_binary buf;	// paletted supersample framebuffer (cx_s*cy_s bytes)
@@ -425,12 +453,15 @@ private:
 		int splat_ss = 0;
 		bool splat_shading = false;
 		int splat_lighting_version = -1;
+		bool splat_vpl_active = false;
+		int splat_vpl_lighting_version = -1;
 		int side = -2;	// -1 = no remap; -2 = "never matched" sentinel
 		COLORREF custom_color = 0;
-		bool bg_on = false;
+		int bg_mode = -1;	// matches m_player_bg_mode; -1 = "never matched"
 		int grid_mode = 0;
 		COLORREF ck_a = 0;
 		COLORREF ck_b = 0;
+		COLORREF pane_c = 0;
 		int cx_s = 0;
 		int cy_s = 0;
 		std::vector<DWORD> bgra;

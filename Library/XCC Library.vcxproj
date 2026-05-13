@@ -308,6 +308,8 @@
     </ClCompile>
     <ClCompile Include="..\misc\voc_file.cpp">
     </ClCompile>
+    <ClCompile Include="..\misc\vpl_file.cpp">
+    </ClCompile>
     <ClCompile Include="..\misc\vqa_decode.cpp">
     </ClCompile>
     <ClCompile Include="..\misc\vqa_file.cpp">
@@ -427,6 +429,7 @@
     <ClInclude Include="..\misc\virtual_image.h" />
     <ClInclude Include="..\misc\virtual_tfile.h" />
     <ClInclude Include="..\misc\voc_file.h" />
+    <ClInclude Include="..\misc\vpl_file.h" />
     <ClInclude Include="..\misc\vqa_decode.h" />
     <ClInclude Include="..\misc\vqa_file.h" />
     <ClInclude Include="..\misc\vqp_file.h" />

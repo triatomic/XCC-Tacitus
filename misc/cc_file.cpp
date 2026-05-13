@@ -40,6 +40,7 @@
 #include "tmp_ts_file.h"
 #include "virtual_tfile.h"
 #include "voc_file.h"
+#include "vpl_file.h"
 #include "vqa_file.h"
 #include "vqp_file.h"
 #include "vxl_file.h"
@@ -459,6 +460,7 @@ static bool looks_like_ini(const byte* p, size_t size)
 		Ctmp_ra_file tmp_ra_f;
 		Ctmp_ts_file tmp_ts_f;
 		Cvoc_file voc_f;
+		Cvpl_file vpl_f;
 		Cvqa_file vqa_f;
 		Cvqp_file vqp_f;
 		Cvxl_file vxl_f;
@@ -493,6 +495,8 @@ static bool looks_like_ini(const byte* p, size_t size)
 			return ft_jpeg;
 		if (ogg_f.load(data, m_size), ogg_f.is_valid())
 			return ft_ogg;
+		if (vpl_f.load(data, m_size), vpl_f.is_valid())
+			return ft_vpl;
 		if (pal_f.load(data, m_size), pal_f.is_valid())
 			return ft_pal;
 		if (pcx_f.load(data, m_size), pcx_f.is_valid())

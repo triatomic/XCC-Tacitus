@@ -37,3 +37,7 @@ before Performance improvements/
 XCCD2D/
 cmp_misc.sh
 XCCCabal.md
+
+# Claude Code per-folder context (local-only, never push)
+CLAUDE.md
+**/CLAUDE.md

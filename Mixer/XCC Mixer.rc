@@ -178,14 +178,14 @@ BEGIN
             MENUITEM "&Auto",                           ID_THEME_SIZE_FORMAT_AUTO
             MENUITEM "&Bytes",                          ID_THEME_SIZE_FORMAT_BYTES
         END
-        MENUITEM SEPARATOR
         MENUITEM "Show &Grid Lines",                    ID_THEME_SHOW_GRID
-        MENUITEM "&Alpha Color...",                     ID_THEME_ALPHA_COLOR
-        MENUITEM "&Use Checkerboard",                   ID_THEME_USE_CHECKERBOARD
-        MENUITEM "SHP &Transparency",                   ID_THEME_SHP_TRANSPARENCY
         MENUITEM SEPARATOR
-        MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
-        MENUITEM "&Parallel Extract",                   ID_THEME_PARALLEL_EXTRACT
+        POPUP "&Image"
+        BEGIN
+            MENUITEM "&Alpha Color...",                 ID_THEME_ALPHA_COLOR
+            MENUITEM "&Use Checkerboard",               ID_THEME_USE_CHECKERBOARD
+            MENUITEM "SHP &Transparency",               ID_THEME_SHP_TRANSPARENCY
+        END
     END
     POPUP "&Graphics"
     BEGIN
@@ -225,9 +225,12 @@ BEGIN
         MENUITEM "&Limit VXL CPU",                      ID_THEME_LIMIT_VXL_CPU
         MENUITEM "Load &Full Hierarchy",                ID_THEME_VXL_FULL_HIER
     END
-    POPUP "&Keybinds"
+    POPUP "&Configure"
     BEGIN
-        MENUITEM "&Configure...",                       ID_KEYBINDS_CONFIGURE
+        MENUITEM "&Keybinds...",                        ID_KEYBINDS_CONFIGURE
+        MENUITEM SEPARATOR
+        MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
+        MENUITEM "&Parallel Extract",                   ID_THEME_PARALLEL_EXTRACT
         POPUP "&Settings Directory"
         BEGIN
             MENUITEM "&AppData",                        ID_SETTINGS_DIR_APPDATA
@@ -661,6 +664,58 @@ END
 STRINGTABLE
 BEGIN
     AFX_IDS_IDLEMESSAGE     "Ready"
+END
+
+// Status-bar prompts for menu items. MFC's CFrameWnd pushes these to the
+// status bar on hover, keyed on the command ID. Text before \n is the
+// status prompt; text after is the (unused) tooltip.
+
+STRINGTABLE
+BEGIN
+    // Theme menu
+    ID_THEME_LIGHT              "Use light mode colors"
+    ID_THEME_DARK               "Use dark mode colors"
+    ID_THEME_SYSTEM             "Follow the Windows app color setting"
+    ID_THEME_PANES_ONE          "Hide the middle MIX pane (file-info takes the slack)"
+    ID_THEME_PANES_TWO          "Show both MIX panes side-by-side"
+    ID_THEME_SIZE_FORMAT_AUTO   "Display file sizes scaled (e.g. 1.5 MB)"
+    ID_THEME_SIZE_FORMAT_BYTES  "Display file sizes as raw byte counts"
+    ID_THEME_SHOW_GRID          "Toggle grid lines between list-view rows"
+    ID_THEME_ALPHA_COLOR        "Pick the color used to mark transparent pixels"
+    ID_THEME_USE_CHECKERBOARD   "Show a checkerboard pattern over transparent pixels instead of a solid color"
+    ID_THEME_SHP_TRANSPARENCY   "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
+
+    // Graphics menu
+    ID_THEME_INTERP_NEAREST     "Sharp pixel scaling (no smoothing). Best for sprites."
+    ID_THEME_INTERP_BILINEAR    "Bilinear scaling. Smooth, slight blur on upscale."
+    ID_THEME_INTERP_BICUBIC     "Bicubic scaling. Sharper edges than bilinear, slower."
+    ID_THEME_INTERP_LANCZOS     "Lanczos-2 scaling. Sharpest smooth filter, more aliasing on diagonals."
+    ID_THEME_SHARPEN_0          "Disable unsharp-mask post-pass"
+    ID_THEME_SHARPEN_25         "Apply 25% sharpen to scaled images"
+    ID_THEME_SHARPEN_50         "Apply 50% sharpen to scaled images"
+    ID_THEME_SHARPEN_75         "Apply 75% sharpen to scaled images"
+    ID_THEME_SHARPEN_100        "Apply maximum sharpen to scaled images"
+    ID_THEME_FPS_30             "Cap repaint and input handling at 30 fps"
+    ID_THEME_FPS_60             "Cap repaint and input handling at 60 fps"
+    ID_THEME_FPS_120            "Cap repaint and input handling at 120 fps"
+    ID_THEME_FPS_UNLIMITED      "No frame rate cap (soft-capped at 1000 fps)"
+    ID_THEME_FPS_CUSTOM         "Set a custom frame rate cap value"
+    ID_THEME_VXL_SS_OFF         "No supersampling (1x). Fastest, aliased edges."
+    ID_THEME_VXL_SS_2           "2x supersampling. Slight edge smoothing."
+    ID_THEME_VXL_SS_4           "4x supersampling. Default. Good balance of quality and speed."
+    ID_THEME_VXL_SS_8           "8x supersampling. Smoother edges, more CPU."
+    ID_THEME_VXL_SS_16          "16x supersampling. Highest quality, heaviest CPU cost."
+    ID_THEME_VXL_SHADING        "Toggle camera-relative directional lighting on voxel models"
+    ID_THEME_VXL_LIGHTING       "Open the VXL lighting and normals dialog (azimuth, elevation, ambient, diffuse)"
+    ID_THEME_LIMIT_VXL_CPU      "Limit voxel rendering to fewer CPU threads to leave headroom for other apps"
+    ID_THEME_VXL_FULL_HIER      "Auto-load matching turret and barrel voxels when opening a VXL"
+
+    // Configure menu
+    ID_KEYBINDS_CONFIGURE       "Customize keyboard shortcuts"
+    ID_THEME_USE_EXTERNAL_PROGRAMS  "Open files in registered external programs when launched from XCC"
+    ID_THEME_PARALLEL_EXTRACT   "Extract batch selections in parallel (faster on SSDs)"
+    ID_SETTINGS_DIR_APPDATA     "Store settings under %APPDATA%\\XCC\\Mixer"
+    ID_SETTINGS_DIR_EXE         "Store settings next to the XCC Mixer executable (portable)"
 END
 
 #endif    // English (United States) resources

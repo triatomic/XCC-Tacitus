@@ -1476,6 +1476,7 @@
 #define IDC_VXL_NORMAL_KERNEL_LABEL       1174
 #define IDC_VXL_HVA_LOAD                  1165
 #define IDC_VXL_HVA_LOOP                  1166
+#define IDC_VXL_VPL_LOAD                  1175
 #define IDC_INCLUDE_GAME_MIXES            1167
 #define IDC_LOAD_PAL                      1168
 #define ID_THEME_VXL_LIGHTING             41025

@@ -18,7 +18,7 @@ static int get_ft_crc()
 	// Sentinel mixed in to invalidate older caches whose entries were built
 	// by a different probe path. Bump when the magic_dispatch / probe order
 	// changes in cc_file.cpp so old type-tables don't get reused.
-	static const char* probe_version = "probe-v3-mix1";
+	static const char* probe_version = "probe-v4-vpl";
 	Ccrc crc;
 	crc.init();
 	for (int i = 0; i < ft_count; i++)

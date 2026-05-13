@@ -45,6 +45,7 @@
 #include <virtual_tfile.h>
 #include <voc_file.h>
 #include <vqa_file.h>
+#include <vpl_file.h>
 #include <vxl_file.h>
 #include <vxl_normals.h>
 #include <wav_file.h>
@@ -94,6 +95,7 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_VXL_SIDE_CUSTOM, OnVxlSideCustom)
 	ON_BN_CLICKED(IDC_VXL_HVA_LOAD, OnVxlHvaLoad)
 	ON_BN_CLICKED(IDC_VXL_HVA_LOOP, OnVxlHvaLoop)
+	ON_BN_CLICKED(IDC_VXL_VPL_LOAD, OnVxlVplLoad)
 	ON_BN_CLICKED(IDC_LOAD_PAL, OnLoadPal)
 	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
 	ON_WM_DRAWITEM()
@@ -288,6 +290,12 @@ void CXCCFileView::OnMouseMove(UINT nFlags, CPoint point)
 
 BOOL CXCCFileView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
+	// Hover-help: when the cursor is over a player-band child, push that
+	// control's short description to the main frame's status bar. Cleared
+	// when the cursor leaves the band. Lookup is keyed on HWND so the
+	// per-mode BG-button label change doesn't affect the help text.
+	update_player_hover_help(pWnd);
+
 	// In player mode, show the hand cursor over the image area to advertise
 	// right-drag-to-pan. Outside the image area (control band) and outside
 	// player mode, fall through to the default arrow.
@@ -305,6 +313,51 @@ BOOL CXCCFileView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 		}
 	}
 	return CScrollView::OnSetCursor(pWnd, nHitTest, message);
+}
+
+void CXCCFileView::update_player_hover_help(CWnd* pWnd)
+{
+	if (!m_player_controls_created)
+		return;
+	HWND h = pWnd ? pWnd->GetSafeHwnd() : nullptr;
+	const char* msg = nullptr;
+	if (h == m_player_play.GetSafeHwnd())          msg = "Play / pause animation.";
+	else if (h == m_player_reverse.GetSafeHwnd())  msg = "Reverse playback direction.";
+	else if (h == m_player_grid.GetSafeHwnd())     msg = "Show static grid of all frames instead of animation.";
+	else if (h == m_player_native.GetSafeHwnd())   msg = "Display at native resolution (no scaling).";
+	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
+	else if (h == m_player_fps_edit.GetSafeHwnd()) msg = "Playback speed in frames per second.";
+	else if (h == m_player_fps_spin.GetSafeHwnd()) msg = "Playback speed in frames per second.";
+	else if (h == m_player_shadows.GetSafeHwnd())  msg = "Composite frame[i + cf/2] as shadow over frame[i]. Halves the timeline.";
+	else if (h == m_player_bg.GetSafeHwnd())       msg = "Cycle background for transparent pixels: palette color 0 / alpha checker / pane color.";
+	else if (h == m_player_side_custom.GetSafeHwnd()) msg = "Custom side color: opens picker. Click again to clear.";
+	else if (h == m_player_iso_grid.GetSafeHwnd()) msg = "Overlay isometric tile grid (TS 48px / RA2 60px). Drawn before scaling.";
+	else if (h == m_vxl_hva_load.GetSafeHwnd())    msg = "Load an HVA animation. Lists matching HVAs from the source MIX.";
+	else if (h == m_vxl_hva_loop.GetSafeHwnd())    msg = "Loop HVA animation. When off, playback stops at the last keyframe.";
+	else if (h == m_vxl_vpl_load.GetSafeHwnd())    msg = "Load a VPL palette mapper for engine-faithful VXL shading. Auto-loads voxels.vpl on file open.";
+	else if (h == m_vxl_side_custom.GetSafeHwnd()) msg = "Custom VXL side color: opens picker. Click again to clear.";
+	else
+	{
+		for (int i = 0; i < 8; i++)
+		{
+			if (h == m_player_side[i].GetSafeHwnd()) { msg = "Recolor palette indices 16-31 (Westwood remap range). Click active swatch to clear."; break; }
+			if (h == m_vxl_side[i].GetSafeHwnd())    { msg = "Recolor VXL palette indices 16-31. Click active swatch to clear."; break; }
+		}
+	}
+
+	if (CFrameWnd* mf = GetTopLevelFrame())
+	{
+		if (msg && msg != m_last_hover_help)
+		{
+			mf->SetMessageText(msg);
+			m_last_hover_help = msg;
+		}
+		else if (!msg && m_last_hover_help)
+		{
+			mf->SetMessageText(AFX_IDS_IDLEMESSAGE);
+			m_last_hover_help = nullptr;
+		}
+	}
 }
 
 void CXCCFileView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
@@ -2400,6 +2453,16 @@ void CXCCFileView::post_open(Ccc_file& f)
 		// its exact-name <part>.hva auto-paired.
 		if (m_ft == ft_vxl && theme::vxl_full_hierarchy())
 			vxl_load_parts();
+		// Auto-load voxels.vpl alongside the VXL — engine-faithful shading.
+		// Drops the previous load first; succeeds silently or leaves the
+		// viewer on the synthetic-shading fallback.
+		if (m_ft == ft_vxl)
+		{
+			m_vpl_loaded = false;
+			m_vpl_data.clear();
+			m_vpl_name.clear();
+			try_auto_load_vpl();
+		}
 	}
 	if (m_player_mode)
 		player_exit();
@@ -2969,7 +3032,7 @@ void CXCCFileView::player_decode_frames()
 				float nlen = std::sqrt(wnx * wnx + wny * wny + wnz * wnz);
 				if (nlen > 1e-6f) { wnx /= nlen; wny /= nlen; wnz /= nlen; }
 				else              { wnx = 0; wny = 0; wnz = 1; }
-				t_vxl_voxel v{ wx, wy, wz, lv.color, wnx, wny, wnz };
+				t_vxl_voxel v{ wx, wy, wz, lv.color, lv.normal_idx, wnx, wny, wnz };
 				m_vxl_cloud.push_back(v);
 			}
 		}
@@ -3153,7 +3216,9 @@ void CXCCFileView::player_enter()
 		theme::apply_window(m_player_fps_spin.GetSafeHwnd());
 
 		m_player_shadows.Create("Shadows", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_SHADOWS);
-		m_player_bg.Create("BG", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_BG);
+		// 3-state pushbutton: click cycles Color → Checker → Pane bg.
+		// Label is updated to reflect current state in player_show_for_kind.
+		m_player_bg.Create("BG", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_BG);
 		for (int i = 0; i < 8; i++)
 		{
 			m_player_side[i].Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE0 + i);
@@ -3212,6 +3277,12 @@ void CXCCFileView::player_enter()
 		m_vxl_hva_loop.SetFont(&m_font);
 		theme::apply_window(m_vxl_hva_loop.GetSafeHwnd());
 
+		// VPL load button (VXL-only). Lets the user pick voxels.vpl manually
+		// when auto-detection didn't find one in the source MIX or folder.
+		m_vxl_vpl_load.Create("Load VPL...", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_VXL_VPL_LOAD);
+		m_vxl_vpl_load.SetFont(&m_font);
+		theme::apply_window(m_vxl_vpl_load.GetSafeHwnd());
+
 		m_player_controls_created = true;
 	}
 	const bool vxl = (m_ft == ft_vxl);
@@ -3245,7 +3316,7 @@ void CXCCFileView::player_enter()
 	// "transparent" pixel in either case, so the show-bg-vs-checker switch is
 	// meaningful for both.
 	m_player_bg.ShowWindow(SW_SHOW);
-	m_player_bg.SetCheck(m_player_bg_on ? BST_CHECKED : BST_UNCHECKED);
+	player_update_bg_label();
 	for (int i = 0; i < 8; i++)
 		m_player_side[i].ShowWindow(shp_show);
 	m_player_side_custom.ShowWindow(shp_show);
@@ -3255,6 +3326,7 @@ void CXCCFileView::player_enter()
 		m_vxl_side[i].ShowWindow(vxl_show);
 	m_vxl_side_custom.ShowWindow(vxl_show);
 	m_vxl_hva_load.ShowWindow(vxl_show);
+	m_vxl_vpl_load.ShowWindow(vxl_show);
 	// Loop only meaningful while an HVA is supplying multiple frames.
 	const int hva_loop_show = vxl_hva ? SW_SHOW : SW_HIDE;
 	m_vxl_hva_loop.ShowWindow(hva_loop_show);
@@ -3311,6 +3383,7 @@ void CXCCFileView::player_exit()
 		m_vxl_side_custom.ShowWindow(SW_HIDE);
 		m_vxl_hva_load.ShowWindow(SW_HIDE);
 		m_vxl_hva_loop.ShowWindow(SW_HIDE);
+		m_vxl_vpl_load.ShowWindow(SW_HIDE);
 		m_player_iso_grid.ShowWindow(SW_HIDE);
 	}
 	m_player_frames.clear();
@@ -3406,7 +3479,7 @@ void CXCCFileView::player_layout_controls()
 		// (+ iso-grid when HVA is loaded).
 		int y2 = y - H - pad;
 		int x2 = pad;
-		m_player_bg.MoveWindow(x2, y2, 36, H); x2 += 36 + pad;
+		m_player_bg.MoveWindow(x2, y2, 70, H); x2 += 70 + pad;
 		const int swatch = H;
 		for (int i = 0; i < 8; i++)
 		{
@@ -3416,6 +3489,9 @@ void CXCCFileView::player_layout_controls()
 		m_vxl_side_custom.MoveWindow(x2, y2, swatch, H); x2 += swatch + pad;
 		// HVA load button — sits at the right end of the VXL upper row.
 		m_vxl_hva_load.MoveWindow(x2, y2, 90, H); x2 += 90 + pad;
+		// VPL load button — alongside HVA. Auto-detection covers most cases;
+		// the button is the manual override.
+		m_vxl_vpl_load.MoveWindow(x2, y2, 90, H); x2 += 90 + pad;
 		// Loop checkbox — only visible while an HVA is loaded.
 		m_vxl_hva_loop.MoveWindow(x2, y2, 56, H); x2 += 56 + pad;
 		if (vxl_hva)
@@ -3426,7 +3502,7 @@ void CXCCFileView::player_layout_controls()
 	int y2 = y - H - pad;
 	int x2 = pad;
 	m_player_shadows.MoveWindow(x2, y2, 64, H);       x2 += 64 + pad;
-	m_player_bg.MoveWindow(x2, y2, 36, H);            x2 += 36 + pad;
+	m_player_bg.MoveWindow(x2, y2, 70, H);            x2 += 70 + pad;
 	const int swatch = H;
 	for (int i = 0; i < 8; i++)
 	{
@@ -3458,13 +3534,17 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 		return;
 	const byte* s = m_player_frames[frame_idx].data();
 	const int cx_s = m_player_cx;
-	const bool show_bg = m_player_bg_on;
+	const int bg_mode = m_player_bg_mode;
 	const int side = m_player_side_idx;
 	const COLORREF custom_color = m_player_side_custom_color;
 	const COLORREF ck_a = theme::checker_a();
 	const COLORREF ck_b = theme::checker_b();
 	const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
 	const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
+	// Pane bg (mode 2): use theme background so transparent pixels blend
+	// into the file-info pane. Shadows still darken these pixels.
+	const COLORREF pane_c = theme::bg();
+	const DWORD pane_d = (GetRValue(pane_c) << 16) | (GetGValue(pane_c) << 8) | GetBValue(pane_c);
 	float remap_r = 0, remap_g = 0, remap_b = 0;
 	if (side >= 0 && side < 8)
 	{
@@ -3493,8 +3573,10 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 		DWORD bgra;
 		if (idx == 0)
 		{
-			if (show_bg)
+			if (bg_mode == 0)
 				bgra = m_color_table[0];
+			else if (bg_mode == 2)
+				bgra = pane_d;
 			else
 			{
 				int x = i % cx_s, y = i / cx_s;
@@ -3645,12 +3727,17 @@ void CXCCFileView::player_draw(CDC* pDC)
 		// affects shade[], which is rebuilt by a cheap separate pass below
 		// (consuming the per-pixel cam_normal[] buffer). So slider drags in
 		// the VXL Lighting dialog skip the splat rebuild entirely.
+		// VPL bakes lighting directly into buf, so its key must include both
+		// "vpl is on" and the current lighting version (light direction).
+		const int splat_lighting_version_now = theme::vxl_lighting_version();
 		const bool cache_hit =
 			m_vxl_splat.token == m_open_token &&
 			m_vxl_splat.yaw == m_vxl_yaw &&
 			m_vxl_splat.pitch == m_vxl_pitch &&
 			m_vxl_splat.ss == ss &&
 			m_vxl_splat.shading == shading &&
+			m_vxl_splat.vpl_active == m_vpl_loaded &&
+			(!m_vpl_loaded || m_vxl_splat.vpl_lighting_version == splat_lighting_version_now) &&
 			m_vxl_splat.cx_s == vxl_ss_cx &&
 			m_vxl_splat.cy_s == vxl_ss_cy &&
 			m_vxl_splat.buf.size() == static_cast<size_t>(vxl_ss_cx) * vxl_ss_cy;
@@ -3692,7 +3779,12 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// converts cam_normal -> shade in a cheap second pass keyed on
 			// lighting_version. That way slider drags in the VXL Lighting
 			// dialog only redo the lighting pass, not the splat.
-			if (shading)
+			//
+			// VPL path: lighting is baked into buf via vpl[section][color]
+			// at splat time, so cam_normal/shade are unused (and would
+			// double-shade if the post-splat lighting pass ran).
+			const bool synth_shading = shading && !m_vpl_loaded;
+			if (synth_shading)
 			{
 				m_vxl_splat.cam_normal.assign(static_cast<size_t>(c_pixels) * 3, 0);
 			}
@@ -3701,6 +3793,11 @@ void CXCCFileView::player_draw(CDC* pDC)
 				m_vxl_splat.cam_normal.clear();
 				m_vxl_splat.shade.clear();
 			}
+			// Light direction for VPL section selection. Fetched once per
+			// rebuild — same for every voxel in this splat.
+			float vpl_lx = 0, vpl_ly = 0, vpl_lz = 1;
+			if (m_vpl_loaded)
+				theme::vxl_light_direction(vpl_lx, vpl_ly, vpl_lz);
 			// Parallelize the splat by partitioning *output rows*: each thread
 			// owns a contiguous row band [y_lo, y_hi) of the supersample
 			// framebuffer and iterates the entire voxel cloud, writing only when
@@ -3712,7 +3809,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// anyway. Voxel cloud is read-only, so no copies needed.
 			const int n_voxels = static_cast<int>(m_vxl_cloud.size());
 			const t_vxl_voxel* cloud = m_vxl_cloud.data();
-			signed char* cam_n_buf = shading ? m_vxl_splat.cam_normal.data() : nullptr;
+			signed char* cam_n_buf = synth_shading ? m_vxl_splat.cam_normal.data() : nullptr;
 			// Splat is intentionally serial. The previous output-row-banded
 			// OpenMP version made every thread iterate the whole voxel cloud
 			// and run the rotation math for each voxel, then reject ones
@@ -3738,8 +3835,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 				// shading pass can re-apply lighting without rebuilding the
 				// splat. Y is flipped to match the same post-transform Y flip
 				// applied to positions during decode.
+				//
+				// The same rotated normal is also used to pick the VPL
+				// section (when VPL is loaded), so we compute it whenever
+				// either path needs it.
 				signed char ni8x = 0, ni8y = 0, ni8z = 0;
-				if (shading)
+				byte voxel_pal = v.color;
+				const bool need_normal = synth_shading || m_vpl_loaded;
+				if (need_normal)
 				{
 					float nrx = static_cast<float>(v.nx * cosY - v.ny * sinY);
 					float nry = static_cast<float>(v.nx * sinY + v.ny * cosY);
@@ -3756,6 +3859,20 @@ void CXCCFileView::player_draw(CDC* pDC)
 					ni8x = q(nrx);
 					ni8y = q(-nry_p);
 					ni8z = q(nrz_p);
+					if (m_vpl_loaded && voxel_pal != 0)
+					{
+						// Section index in [0..31]: 0 = brightest (n·L = +1, normal
+						// facing the light), 31 = darkest (n·L = -1, normal facing
+						// away). Empirically verified by tracing remap entries in
+						// a real voxels.vpl — section 0 maps colors toward lighter
+						// ramp positions, sections grow darker toward 31. Stored
+						// normal is already in the "dot-with-light gives signed
+						// brightness" form.
+						float ndotl = (ni8x * vpl_lx + ni8y * vpl_ly + ni8z * vpl_lz) / 127.0f;
+						int sec = static_cast<int>((1.0f - ndotl) * 0.5f * 31.0f + 0.5f);
+						if (sec < 0) sec = 0; else if (sec > 31) sec = 31;
+						voxel_pal = m_vpl_file.get_section(sec)[v.color];
+					}
 				}
 				// Splat the rotation-aware footprint (computed above) centered
 				// on the projected voxel position. Guarantees overlap with the
@@ -3774,7 +3891,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 						if (depth > z_buf[ofs])
 						{
 							z_buf[ofs] = depth;
-							d[ofs] = v.color;
+							d[ofs] = voxel_pal;
 							if (cam_n_buf)
 							{
 								signed char* p = cam_n_buf + 3 * ofs;
@@ -3789,6 +3906,8 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.pitch = m_vxl_pitch;
 			m_vxl_splat.ss = ss;
 			m_vxl_splat.shading = shading;
+			m_vxl_splat.vpl_active = m_vpl_loaded;
+			m_vxl_splat.vpl_lighting_version = m_vpl_loaded ? splat_lighting_version_now : -1;
 			m_vxl_splat.cx_s = vxl_ss_cx;
 			m_vxl_splat.cy_s = vxl_ss_cy;
 			// Force the shading pass to run on the fresh cam_normal buffer.
@@ -3799,7 +3918,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 		// Converts cam_normal[] -> shade[] via the same ambient + diffuse*max(0,
 		// dot(n, light)) formula the old in-splat shading used. Output range
 		// 0..255 where 128 = neutral 1.0 (matches downstream BGRA composite).
-		if (shading && m_vxl_splat.shade_lighting_version != lighting_version)
+		if (shading && !m_vpl_loaded && m_vxl_splat.shade_lighting_version != lighting_version)
 		{
 			const int c_pixels_pass = vxl_ss_cx * vxl_ss_cy;
 			m_vxl_splat.shade.assign(c_pixels_pass, 128);
@@ -3943,7 +4062,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 		// re-running the per-pixel loop 15-30 times per second goes away.
 		// VXL still runs the loop every paint because shading scales the
 		// VXL splat output (which already has its own splat-level cache).
-		const bool show_bg = m_player_bg_on;
+		const int bg_mode = m_player_bg_mode;
 		// SHP and VXL each have their own side-color state. Pick the active
 		// one for the current view so the retint applies independently per
 		// kind of asset.
@@ -3954,6 +4073,8 @@ void CXCCFileView::player_draw(CDC* pDC)
 		const COLORREF ck_b = theme::checker_b();
 		const DWORD ck_a_d = (GetRValue(ck_a) << 16) | (GetGValue(ck_a) << 8) | GetBValue(ck_a);
 		const DWORD ck_b_d = (GetRValue(ck_b) << 16) | (GetGValue(ck_b) << 8) | GetBValue(ck_b);
+		const COLORREF pane_c = theme::bg();
+		const DWORD pane_d = (GetRValue(pane_c) << 16) | (GetGValue(pane_c) << 8) | GetBValue(pane_c);
 		float remap_r = 0, remap_g = 0, remap_b = 0;
 		if (side >= 0 && side < 8)
 		{
@@ -4009,12 +4130,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 				vc.splat_ss == m_vxl_splat.ss &&
 				vc.splat_shading == m_vxl_splat.shading &&
 				vc.splat_lighting_version == m_vxl_splat.shade_lighting_version &&
+				vc.splat_vpl_active == m_vxl_splat.vpl_active &&
+				vc.splat_vpl_lighting_version == m_vxl_splat.vpl_lighting_version &&
 				vc.side == side &&
 				vc.custom_color == custom_color &&
-				vc.bg_on == show_bg &&
+				vc.bg_mode == bg_mode &&
 				vc.grid_mode == m_player_grid_mode &&
 				vc.ck_a == ck_a &&
 				vc.ck_b == ck_b &&
+				vc.pane_c == pane_c &&
 				vc.cx_s == cx_s &&
 				vc.cy_s == cy_s &&
 				static_cast<int>(vc.bgra.size()) == n)
@@ -4046,8 +4170,10 @@ void CXCCFileView::player_draw(CDC* pDC)
 			DWORD bgra;
 			if (idx == 0)
 			{
-				if (show_bg)
+				if (bg_mode == 0)
 					bgra = m_color_table[0];
+				else if (bg_mode == 2)
+					bgra = pane_d;
 				else
 				{
 					int x = i % cx_s, y = i / cx_s;
@@ -4148,12 +4274,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vc.splat_ss = m_vxl_splat.ss;
 			vc.splat_shading = m_vxl_splat.shading;
 			vc.splat_lighting_version = m_vxl_splat.shade_lighting_version;
+			vc.splat_vpl_active = m_vxl_splat.vpl_active;
+			vc.splat_vpl_lighting_version = m_vxl_splat.vpl_lighting_version;
 			vc.side = m_vxl_side_idx;
 			vc.custom_color = m_vxl_side_custom_color;
-			vc.bg_on = m_player_bg_on;
+			vc.bg_mode = m_player_bg_mode;
 			vc.grid_mode = m_player_grid_mode;
 			vc.ck_a = theme::checker_a();
 			vc.ck_b = theme::checker_b();
+			vc.pane_c = theme::bg();
 			vc.cx_s = cx_s;
 			vc.cy_s = cy_s;
 			vc.bgra.assign(p_dib, p_dib + n);
@@ -4415,6 +4544,7 @@ void CXCCFileView::reapply_player_theme()
 		m_player_side_custom.GetSafeHwnd(),
 		m_vxl_hva_load.GetSafeHwnd(),
 		m_vxl_hva_loop.GetSafeHwnd(),
+		m_vxl_vpl_load.GetSafeHwnd(),
 	};
 	for (HWND h : ctrls)
 		if (h)
@@ -4453,6 +4583,11 @@ void CXCCFileView::reapply_player_theme()
 			if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
 		}
 	}
+	// Theme switch changes theme::bg(), which feeds BG=Pane mode. Invalidate
+	// the SHP/WSA BGRA cache so the next paint rebuilds against the new pane
+	// color; the VXL cache key includes pane_c so it self-invalidates.
+	m_player_bgra_version++;
+	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 }
 
 void CXCCFileView::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT mis)
@@ -4584,12 +4719,23 @@ void CXCCFileView::OnPlayerShadows()
 void CXCCFileView::OnPlayerBg()
 {
 	if (!m_player_controls_created) return;
-	m_player_bg_on = m_player_bg.GetCheck() == BST_CHECKED;
+	// Cycle: 0 (Color) → 1 (Alpha checker) → 2 (Pane bg).
+	m_player_bg_mode = (m_player_bg_mode + 1) % 3;
+	player_update_bg_label();
 	m_player_bgra_version++;
 	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);
+}
+
+void CXCCFileView::player_update_bg_label()
+{
+	if (!m_player_bg.GetSafeHwnd()) return;
+	const char* label = "BG Color";
+	if (m_player_bg_mode == 1) label = "BG Alpha";
+	else if (m_player_bg_mode == 2) label = "BG Pane";
+	m_player_bg.SetWindowText(label);
 }
 
 void CXCCFileView::OnPlayerSide(UINT id)
@@ -4791,6 +4937,175 @@ void CXCCFileView::vxl_load_parts()
 
 	try_part("tur");
 	try_part("barl");
+}
+
+void CXCCFileView::try_auto_load_vpl()
+{
+	// Engine convention: a single "voxels.vpl" per game lives alongside the
+	// voxel assets. Look for it in the same places vxl_load_parts looks for
+	// sibling .vxl/.hva files (source MIX, opposite pane's MIX, disk folder).
+	Cvirtual_binary bytes = find_in_sources("voxels.vpl");
+	if (bytes.size() == 0)
+		return;
+	Cvpl_file probe;
+	probe.load(bytes);
+	if (!probe.is_valid())
+		return;
+	m_vpl_data = bytes;
+	m_vpl_file.load(m_vpl_data);
+	m_vpl_loaded = true;
+	m_vpl_name = "voxels.vpl";
+	// Splat cache is keyed on m_vpl_loaded; nothing to invalidate explicitly,
+	// player_enter / next paint will rebuild.
+}
+
+void CXCCFileView::OnVxlVplLoad()
+{
+	if (m_ft != ft_vxl)
+		return;
+
+	// Same MIX-popup-then-Browse pattern as OnVxlHvaLoad. No similarity
+	// filter — VPLs aren't named after the VXL; just list every .vpl in the
+	// source MIX.
+	const int k_browse_cmd = 1;
+	const int k_clear_cmd  = 2;
+	const int k_reload_cmd = 3;
+	const int k_mix_base   = 100;
+	struct mix_choice { int id; string label; };
+	std::vector<mix_choice> mix_choices;
+	if (m_source_mix)
+	{
+		for (size_t i = 0; i < m_source_mix->get_c_files(); i++)
+		{
+			const int id = m_source_mix->get_id(static_cast<int>(i));
+			string name = m_source_mix->get_name(id);
+			if (name.size() < 4)
+				continue;
+			string lc = name;
+			for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			if (lc.substr(lc.size() - 4) != ".vpl")
+				continue;
+			mix_choices.push_back({ id, name });
+		}
+	}
+
+	// Active VPL name (case-insensitive) for matching against MIX entries
+	// so we can show a checkmark next to the one currently in use.
+	string active_lc = m_vpl_name;
+	for (auto& c : active_lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+
+	int chosen = k_browse_cmd;
+	{
+		CMenu menu;
+		menu.CreatePopupMenu();
+
+		// Status header — shows the currently active VPL (or "none"). Disabled
+		// so it can't be clicked but it makes the source visible.
+		string header = m_vpl_loaded
+			? ("Active: " + m_vpl_name)
+			: string("Active: (none - synthetic shading)");
+		menu.AppendMenu(MF_STRING | MF_GRAYED | MF_DISABLED, 0, header.c_str());
+		menu.AppendMenu(MF_SEPARATOR);
+
+		for (size_t i = 0; i < mix_choices.size(); i++)
+		{
+			string lc = mix_choices[i].label;
+			for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			UINT flags = MF_STRING;
+			if (m_vpl_loaded && lc == active_lc)
+				flags |= MF_CHECKED;
+			menu.AppendMenu(flags, k_mix_base + i, mix_choices[i].label.c_str());
+		}
+		if (!mix_choices.empty())
+			menu.AppendMenu(MF_SEPARATOR);
+		menu.AppendMenu(MF_STRING, k_browse_cmd, "Browse disk...");
+		// Always offer the auto-detect path so a manual clear can be undone
+		// even when the VPL lives outside m_source_mix (opposite pane / disk).
+		menu.AppendMenu(MF_STRING, k_reload_cmd, "Auto-detect (voxels.vpl)");
+		if (m_vpl_loaded)
+		{
+			menu.AppendMenu(MF_SEPARATOR);
+			menu.AppendMenu(MF_STRING, k_clear_cmd, "Clear (use synthetic shading)");
+		}
+		CRect br;
+		m_vxl_vpl_load.GetWindowRect(&br);
+		chosen = menu.TrackPopupMenu(
+			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+			br.left, br.bottom, this);
+		if (chosen == 0)
+			return;
+	}
+
+	if (chosen == k_clear_cmd)
+	{
+		m_vpl_loaded = false;
+		m_vpl_data.clear();
+		m_vpl_name.clear();
+		m_open_token++;	// invalidate splat cache (key includes m_vpl_loaded)
+		Invalidate();
+		return;
+	}
+
+	if (chosen == k_reload_cmd)
+	{
+		// Re-run the same auto-detection used on file open. Searches
+		// m_source_mix → opposite pane's MIX → m_disk_dir for "voxels.vpl".
+		m_vpl_loaded = false;
+		m_vpl_data.clear();
+		m_vpl_name.clear();
+		try_auto_load_vpl();
+		if (!m_vpl_loaded)
+		{
+			AfxMessageBox("No voxels.vpl found in this MIX, the opposite pane, or the source folder.", MB_ICONINFORMATION);
+			return;
+		}
+		m_open_token++;
+		Invalidate();
+		return;
+	}
+
+	Cvirtual_binary data;
+	string source_label;
+	if (chosen >= k_mix_base && chosen < k_mix_base + static_cast<int>(mix_choices.size()))
+	{
+		const mix_choice& c = mix_choices[chosen - k_mix_base];
+		data = m_source_mix->get_vdata(c.id);
+		source_label = c.label;
+		if (data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected VPL entry from the MIX.", MB_ICONERROR);
+			return;
+		}
+	}
+	else
+	{
+		CFileDialog dlg(TRUE, "vpl", NULL,
+			OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+			"VPL files (*.vpl)|*.vpl|All files (*.*)|*.*||", this);
+		if (dlg.DoModal() != IDOK)
+			return;
+		const string path = static_cast<const char*>(dlg.GetPathName());
+		if (data.load(path) || data.size() == 0)
+		{
+			AfxMessageBox("Could not read the selected VPL file.", MB_ICONERROR);
+			return;
+		}
+		source_label = Cfname(path).get_fname();
+	}
+
+	Cvpl_file probe;
+	probe.load(data);
+	if (!probe.is_valid())
+	{
+		AfxMessageBox("File is not a valid VPL.", MB_ICONERROR);
+		return;
+	}
+	m_vpl_data = data;
+	m_vpl_file.load(m_vpl_data);
+	m_vpl_loaded = true;
+	m_vpl_name = source_label;
+	m_open_token++;	// invalidate splat cache
+	Invalidate();
 }
 
 void CXCCFileView::OnVxlHvaLoad()
