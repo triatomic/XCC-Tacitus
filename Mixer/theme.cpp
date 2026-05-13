@@ -38,7 +38,7 @@ namespace theme
 		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
 		// 0.81650 vs sqrt(0.40825^2*2)). Ambient/diffuse are unchanged.
 		const float k_default_az = 225.0f;
-		const float k_default_el = 54.7356f;
+		const float k_default_el = -54.7356f;
 		const float k_default_ambient = 0.55f;
 		const float k_default_diffuse = 0.85f;
 		float g_vxl_light_az = k_default_az;
@@ -50,6 +50,12 @@ namespace theme
 		// would otherwise have called save(). flush_lighting_save() consumes
 		// it. Decouples slider-drag tick rate from registry write rate.
 		bool g_vxl_lighting_save_pending = false;
+		// Light-direction indicator state. Visibility is a runtime flag (not
+		// persisted) toggled by the lighting dialog's show/hide lifecycle.
+		// Placement mode IS persisted so the user's choice sticks.
+		bool g_vxl_vpl_engine_faithful = true;
+		bool g_vxl_light_indicator_visible = false;
+		vxl_light_indicator_placement g_vxl_light_indicator_mode = vxl_light_indicator_overlay;
 		bool g_limit_vxl_cpu = false;
 		bool g_vxl_full_hierarchy = true;
 		bool g_parallel_extract = true;
@@ -212,6 +218,12 @@ namespace theme
 		g_vxl_light_el = load_f("vxl_light_el", k_default_el, -90.0f, 90.0f);
 		g_vxl_light_ambient = load_f("vxl_light_ambient", k_default_ambient, 0.0f, 1.0f);
 		g_vxl_light_diffuse = load_f("vxl_light_diffuse", k_default_diffuse, 0.0f, 1.0f);
+		g_vxl_vpl_engine_faithful = AfxGetApp()->GetProfileInt("Theme", "vxl_vpl_engine_faithful", 1) != 0;
+		{
+			int v = AfxGetApp()->GetProfileInt("Theme", "vxl_light_indicator_mode", static_cast<int>(vxl_light_indicator_overlay));
+			if (v < 0 || v > 1) v = static_cast<int>(vxl_light_indicator_overlay);
+			g_vxl_light_indicator_mode = static_cast<vxl_light_indicator_placement>(v);
+		}
 		g_limit_vxl_cpu = AfxGetApp()->GetProfileInt("Theme", "limit_vxl_cpu", 0) != 0;
 		g_vxl_full_hierarchy = AfxGetApp()->GetProfileInt("Theme", "vxl_full_hierarchy", 1) != 0;
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
@@ -239,6 +251,8 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_diffuse", static_cast<int>(g_vxl_light_diffuse * 1000.0f));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_vpl_engine_faithful", g_vxl_vpl_engine_faithful ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_indicator_mode", static_cast<int>(g_vxl_light_indicator_mode));
 		AfxGetApp()->WriteProfileInt("Theme", "limit_vxl_cpu", g_limit_vxl_cpu ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_full_hierarchy", g_vxl_full_hierarchy ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
@@ -399,12 +413,36 @@ namespace theme
 		float az_rad = g_vxl_light_az * pi / 180.0f;
 		float el_rad = g_vxl_light_el * pi / 180.0f;
 		float ce = std::cos(el_rad);
-		// Convention: az=0 → +X, az=90° → +Y; elevation lifts toward +Z.
-		// Default az=225°, el=54.7356° → x=-0.40825, y=-0.40825, z=+0.81650
+		// Convention: az=0 → +X, az=90° → +Y; +elevation = light above the
+		// horizon (RA2 [Lighting] convention). After the splat's post-transform
+		// Y-flip on normals, +elevation correctly lights the *top* of the model.
+		// Default az=225°, el=-54.7356° → x=-0.40825, y=-0.40825, z=+0.81650
 		// (matches the original hand-tuned constants).
 		x = ce * std::cos(az_rad);
 		y = ce * std::sin(az_rad);
-		z = std::sin(el_rad);
+		z = -std::sin(el_rad);
+	}
+
+	bool vxl_vpl_engine_faithful() { return g_vxl_vpl_engine_faithful; }
+	void set_vxl_vpl_engine_faithful(bool v)
+	{
+		if (g_vxl_vpl_engine_faithful == v) return;
+		g_vxl_vpl_engine_faithful = v;
+		// Bumping the lighting version invalidates the splat cache, which
+		// has the VPL section bytes baked in. The next paint re-derives
+		// section indices under the new formula.
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	bool vxl_light_indicator_visible() { return g_vxl_light_indicator_visible; }
+	void set_vxl_light_indicator_visible(bool v) { g_vxl_light_indicator_visible = v; }
+	vxl_light_indicator_placement vxl_light_indicator_mode() { return g_vxl_light_indicator_mode; }
+	void set_vxl_light_indicator_mode(vxl_light_indicator_placement v)
+	{
+		if (g_vxl_light_indicator_mode == v) return;
+		g_vxl_light_indicator_mode = v;
+		save();
 	}
 
 	bool limit_vxl_cpu() { return g_limit_vxl_cpu; }
@@ -1235,6 +1273,187 @@ namespace theme
 		::InvalidateRect(h, NULL, TRUE);
 	}
 
+	// Radio / checkbox BUTTONs paint their indicator glyph (the circle dot or
+	// the box tick) via uxtheme's Button parts. Even with DarkMode_Explorer
+	// applied, the *label* text is drawn by the same uxtheme call using the
+	// theme's hardcoded foreground color — which is black, regardless of any
+	// SetTextColor we apply via WM_CTLCOLORSTATIC. So in dark mode the labels
+	// come out unreadable.
+	//
+	// Notepad++ pattern: subclass each radio/checkbox, intercept WM_PAINT,
+	// use DrawThemeBackground for ONLY the indicator rect (theme draws the
+	// dark-mode-correct circle/check), then DrawText the label ourselves with
+	// theme::text() so the label honors dark mode. Light mode falls through
+	// to the original wndproc untouched.
+	static int button_state_id(HWND h, bool is_radio)
+	{
+		// Per vsstyle.h: RBS_UNCHECKED*=1..4, RBS_CHECKED*=5..8;
+		// CBS_UNCHECKED*=1..4, CBS_CHECKED*=5..8.
+		const LRESULT chk = ::SendMessageW(h, BM_GETCHECK, 0, 0);
+		const bool checked = chk == BST_CHECKED;
+		const bool disabled = !::IsWindowEnabled(h);
+		const bool hot = ::SendMessageW(h, BM_GETSTATE, 0, 0) & BST_HOT;
+		const bool pushed = ::SendMessageW(h, BM_GETSTATE, 0, 0) & BST_PUSHED;
+		int base = checked ? 5 : 1;	// CBS_CHECKED*=5, CBS_UNCHECKED*=1
+		if (disabled)     base += 3;
+		else if (pushed)  base += 2;
+		else if (hot)     base += 1;
+		(void)is_radio;	// state ids are identical for BP_RADIOBUTTON & BP_CHECKBOX
+		return base;
+	}
+
+	static void paint_dark_button(HWND h, bool is_radio)
+	{
+		PAINTSTRUCT ps;
+		HDC hdc = ::BeginPaint(h, &ps);
+		if (!hdc)
+			return;
+		RECT rc;
+		::GetClientRect(h, &rc);
+
+		// Fill background with parent's dark bg so we don't get a flash of
+		// the system COLOR_BTNFACE. Parent's WM_CTLCOLORSTATIC already
+		// returns bg_brush() so any non-painted pixels match too, but we
+		// also need the indicator's bounding rect to be clean before
+		// DrawThemeBackground composites on top of it.
+		HBRUSH bg_br = bg_brush();
+		::FillRect(hdc, &rc, bg_br);
+
+		HFONT hf = reinterpret_cast<HFONT>(::SendMessageW(h, WM_GETFONT, 0, 0));
+		HGDIOBJ old_font = hf ? ::SelectObject(hdc, hf) : NULL;
+
+		// Open the Button theme and ask for the natural size of the indicator
+		// glyph. Falls back to a 13-px square (the classic Win32 indicator
+		// size) if uxtheme isn't loaded or part lookup fails.
+		HTHEME ht = ::OpenThemeData(h, L"Button");
+		const int part = is_radio ? 2 /*BP_RADIOBUTTON*/ : 3 /*BP_CHECKBOX*/;
+		const int state = button_state_id(h, is_radio);
+		SIZE glyph_sz = { 13, 13 };
+		if (ht)
+			::GetThemePartSize(ht, hdc, part, state, NULL, TS_DRAW, &glyph_sz);
+
+		// Indicator is left-anchored, vertically centered.
+		RECT glyph_rc;
+		glyph_rc.left = rc.left;
+		glyph_rc.top = rc.top + (rc.bottom - rc.top - glyph_sz.cy) / 2;
+		glyph_rc.right = glyph_rc.left + glyph_sz.cx;
+		glyph_rc.bottom = glyph_rc.top + glyph_sz.cy;
+
+		if (ht)
+		{
+			::DrawThemeBackground(ht, hdc, part, state, &glyph_rc, NULL);
+			::CloseThemeData(ht);
+		}
+		else
+		{
+			// Classic fallback: draw a simple framed circle/square so the
+			// control is at least visible.
+			HPEN pen = ::CreatePen(PS_SOLID, 1, border());
+			HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+			HBRUSH br = bg_alt_brush();
+			HGDIOBJ old_br = ::SelectObject(hdc, br);
+			if (is_radio)
+				::Ellipse(hdc, glyph_rc.left, glyph_rc.top, glyph_rc.right, glyph_rc.bottom);
+			else
+				::Rectangle(hdc, glyph_rc.left, glyph_rc.top, glyph_rc.right, glyph_rc.bottom);
+			::SelectObject(hdc, old_br);
+			::SelectObject(hdc, old_pen);
+			::DeleteObject(pen);
+		}
+
+		// Label text in the remaining rect to the right of the indicator,
+		// with a small gap. Disabled labels use the dimmed text color so
+		// they read as inactive.
+		wchar_t buf[256] = {};
+		::GetWindowTextW(h, buf, _countof(buf));
+		if (buf[0])
+		{
+			RECT tr = rc;
+			tr.left = glyph_rc.right + 4;
+			::SetBkMode(hdc, TRANSPARENT);
+			::SetTextColor(hdc, ::IsWindowEnabled(h) ? text() : text_dim());
+			// Match the system Button's text alignment: vertically centered,
+			// horizontally left for both radio and checkbox unless the style
+			// asks otherwise. BS_RIGHT / BS_CENTER could be honored here, but
+			// every radio/checkbox in this codebase is BS_LEFT (the default).
+			UINT fmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE;
+			LONG_PTR bs = ::GetWindowLongPtrW(h, GWL_STYLE);
+			if (bs & BS_MULTILINE) fmt = DT_LEFT | DT_WORDBREAK;
+			::DrawTextW(hdc, buf, -1, &tr, fmt);
+		}
+
+		// No focus rectangle. The File/Computed radios above use plain LTEXT
+		// labels (statics) that route clicks back through STN_CLICKED, so they
+		// never receive keyboard focus and never grew a focus box. To match
+		// that visual exactly, we skip drawing one here entirely.
+
+		if (old_font)
+			::SelectObject(hdc, old_font);
+		::EndPaint(h, &ps);
+	}
+
+	static LRESULT CALLBACK dark_button_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.dark_button_orig_proc";
+		static const wchar_t* k_is_radio  = L"xcc.dark_button_is_radio";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		const bool is_radio = ::GetPropW(h, k_is_radio) != NULL;
+		if (is_dark())
+		{
+			// Repaint on focus, enable, and check transitions so the indicator
+			// state stays in sync.
+			if (msg == WM_PAINT)
+			{
+				paint_dark_button(h, is_radio);
+				return 0;
+			}
+			if (msg == WM_ERASEBKGND)
+			{
+				// Suppress default erase so we don't briefly flash the system
+				// button face. Our WM_PAINT FillRect handles the bg.
+				return 1;
+			}
+			if (msg == BM_SETCHECK || msg == BM_SETSTATE
+				|| msg == WM_SETFOCUS || msg == WM_KILLFOCUS
+				|| msg == WM_ENABLE)
+			{
+				LRESULT r = orig
+					? ::CallWindowProcW(orig, h, msg, wp, lp)
+					: ::DefWindowProcW(h, msg, wp, lp);
+				::InvalidateRect(h, NULL, FALSE);
+				return r;
+			}
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			::RemovePropW(h, L"xcc.dark_button_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::RemovePropW(h, k_is_radio);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return orig
+			? ::CallWindowProcW(orig, h, msg, wp, lp)
+			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	static void install_dark_button_subclass(HWND h, bool is_radio)
+	{
+		if (!h)
+			return;
+		static const wchar_t* k_subclassed = L"xcc.dark_button_subclass";
+		static const wchar_t* k_orig_proc  = L"xcc.dark_button_orig_proc";
+		static const wchar_t* k_is_radio   = L"xcc.dark_button_is_radio";
+		if (::GetPropW(h, k_subclassed))
+			return;
+		LONG_PTR orig = ::GetWindowLongPtrW(h, GWLP_WNDPROC);
+		::SetPropW(h, k_orig_proc, reinterpret_cast<HANDLE>(orig));
+		if (is_radio)
+			::SetPropW(h, k_is_radio, reinterpret_cast<HANDLE>(1));
+		::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(dark_button_proc));
+		::SetPropW(h, k_subclassed, reinterpret_cast<HANDLE>(1));
+		::InvalidateRect(h, NULL, TRUE);
+	}
+
 	void apply_listview(HWND h_listview)
 	{
 		if (!h_listview)
@@ -1344,13 +1563,21 @@ namespace theme
 		}
 		else
 			apply_window(h);
-		// Group-box BUTTONs need a subclass to owner-draw their caption in
-		// dark mode (uxtheme / classic both ignore SetTextColor for them).
+		// BUTTON-class controls need per-style subclassing in dark mode.
+		// uxtheme + classic both ignore SetTextColor for groupbox captions
+		// and radio/checkbox labels, so we owner-paint those ourselves.
+		// Pushbuttons (BS_PUSHBUTTON / BS_DEFPUSHBUTTON) are left alone —
+		// DarkMode_Explorer paints them acceptably.
 		if (_stricmp(cls, "BUTTON") == 0)
 		{
 			LONG_PTR style = ::GetWindowLongPtrW(h, GWL_STYLE);
-			if ((style & 0xF) == BS_GROUPBOX)
+			const LONG_PTR sub = style & 0xF;
+			if (sub == BS_GROUPBOX)
 				install_dark_groupbox_subclass(h);
+			else if (sub == BS_AUTORADIOBUTTON || sub == BS_RADIOBUTTON)
+				install_dark_button_subclass(h, true);
+			else if (sub == BS_AUTOCHECKBOX || sub == BS_CHECKBOX || sub == BS_AUTO3STATE || sub == BS_3STATE)
+				install_dark_button_subclass(h, false);
 		}
 		// ComboBoxes get the Notepad++-style WM_PAINT subclass for proper
 		// dark/light transition. subclass_combobox is idempotent and

@@ -98,6 +98,7 @@ protected:
 	afx_msg void OnPlayerReverse();
 	afx_msg void OnPlayerGrid();
 	afx_msg void OnPlayerNative();
+	afx_msg void OnPlayerScreenshot();
 	afx_msg void OnPlayerFpsChange();
 	afx_msg void OnPlayerShadows();
 	afx_msg void OnPlayerBg();
@@ -151,6 +152,11 @@ public:
 	// high-rate input. The CXCCFileView instance also exposes this so the
 	// VXL Lighting dialog can use the same gate.
 	bool throttle_input_tick();
+	// Save the currently displayed frame to disk via a CFileDialog
+	// (BMP / PNG / PCX). Returns true on successful write, false on cancel
+	// or error. Used by both the player-band Screenshot button and the
+	// Ctrl+Shift+S accelerator routed via CMainFrame.
+	bool take_screenshot();
 	DWORD m_last_input_ms = 0;
 	// Set/clear the interactive low-SS flag from outside (e.g. the VXL
 	// Lighting dialog while a slider is being dragged). When clearing,
@@ -196,6 +202,7 @@ protected:
 	CButton m_player_reverse;
 	CButton m_player_grid;
 	CButton m_player_native;
+	CButton m_player_screenshot;
 	bool m_player_native_size = false;
 	// Ctrl+wheel zoom override for the player (SHP/WSA/VXL). 0 = follow
 	// auto-fit / Native mode; otherwise an explicit percentage 25..1600.

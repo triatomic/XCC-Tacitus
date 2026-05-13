@@ -185,6 +185,29 @@ namespace theme
 	// Resolve azimuth/elevation into a unit direction vector in camera space.
 	void vxl_light_direction(float& x, float& y, float& z);
 
+	// Light-direction indicator overlay. Auto-shown while the VXL Lighting
+	// dialog is open (visibility flag, not persisted) and drawn by the VXL
+	// player's paint path. Placement mode is persisted across sessions so the
+	// user's choice sticks.
+	enum vxl_light_indicator_placement
+	{
+		vxl_light_indicator_overlay = 0,  // drawn on top of the model
+		vxl_light_indicator_corner  = 1,  // small widget in the top-right corner
+	};
+	// When true, VPL section selection uses the engine-faithful
+	// `(1 - N·L) / 2 * 31` formula — Ambient and Diffuse sliders are
+	// ignored for VPL shading. When false, VPL goes through the same
+	// `ambient + diffuse * max(0, N·L)` modulation as synthetic shading,
+	// which gives extra creative control but isn't what the engine does.
+	// Default true so out-of-the-box VPL output matches in-game.
+	bool vxl_vpl_engine_faithful();
+	void set_vxl_vpl_engine_faithful(bool v);
+
+	bool vxl_light_indicator_visible();
+	void set_vxl_light_indicator_visible(bool v);
+	vxl_light_indicator_placement vxl_light_indicator_mode();
+	void set_vxl_light_indicator_mode(vxl_light_indicator_placement v);
+
 	// Limit VXL CPU: when on, the VXL splat OpenMP region runs at half the
 	// hardware thread count (min 1). Lets the user trade splat-rebuild latency
 	// for lower idle-orbit core wake-up + heat without losing parallelism

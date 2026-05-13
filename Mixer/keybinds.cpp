@@ -29,6 +29,7 @@ namespace keybinds
 			{ "theme_light",              "Theme: Light",            scope_accel, ID_THEME_LIGHT,               '1',         FCONTROL,           mb_none, 0 },
 			{ "theme_dark",               "Theme: Dark",             scope_accel, ID_THEME_DARK,                '2',         FCONTROL,           mb_none, 0 },
 			{ "theme_vxl_lighting",       "VXL Lighting...",         scope_accel, ID_THEME_VXL_LIGHTING,        'L',         FCONTROL,           mb_none, 0 },
+			{ "file_screenshot",          "Screenshot current frame",scope_accel, ID_FILE_SCREENSHOT,           'S',         FCONTROL | FSHIFT,  mb_none, 0 },
 
 			// scope_file_view: keyboard-only actions
 			{ "view_alpha_toggle",        "Toggle alpha-only view",  scope_file_view, vact_alpha_toggle,    'M',         0,                  mb_none, 0 },

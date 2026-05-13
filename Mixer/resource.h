@@ -38,6 +38,7 @@
 #define IDC_PLAYER_GRID_SEL             1123
 #define IDC_LOAD_MIX                    1124
 #define ID_FILE_SEARCH_IN_MIX           33132
+#define ID_FILE_SCREENSHOT              33133
 #define ID_POPUP_COPY_NAME              33133
 #define ID_VIEW_PALETTE_PREV_SIBLING    33134
 #define ID_VIEW_PALETTE_NEXT_SIBLING    33135
@@ -1452,6 +1453,7 @@
 #define IDD_FPS_CUSTOM                    147
 #define IDC_FPS_CUSTOM_EDIT               1180
 #define IDC_FPS_CUSTOM_LABEL              1181
+#define IDC_PLAYER_SCREENSHOT             1182
 #define IDC_VXL_LIGHT_AZ_SLIDER           1152
 #define IDC_VXL_LIGHT_AZ_LABEL            1153
 #define IDC_VXL_LIGHT_AZ_VALUE            1154
@@ -1477,6 +1479,10 @@
 #define IDC_VXL_HVA_LOAD                  1165
 #define IDC_VXL_HVA_LOOP                  1166
 #define IDC_VXL_VPL_LOAD                  1175
+#define IDC_VXL_LIGHT_INDICATOR_GROUP     1176
+#define IDC_VXL_LIGHT_INDICATOR_OVERLAY   1177
+#define IDC_VXL_LIGHT_INDICATOR_CORNER    1178
+#define IDC_VXL_LIGHT_VPL_FAITHFUL        1179
 #define IDC_INCLUDE_GAME_MIXES            1167
 #define IDC_LOAD_PAL                      1168
 #define ID_THEME_VXL_LIGHTING             41025

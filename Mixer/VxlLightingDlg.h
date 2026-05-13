@@ -30,6 +30,10 @@ protected:
 	afx_msg void OnNormalSrcFile();
 	afx_msg void OnNormalMethodChanged();
 	afx_msg void OnNormalKernelChanged();
+	afx_msg void OnVplFaithfulToggle();
+	afx_msg void OnIndicatorOverlay();
+	afx_msg void OnIndicatorCorner();
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	// Edit-box commit handlers. EN_KILLFOCUS fires when the user tabs away
 	// or clicks elsewhere; we also intercept Enter in PreTranslateMessage
 	// and route through commit_<field>() so committed-on-Enter feels
@@ -70,6 +74,9 @@ private:
 	// selection. Method combo is disabled when File is selected; Kernel combo
 	// is disabled when File is selected OR when Method != Smooth gradient.
 	void update_computed_combos_enable();
+	// Gray out Ambient + Diffuse slider/edit when "Use VPL engine formula"
+	// is checked — those values are ignored by the engine-faithful path.
+	void update_ambient_diffuse_enable();
 	// Commit helpers: parse an edit's text, clamp to range, write to theme,
 	// snap the corresponding slider position, repaint the VXL view.
 	void commit_az_edit();

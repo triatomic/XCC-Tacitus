@@ -110,6 +110,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_VIEW_DIRECTORIES, OnViewDirectories)
 	ON_COMMAND(ID_FILE_SEARCH, OnFileSearch)
 	ON_COMMAND(ID_FILE_SEARCH_IN_MIX, OnFileSearchInMix)
+	ON_COMMAND(ID_FILE_SCREENSHOT, OnFileScreenshot)
 	ON_COMMAND(ID_CONVERSION_ENABLE_COMPRESSION, OnConversionEnableCompression)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_ENABLE_COMPRESSION, OnUpdateConversionEnableCompression)
 	ON_WM_DESTROY()
@@ -1043,6 +1044,15 @@ void CMainFrame::OnFileSearch()
 	CSearchFileDlg dlg;
 	dlg.set(this, prefer_right);
 	dlg.DoModal();
+}
+
+void CMainFrame::OnFileScreenshot()
+{
+	// Ctrl+Shift+S accelerator. Routes to the file-info pane's screenshot
+	// worker. The pane handles the "not in player mode / no frame" cases
+	// with a status-bar message so this dispatcher stays trivial.
+	if (m_file_info_pane)
+		m_file_info_pane->take_screenshot();
 }
 
 void CMainFrame::OnFileSearchInMix()

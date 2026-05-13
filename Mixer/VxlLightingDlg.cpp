@@ -57,6 +57,10 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_STN_CLICKED(IDC_VXL_NORMAL_SRC_FILE_LABEL, OnNormalSrcFile)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_METHOD, OnNormalMethodChanged)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_KERNEL, OnNormalKernelChanged)
+	ON_BN_CLICKED(IDC_VXL_LIGHT_VPL_FAITHFUL, OnVplFaithfulToggle)
+	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_OVERLAY, OnIndicatorOverlay)
+	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_CORNER, OnIndicatorCorner)
+	ON_WM_SHOWWINDOW()
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AZ_VALUE,      OnAzEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_EL_VALUE,      OnElEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE, OnAmbientEditKillFocus)
@@ -160,8 +164,28 @@ void CVxlLightingDlg::load_from_theme()
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_FILE,     is_file ? BST_CHECKED   : BST_UNCHECKED);
 	m_method.SetCurSel(static_cast<int>(theme::vxl_normals_method()));
 	m_kernel.SetCurSel(static_cast<int>(theme::vxl_normals_kernel()));
+	const bool overlay_mode = theme::vxl_light_indicator_mode() == theme::vxl_light_indicator_overlay;
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_OVERLAY, overlay_mode ? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_CORNER, overlay_mode ? BST_UNCHECKED : BST_CHECKED);
+	CheckDlgButton(IDC_VXL_LIGHT_VPL_FAITHFUL, theme::vxl_vpl_engine_faithful() ? BST_CHECKED : BST_UNCHECKED);
+	update_ambient_diffuse_enable();
 	update_computed_combos_enable();
 	update_value_labels();
+}
+
+void CVxlLightingDlg::update_ambient_diffuse_enable()
+{
+	// Engine-faithful VPL ignores both sliders. Gray them + their edit boxes
+	// so it's visually obvious the values aren't doing anything.
+	const bool ena = !theme::vxl_vpl_engine_faithful();
+	if (HWND h = m_ambient.GetSafeHwnd())          ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = m_diffuse.GetSafeHwnd())          ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = m_ambient_value.GetSafeHwnd())    ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = m_diffuse_value.GetSafeHwnd())    ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_LIGHT_AMBIENT_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_LIGHT_DIFFUSE_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, ena ? TRUE : FALSE);
 }
 
 void CVxlLightingDlg::update_computed_combos_enable()
@@ -215,22 +239,14 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
 	}
-	// Two phases:
-	//   mid-drag (TB_THUMBTRACK): only update the edit-box text to preview
-	//     where the value will land. Don't touch theme or repaint — the
-	//     model stays at whatever lighting was set before the drag began.
-	//   release / discrete step (TB_ENDTRACK, TB_THUMBPOSITION, plus
-	//     keyboard/arrow/click events): commit the value to theme and
-	//     repaint the view. This is the user's "I'm done; apply it" signal.
-	// This keeps the dialog interactive (slider thumb visibly moves, edit
-	// shows the in-flight value) while keeping the heavy splat work to one
-	// paint per discrete adjustment — solving the 80% CPU peg during drag.
-	const bool is_commit =
-		nSBCode == TB_ENDTRACK
-		|| nSBCode == TB_THUMBPOSITION
-		|| nSBCode == TB_LINEUP || nSBCode == TB_LINEDOWN
-		|| nSBCode == TB_PAGEUP || nSBCode == TB_PAGEDOWN
-		|| nSBCode == TB_TOP || nSBCode == TB_BOTTOM;
+	// Continuous-commit: every slider event (including mid-drag TB_THUMBTRACK)
+	// writes through to theme and triggers a repaint, so the model updates
+	// live as the user drags. The splat cache invalidates per lighting_version
+	// bump and the VPL section selection re-runs; mouse-input throttling via
+	// CMainFrame::throttle_input_tick() (see CLAUDE.md "Frame-rate cap + paint/
+	// input throttle") already drops high-poll-rate drag events to keep this
+	// affordable. TB_ENDTRACK still arrives at release; no special handling
+	// needed — it just commits the final value once more.
 	int id = pScrollBar->GetDlgCtrlID();
 	// Compute the would-be value from the slider position, regardless of
 	// phase. Used either to update the edit preview (mid-drag) or to
@@ -246,26 +262,8 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
 	}
-	if (!is_commit)
-	{
-		// Mid-drag preview: update only the matching edit box. No theme
-		// write, no invalidate. Guard so the EN_KILLFOCUS handler doesn't
-		// re-commit our own preview text if focus moves.
-		m_updating_ui = true;
-		char buf[32];
-		const char* fmt = (id == IDC_VXL_LIGHT_AZ_SLIDER || id == IDC_VXL_LIGHT_EL_SLIDER) ? "%.0f" : "%.2f";
-		std::snprintf(buf, sizeof(buf), fmt, preview_value);
-		switch (id)
-		{
-		case IDC_VXL_LIGHT_AZ_SLIDER:      m_az_value.SetWindowText(buf); break;
-		case IDC_VXL_LIGHT_EL_SLIDER:      m_el_value.SetWindowText(buf); break;
-		case IDC_VXL_LIGHT_AMBIENT_SLIDER: m_ambient_value.SetWindowText(buf); break;
-		case IDC_VXL_LIGHT_DIFFUSE_SLIDER: m_diffuse_value.SetWindowText(buf); break;
-		}
-		m_updating_ui = false;
-		return;
-	}
-	// Commit: write through to theme:: and trigger a single repaint.
+	// Commit: write through to theme:: and trigger a repaint. Runs on every
+	// slider event so the model reflects the live slider position.
 	switch (id)
 	{
 	case IDC_VXL_LIGHT_AZ_SLIDER:      theme::set_vxl_light_azimuth(preview_value); break;
@@ -396,6 +394,41 @@ void CVxlLightingDlg::OnNormalKernelChanged()
 	// rebuild than to inspect — the dialog enable state already gates it.
 	if (CMainFrame* mf = GetMainFrame())
 		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnVplFaithfulToggle()
+{
+	const bool checked = IsDlgButtonChecked(IDC_VXL_LIGHT_VPL_FAITHFUL) == BST_CHECKED;
+	theme::set_vxl_vpl_engine_faithful(checked);
+	update_ambient_diffuse_enable();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnIndicatorOverlay()
+{
+	theme::set_vxl_light_indicator_mode(theme::vxl_light_indicator_overlay);
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_OVERLAY, BST_CHECKED);
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_CORNER, BST_UNCHECKED);
+	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnIndicatorCorner()
+{
+	theme::set_vxl_light_indicator_mode(theme::vxl_light_indicator_corner);
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_OVERLAY, BST_UNCHECKED);
+	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_CORNER, BST_CHECKED);
+	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CDialog::OnShowWindow(bShow, nStatus);
+	// Mirror the dialog's visibility into the runtime flag so the VXL view
+	// only draws the light indicator while the dialog is on screen.
+	theme::set_vxl_light_indicator_visible(bShow ? true : false);
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_file_info_pane();
 }
 
 void CVxlLightingDlg::OnOK()

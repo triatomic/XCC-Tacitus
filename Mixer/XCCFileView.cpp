@@ -14,6 +14,7 @@
 #include <fname.h>
 #include <fnt_file.h>
 #include <fstream>
+#include <gdiplus.h>
 #include <hva_file.h>
 #include <id_log.h>
 #include <map_ra_ini_reader.h>
@@ -28,6 +29,7 @@
 #include <pal_file.h>
 #include <pcx_decode.h>
 #include <pcx_file.h>
+#include <pcx_file_write.h>
 #include <pkt_ts_ini_reader.h>
 #include <shp_decode.h>
 #include <shp_dune2_file.h>
@@ -86,6 +88,7 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_PLAYER_REVERSE, OnPlayerReverse)
 	ON_BN_CLICKED(IDC_PLAYER_GRID, OnPlayerGrid)
 	ON_BN_CLICKED(IDC_PLAYER_NATIVE, OnPlayerNative)
+	ON_BN_CLICKED(IDC_PLAYER_SCREENSHOT, OnPlayerScreenshot)
 	ON_EN_CHANGE(IDC_PLAYER_FPS_EDIT, OnPlayerFpsChange)
 	ON_BN_CLICKED(IDC_PLAYER_SHADOWS, OnPlayerShadows)
 	ON_BN_CLICKED(IDC_PLAYER_BG, OnPlayerBg)
@@ -325,6 +328,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_player_reverse.GetSafeHwnd())  msg = "Reverse playback direction.";
 	else if (h == m_player_grid.GetSafeHwnd())     msg = "Show static grid of all frames instead of animation.";
 	else if (h == m_player_native.GetSafeHwnd())   msg = "Display at native resolution (no scaling).";
+	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Save the current frame as BMP / PNG / PCX (Ctrl+Shift+S).";
 	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
 	else if (h == m_player_fps_edit.GetSafeHwnd()) msg = "Playback speed in frames per second.";
 	else if (h == m_player_fps_spin.GetSafeHwnd()) msg = "Playback speed in frames per second.";
@@ -3191,6 +3195,7 @@ void CXCCFileView::player_enter()
 		m_player_reverse.Create("<<", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_REVERSE);
 		m_player_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
 		m_player_native.Create("Native", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_NATIVE);
+		m_player_screenshot.Create("Screenshot", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_SCREENSHOT);
 		m_player_slider.Create(WS_CHILD | TBS_HORZ | TBS_NOTICKS, r, this, IDC_PLAYER_SLIDER);
 		m_player_label.Create("", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FRAME_LABEL);
 		m_player_fps_label.Create("FPS", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FPS_LABEL);
@@ -3202,6 +3207,7 @@ void CXCCFileView::player_enter()
 		m_player_reverse.SetFont(&m_font);
 		m_player_grid.SetFont(&m_font);
 		m_player_native.SetFont(&m_font);
+		m_player_screenshot.SetFont(&m_font);
 		m_player_label.SetFont(&m_font);
 		m_player_fps_label.SetFont(&m_font);
 		m_player_fps_edit.SetFont(&m_font);
@@ -3209,6 +3215,7 @@ void CXCCFileView::player_enter()
 		theme::apply_window(m_player_reverse.GetSafeHwnd());
 		theme::apply_window(m_player_grid.GetSafeHwnd());
 		theme::apply_window(m_player_native.GetSafeHwnd());
+		theme::apply_window(m_player_screenshot.GetSafeHwnd());
 		theme::apply_window(m_player_slider.GetSafeHwnd());
 		theme::apply_window(m_player_label.GetSafeHwnd());
 		theme::apply_window(m_player_fps_label.GetSafeHwnd());
@@ -3301,6 +3308,7 @@ void CXCCFileView::player_enter()
 	m_player_reverse.SetCheck(m_player_reverse_dir ? BST_CHECKED : BST_UNCHECKED);
 	m_player_grid.ShowWindow(SW_SHOW);
 	m_player_native.ShowWindow(SW_SHOW);
+	m_player_screenshot.ShowWindow(SW_SHOW);
 	m_player_native.SetCheck(m_player_native_size ? BST_CHECKED : BST_UNCHECKED);
 	m_player_slider.ShowWindow(playback_show);
 	m_player_label.ShowWindow(playback_show);
@@ -3370,6 +3378,7 @@ void CXCCFileView::player_exit()
 		m_player_reverse.ShowWindow(SW_HIDE);
 		m_player_grid.ShowWindow(SW_HIDE);
 		m_player_native.ShowWindow(SW_HIDE);
+		m_player_screenshot.ShowWindow(SW_HIDE);
 		m_player_slider.ShowWindow(SW_HIDE);
 		m_player_label.ShowWindow(SW_HIDE);
 		m_player_fps_label.ShowWindow(SW_HIDE);
@@ -3451,6 +3460,7 @@ void CXCCFileView::player_layout_controls()
 	// Bottom row: transport controls (Play, <<, Grid, Native, slider, FPS).
 	int y = cr.bottom - H - pad;
 	int x = pad;
+	m_player_screenshot.MoveWindow(x, y, 80, H);      x += 80 + pad;
 	m_player_play.MoveWindow(x, y, 60, H);            x += 60 + pad;
 	m_player_reverse.MoveWindow(x, y, 30, H);         x += 30 + pad;
 	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
@@ -3474,7 +3484,7 @@ void CXCCFileView::player_layout_controls()
 		const bool vxl_hva = m_hva_loaded && m_player_cf > 1;
 		if (!vxl_hva)
 		{
-			int gx = pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
+			int gx = pad + 80 + pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
 			m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
 		}
 		// Upper row: BG toggle + 9 VXL side-color swatches + HVA button
@@ -3798,8 +3808,16 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// Light direction for VPL section selection. Fetched once per
 			// rebuild — same for every voxel in this splat.
 			float vpl_lx = 0, vpl_ly = 0, vpl_lz = 1;
+			float vpl_ambient = 0.0f;
+			float vpl_diffuse = 1.0f;
+			bool vpl_faithful = true;
 			if (m_vpl_loaded)
+			{
 				theme::vxl_light_direction(vpl_lx, vpl_ly, vpl_lz);
+				vpl_ambient = theme::vxl_light_ambient();
+				vpl_diffuse = theme::vxl_light_diffuse();
+				vpl_faithful = theme::vxl_vpl_engine_faithful();
+			}
 			// Parallelize the splat by partitioning *output rows*: each thread
 			// owns a contiguous row band [y_lo, y_hi) of the supersample
 			// framebuffer and iterates the entire voxel cloud, writing only when
@@ -3870,8 +3888,29 @@ void CXCCFileView::player_draw(CDC* pDC)
 						// ramp positions, sections grow darker toward 31. Stored
 						// normal is already in the "dot-with-light gives signed
 						// brightness" form.
+						//
+						// Two formulas selected by theme::vxl_vpl_engine_faithful():
+						//   true  (default): engine-faithful (1 - N·L) / 2 * 31.
+						//                    Matches RA2 in-game; ignores Ambient/Diffuse.
+						//   false: ambient + diffuse * max(0, N·L) modulation, same
+						//                    formula as synthetic shading. Lets the user
+						//                    lift back-faces / compress contrast for
+						//                    creative effect; not what the engine does.
 						float ndotl = (ni8x * vpl_lx + ni8y * vpl_ly + ni8z * vpl_lz) / 127.0f;
-						int sec = static_cast<int>((1.0f - ndotl) * 0.5f * 31.0f + 0.5f);
+						int sec;
+						if (vpl_faithful)
+						{
+							if (ndotl < -1.0f) ndotl = -1.0f;
+							else if (ndotl > 1.0f) ndotl = 1.0f;
+							sec = static_cast<int>((1.0f - ndotl) * 0.5f * 31.0f + 0.5f);
+						}
+						else
+						{
+							if (ndotl < 0.0f) ndotl = 0.0f;
+							float brightness = vpl_ambient + vpl_diffuse * ndotl;
+							if (brightness > 1.0f) brightness = 1.0f;
+							sec = static_cast<int>((1.0f - brightness) * 31.0f + 0.5f);
+						}
 						if (sec < 0) sec = 0; else if (sec > 31) sec = 31;
 						voxel_pal = m_vpl_file.get_section(sec)[v.color];
 					}
@@ -4316,6 +4355,94 @@ void CXCCFileView::player_draw(CDC* pDC)
 	pDC->RestoreDC(-1);
 	mem_dc.SelectObject(old);
 	DeleteObject(h_dib);
+
+	// Light-direction indicator overlay. Drawn after the model so it sits on
+	// top of voxels. Active only when the VXL Lighting dialog is open
+	// (theme::vxl_light_indicator_visible). Mode:
+	//   overlay: line from model center to sun-disc, scaled to ~35% of canvas.
+	//   corner:  small widget in the top-right (40px radius).
+	//
+	// Axis mapping — must match the *shading* path, not raw camera space:
+	//   The splat stores normals as cam_normal = (nrx, -nry_p, nrz_p), so a
+	//   voxel whose post-rotation normal points down in screen (nry_p > 0)
+	//   has ni8y < 0 and is bright when vpl_ly < 0. Therefore a *negative*
+	//   vpl_ly means "light is coming from below", and the indicator must
+	//   show the sun *below* center. Screen-Y in GDI is +down, so we negate
+	//   ly when placing the sun. X has no flip (ni8x = nrx), so screen-X = +lx.
+	//   Depth (lz): +lz means light is behind the model (away from camera),
+	//   so the sun should *shrink*, not grow. Modulate radius by (1 - 0.3*lz).
+	if (is_vxl_view() && theme::vxl_light_indicator_visible())
+	{
+		float lx, ly, lz;
+		theme::vxl_light_direction(lx, ly, lz);
+
+		int center_x, center_y, radius;
+		if (theme::vxl_light_indicator_mode() == theme::vxl_light_indicator_corner)
+		{
+			const int margin = 12;
+			const int widget_r = 32;
+			center_x = x_d + cx_d - margin - widget_r;
+			center_y = y_d + margin + widget_r;
+			radius = widget_r;
+		}
+		else
+		{
+			center_x = x_d + cx_d / 2;
+			center_y = y_d + cy_d / 2;
+			radius = static_cast<int>(std::min(cx_d, cy_d) * 0.35f);
+		}
+		const int light_x = center_x + static_cast<int>(lx * radius);
+		const int light_y = center_y - static_cast<int>(ly * radius);
+		const int sun_r = std::max(3, static_cast<int>(radius * 0.08f * (1.0f - 0.3f * lz)));
+
+		// Corner mode: draw a faint background disc so the widget is readable
+		// over any voxel color underneath. Overlay mode skips this so the
+		// model stays visible.
+		const COLORREF c_ring = RGB(255, 200, 0);
+		const COLORREF c_line = RGB(255, 220, 80);
+		const COLORREF c_sun  = RGB(255, 240, 120);
+		const COLORREF c_bg   = theme::is_dark() ? RGB(30, 30, 30) : RGB(240, 240, 240);
+
+		if (theme::vxl_light_indicator_mode() == theme::vxl_light_indicator_corner)
+		{
+			CBrush bg_brush(c_bg);
+			CPen bg_pen(PS_SOLID, 1, c_ring);
+			CBrush* old_brush = pDC->SelectObject(&bg_brush);
+			CPen* old_pen = pDC->SelectObject(&bg_pen);
+			pDC->Ellipse(center_x - radius, center_y - radius,
+			             center_x + radius, center_y + radius);
+			pDC->SelectObject(old_brush);
+			pDC->SelectObject(old_pen);
+		}
+
+		// Line from center to sun.
+		CPen line_pen(PS_SOLID, 2, c_line);
+		CPen* old_pen = pDC->SelectObject(&line_pen);
+		pDC->MoveTo(center_x, center_y);
+		pDC->LineTo(light_x, light_y);
+		pDC->SelectObject(old_pen);
+
+		// Sun disc.
+		CBrush sun_brush(c_sun);
+		CPen sun_pen(PS_SOLID, 1, c_ring);
+		CBrush* old_brush = pDC->SelectObject(&sun_brush);
+		old_pen = pDC->SelectObject(&sun_pen);
+		pDC->Ellipse(light_x - sun_r, light_y - sun_r,
+		             light_x + sun_r, light_y + sun_r);
+		pDC->SelectObject(old_brush);
+		pDC->SelectObject(old_pen);
+
+		// Small dot at center to mark the anchor.
+		const int dot_r = 2;
+		CBrush dot_brush(c_ring);
+		CPen dot_pen(PS_SOLID, 1, c_ring);
+		old_brush = pDC->SelectObject(&dot_brush);
+		old_pen = pDC->SelectObject(&dot_pen);
+		pDC->Ellipse(center_x - dot_r, center_y - dot_r,
+		             center_x + dot_r, center_y + dot_r);
+		pDC->SelectObject(old_brush);
+		pDC->SelectObject(old_pen);
+	}
 }
 
 void CXCCFileView::OnSize(UINT nType, int cx, int cy)
@@ -4504,6 +4631,251 @@ void CXCCFileView::OnPlayerNative()
 	cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, TRUE);
+}
+
+// Helper: locate the GDI+ PNG encoder CLSID. Standard MSDN snippet.
+static int get_png_encoder_clsid(CLSID& out)
+{
+	UINT num = 0, size = 0;
+	Gdiplus::GetImageEncodersSize(&num, &size);
+	if (size == 0) return -1;
+	std::vector<byte> buf(size);
+	auto* infos = reinterpret_cast<Gdiplus::ImageCodecInfo*>(buf.data());
+	if (Gdiplus::GetImageEncoders(num, size, infos) != Gdiplus::Ok) return -1;
+	for (UINT i = 0; i < num; i++)
+	{
+		if (wcscmp(infos[i].MimeType, L"image/png") == 0)
+		{
+			out = infos[i].Clsid;
+			return 0;
+		}
+	}
+	return -1;
+}
+
+// Helper: write a 32-bit top-down BMP from BGRA bytes.
+static bool write_bmp32(const char* path, const byte* bgra, int cx, int cy)
+{
+	if (!bgra || cx <= 0 || cy <= 0) return false;
+	const DWORD pixel_bytes = static_cast<DWORD>(cx) * cy * 4;
+	BITMAPFILEHEADER fh = {};
+	fh.bfType = 0x4D42; // 'BM'
+	fh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+	fh.bfSize = fh.bfOffBits + pixel_bytes;
+	BITMAPINFOHEADER ih = {};
+	ih.biSize = sizeof(BITMAPINFOHEADER);
+	ih.biWidth = cx;
+	ih.biHeight = -cy; // top-down
+	ih.biPlanes = 1;
+	ih.biBitCount = 32;
+	ih.biCompression = BI_RGB;
+	ih.biSizeImage = pixel_bytes;
+	FILE* f = std::fopen(path, "wb");
+	if (!f) return false;
+	bool ok = std::fwrite(&fh, sizeof(fh), 1, f) == 1
+		&& std::fwrite(&ih, sizeof(ih), 1, f) == 1
+		&& std::fwrite(bgra, pixel_bytes, 1, f) == 1;
+	std::fclose(f);
+	return ok;
+}
+
+bool CXCCFileView::take_screenshot()
+{
+	// Player mode + a renderable frame is the prerequisite. Outside player mode
+	// (grid view), the BGRA caches don't exist; nudge the user instead of
+	// silently failing.
+	if (!m_player_mode || !m_is_open)
+	{
+		if (CMainFrame* mf = GetMainFrame())
+			mf->SetMessageText("Press P to enter player mode before taking a screenshot.");
+		return false;
+	}
+	const bool vxl = is_vxl_view();
+
+	// Force any pending invalidate to actually paint so the BGRA cache is
+	// fresh under the current settings (slider commits etc.).
+	UpdateWindow();
+
+	// Resolve output dimensions:
+	//   VXL: cx_s/cy_s already include supersampling (cx_logical * SS).
+	//   SHP/WSA/PCX/CPS/TMP: cx_s = m_player_cx, cy_s = m_player_cy (native).
+	int cx_s = 0, cy_s = 0;
+	if (vxl)
+	{
+		cx_s = m_vxl_splat.cx_s;
+		cy_s = m_vxl_splat.cy_s;
+	}
+	else
+	{
+		cx_s = m_player_cx;
+		cy_s = m_player_cy;
+	}
+	if (cx_s <= 0 || cy_s <= 0)
+	{
+		if (CMainFrame* mf = GetMainFrame())
+			mf->SetMessageText("Screenshot: no rendered frame available.");
+		return false;
+	}
+
+	// Build a default filename from the loaded asset's basename. m_fname is
+	// the basename within the source MIX (or just the disk filename); strip
+	// the extension before appending our own.
+	CString default_name = m_fname.empty() ? "screenshot" : m_fname.c_str();
+	{
+		int dot = default_name.ReverseFind('.');
+		if (dot > 0) default_name = default_name.Left(dot);
+		if (m_player_frame > 0)
+		{
+			CString frame_suffix;
+			frame_suffix.Format("_f%d", m_player_frame);
+			default_name += frame_suffix;
+		}
+		default_name += ".bmp";
+	}
+
+	// Save dialog with three filters. The dialog's selected filter drives the
+	// default extension via the filter index — order: BMP, PNG, PCX.
+	CFileDialog dlg(FALSE, "bmp", default_name,
+		OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
+		"Bitmap (*.bmp)|*.bmp|PNG (*.png)|*.png|PCX (*.pcx)|*.pcx||",
+		this);
+	if (dlg.DoModal() != IDOK)
+		return false;
+	CString path = dlg.GetPathName();
+	const int filter_idx = static_cast<int>(dlg.m_ofn.nFilterIndex);
+	// Sanity: if user typed a filename without an extension, append one based
+	// on the chosen filter. CFileDialog usually does this with lpstrDefExt for
+	// filter 1 only, so handle 2/3 manually.
+	if (path.ReverseFind('.') <= path.ReverseFind('\\'))
+	{
+		path += (filter_idx == 2) ? ".png" : (filter_idx == 3) ? ".pcx" : ".bmp";
+	}
+
+	// Determine target format from filter index (preferred) with fallback to
+	// the extension the user actually typed — covers the case where the user
+	// typed "foo.png" but left the filter on Bitmap.
+	enum { fmt_bmp, fmt_png, fmt_pcx } fmt;
+	if      (filter_idx == 2) fmt = fmt_png;
+	else if (filter_idx == 3) fmt = fmt_pcx;
+	else                      fmt = fmt_bmp;
+	{
+		CString ext = path.Right(4);
+		ext.MakeLower();
+		if      (ext == ".png") fmt = fmt_png;
+		else if (ext == ".pcx") fmt = fmt_pcx;
+		else if (ext == ".bmp") fmt = fmt_bmp;
+	}
+
+	bool ok = false;
+	if (fmt == fmt_pcx)
+	{
+		// PCX: raw 8-bit indexed pixels + 256-entry RGB palette. Ignores
+		// side-color tint / BG mode / shadows so the output round-trips into
+		// other Westwood tools. Source pixels come from the pre-composite
+		// indexed buffer (m_vxl_splat.buf for VXL, m_player_frames[n] for
+		// SHP/WSA).
+		const byte* indexed = nullptr;
+		if (vxl)
+		{
+			if (m_vxl_splat.buf.size() != 0) indexed = m_vxl_splat.buf.data();
+		}
+		else
+		{
+			if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
+				&& static_cast<int>(m_player_frames[m_player_frame].size()) >= cx_s * cy_s)
+			{
+				indexed = m_player_frames[m_player_frame].data();
+			}
+		}
+		if (!indexed)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Screenshot: indexed pixel buffer unavailable; try BMP or PNG.");
+			return false;
+		}
+		// Build the palette. m_color_table is the already-gamma-corrected
+		// (6-bit -> 8-bit) BGRA palette that on-screen rendering uses. Reading
+		// from it guarantees PCX colors match what BMP/PNG export — without
+		// it the raw 6-bit palette values get written, producing a ~25%-
+		// brightness PCX that looks darker than the BMP/PNG versions.
+		t_palette pal;
+		for (int i = 0; i < 256; i++)
+		{
+			DWORD bgra = m_color_table[i];
+			pal[i].b = static_cast<byte>(bgra & 0xff);
+			pal[i].g = static_cast<byte>((bgra >> 8) & 0xff);
+			pal[i].r = static_cast<byte>((bgra >> 16) & 0xff);
+		}
+		const int rv = pcx_file_write(std::string(path), indexed, pal, cx_s, cy_s, 1);
+		ok = (rv == 0);
+	}
+	else
+	{
+		// BMP / PNG: read the composited BGRA cache. Both VXL and SHP/WSA
+		// caches are populated by the paint that UpdateWindow() just forced.
+		// Caches are vector<DWORD> with cx_s*cy_s entries (4 bytes per pixel).
+		const DWORD* src_dwords = nullptr;
+		const int n_pixels = cx_s * cy_s;
+		if (vxl)
+		{
+			if (static_cast<int>(m_vxl_bgra.bgra.size()) == n_pixels)
+				src_dwords = m_vxl_bgra.bgra.data();
+		}
+		else
+		{
+			if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_bgra.size())
+				&& static_cast<int>(m_player_bgra[m_player_frame].bgra.size()) == n_pixels)
+			{
+				src_dwords = m_player_bgra[m_player_frame].bgra.data();
+			}
+		}
+		if (!src_dwords)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Screenshot: rendered buffer unavailable; try toggling the player or moving a slider, then retry.");
+			return false;
+		}
+		// The composite path stores BGRA as `B | G<<8 | R<<16` — the high byte
+		// (alpha) is left at 0. That's fine for GDI's SetDIBitsToDevice (ignores
+		// the channel) but PNG via GDI+ treats it as a real alpha and writes a
+		// fully transparent image; some viewers also read 32-bit BMPs as alpha
+		// and render transparent. Force the alpha byte to 0xFF on a copy so the
+		// exported file is fully opaque.
+		std::vector<DWORD> opaque(n_pixels);
+		for (int i = 0; i < n_pixels; i++)
+			opaque[i] = src_dwords[i] | 0xFF000000u;
+		const byte* bgra = reinterpret_cast<const byte*>(opaque.data());
+		if (fmt == fmt_bmp)
+		{
+			ok = write_bmp32(path, bgra, cx_s, cy_s);
+		}
+		else // fmt_png
+		{
+			Gdiplus::Bitmap bmp(cx_s, cy_s, cx_s * 4, PixelFormat32bppARGB,
+				const_cast<BYTE*>(bgra));
+			CLSID clsid;
+			if (get_png_encoder_clsid(clsid) == 0)
+			{
+				CString wpath_s(path);
+				wchar_t wpath[MAX_PATH * 2] = {};
+				::MultiByteToWideChar(CP_ACP, 0, wpath_s, -1, wpath, _countof(wpath));
+				ok = bmp.Save(wpath, &clsid, NULL) == Gdiplus::Ok;
+			}
+		}
+	}
+
+	if (CMainFrame* mf = GetMainFrame())
+	{
+		CString msg;
+		msg.Format(ok ? "Screenshot saved: %s" : "Screenshot failed: %s", path);
+		mf->SetMessageText(msg);
+	}
+	return ok;
+}
+
+void CXCCFileView::OnPlayerScreenshot()
+{
+	take_screenshot();
 }
 
 HBRUSH CXCCFileView::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
