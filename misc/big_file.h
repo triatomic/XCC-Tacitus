@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_map>
 #include <vector>
 #include "cc_file.h"
 #include "cc_structures.h"
@@ -7,7 +8,7 @@
 class Cbig_file : public Ccc_file  
 {
 public:
-	typedef map<string, t_big_index_entry> t_index;
+	typedef unordered_map<string, t_big_index_entry> t_index;
 	typedef vector<string> t_old_index;
 
 	int get_c_files() const

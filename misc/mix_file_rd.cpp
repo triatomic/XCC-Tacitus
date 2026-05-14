@@ -168,38 +168,47 @@ int Cmix_file_rd::post_open()
 #ifndef NO_FT_SUPPORT
 	if (m_ft_support)
 	{
-		switch (m_game)
+		// game-detection and per-entry probe are now in the cache-miss branch.
+		const bool can_probe = vdata().size() == get_size() && m_index.size() && !m_is_encrypted;
+		const int crc = can_probe
+			? compute_crc(&m_index[0], get_c_files() * sizeof(t_mix_index_entry))
+			: 0;
+		const mix_cache::Entry* cached = can_probe ? mix_cache::get_entry(crc) : nullptr;
+		if (can_probe && cached && cached->ft.size() == get_c_files() * sizeof(t_file_type))
 		{
-		case game_dune2:
-		case game_rg:
-			break;
-		default:
-			int count[game_unknown] = { 0 };
-			for (int i = 0; i < get_c_files(); i++)
+			m_index_ft.resize(get_c_files());
+			memcpy(&m_index_ft[0], cached->ft.data(), get_c_files() * sizeof(t_file_type));
+			if (m_game != game_dune2 && m_game != game_rg)
+				m_game = static_cast<t_game>(cached->game);
+		}
+		else
+		{
+			switch (m_game)
 			{
-				int id = get_id(i);
-				for (int game = game_td; game < game_unknown; game++)
-					count[game] += mix_database::get_name(static_cast<t_game>(game), id).empty();
-			}
-			int min = count[0];
-			for (int game = 0; game < game_unknown; game++)
-			{
-				if (count[game] < min)
+			case game_dune2:
+			case game_rg:
+				break;
+			default:
+				int count[game_unknown] = { 0 };
+				for (int i = 0; i < get_c_files(); i++)
 				{
-					m_game = static_cast<t_game>(game);
-					min = count[game];
+					int id = get_id(i);
+					for (int game = game_td; game < game_unknown; game++)
+						count[game] += mix_database::get_name(static_cast<t_game>(game), id).empty();
+				}
+				int min = count[0];
+				for (int game = 0; game < game_unknown; game++)
+				{
+					if (count[game] < min)
+					{
+						m_game = static_cast<t_game>(game);
+						min = count[game];
+					}
 				}
 			}
-		}
-		if (vdata().size() == get_size() && m_index.size() && !m_is_encrypted)
-		{
-			int crc = compute_crc(&m_index[0], get_c_files() * sizeof(t_mix_index_entry));
-			Cvirtual_binary s = mix_cache::get_data(crc);
-			m_index_ft.resize(get_c_files());
-			if (s.size() == get_c_files() * sizeof(t_file_type))
-				memcpy(&m_index_ft[0], s.data(), get_c_files() * sizeof(t_file_type));
-			else
+			if (can_probe)
 			{
+				m_index_ft.resize(get_c_files());
 				using t_block_map = multimap<int, int>;
 
 				t_block_map block_map;
@@ -211,10 +220,13 @@ int Cmix_file_rd::post_open()
 					f.open(get_id(i.second), *this);
 					m_index_ft[i.second] = f.get_file_type();
 				}
-				mix_cache::set_data(crc, Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type)));
+				mix_cache::Entry e;
+				e.game = static_cast<uint8_t>(m_game);
+				e.ft = Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type));
+				mix_cache::set_entry(crc, std::move(e));
 			}
 		}
-		else if (m_is_encrypted && m_index.size())
+		if (m_is_encrypted && m_index.size())
 		{
 			// Body is ciphertext — can't probe content. Classify by filename
 			// extension from the mix database so palette auto-load still works.

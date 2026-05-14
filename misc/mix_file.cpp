@@ -225,65 +225,37 @@ int Cmix_file::post_open()
 				m_game = game_ts;
 		}
 	}
+	m_id_index.reserve(get_c_files());
 	for (int i = 0; i < get_c_files(); i++)
 		m_id_index[get_id(i)] = i;
 #ifndef NO_FT_SUPPORT
 	if (m_ft_support)
 	{
-		switch (m_game)
-		{
-		case game_dune2:
-		case game_rg:
-			break;
-		default:
-			int count[game_unknown] = {0};
-			for (int i = 0; i < get_c_files(); i++)
-			{
-				int id = get_id(i);
-				for (int game = game_td; game < game_unknown; game++)
-					count[game] += mix_database::get_name(static_cast<t_game>(game), id).empty();
-			}
-			int min = count[0];
-			for (int game = 0; game < game_unknown; game++)
-			{
-				if (count[game] < min)
-				{
-					m_game = static_cast<t_game>(game);
-					min = count[game];
-				}
-			}
-		}
-		if (vdata().size() == get_size() && !m_is_encrypted)
-		{
-			int crc = compute_crc(&m_index[0], get_c_files() * sizeof(t_mix_index_entry));
-			Cvirtual_binary s = mix_cache::get_data(crc);
-			m_index_ft.resize(get_c_files());
-			if (s.size() == get_c_files() * sizeof(t_file_type))
-				memcpy(&m_index_ft[0], s.data(), get_c_files() * sizeof(t_file_type));
-			else
-			{
-				using t_block_map = multimap<int, int>;
+		// game-detection loop and per-entry type probe are folded into the
+		// cache-miss branch below; on a warm reopen we restore m_game from
+		// the cache record and skip both O(N) passes entirely.
+		const bool can_probe = vdata().size() == get_size() && !m_is_encrypted;
+		const int crc = can_probe
+			? compute_crc(&m_index[0], get_c_files() * sizeof(t_mix_index_entry))
+			: 0;
+		const mix_cache::Entry* cached = can_probe ? mix_cache::get_entry(crc) : nullptr;
 
-				t_block_map block_map;
-				for (int i = 0; i < get_c_files(); i++)
-					block_map.insert(t_block_map::value_type(get_offset(get_id(i)), i));
-				for (auto& i : block_map)
-				{
-					Ccc_file f(false);
-					f.open(get_id(i.second), *this);
-					auto test = mix_database::get_name(m_game, get_id(i.second));
-					if (test.ends_with(".ini"))				//if it calls itself an ini, it probably is an ini file and not a text file
-						m_index_ft[i.second] = ft_ini;
-					else
-						m_index_ft[i.second] = f.get_file_type();
-				}
-				mix_cache::set_data(crc, Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type)));
-			}
-			for (int i = 0; i < get_c_files(); i++)
+		if (can_probe && cached && cached->ft.size() == get_c_files() * sizeof(t_file_type))
+		{
+			// Warm path: no per-entry game polling, no full LMD scan.
+			m_index_ft.resize(get_c_files());
+			memcpy(&m_index_ft[0], cached->ft.data(), get_c_files() * sizeof(t_file_type));
+			if (m_game != game_dune2 && m_game != game_rg)
+				m_game = static_cast<t_game>(cached->game);
+			// Re-register LMD-supplied names. Almost every MIX has zero
+			// LMD entries, so this loop is usually a no-op.
+			for (int idx : cached->lmd)
 			{
-				int id = get_id(i);
+				if (idx < 0 || idx >= get_c_files())
+					continue;
+				int id = get_id(idx);
 				Cxcc_lmd_file f;
-				if (get_type(id) != ft_xcc_lmd || f.open(id, *this) || !f.is_valid())
+				if (f.open(id, *this) || !f.is_valid())
 					continue;
 				m_game = f.get_game();
 				int count = f.get_c_fnames();
@@ -296,7 +268,75 @@ int Cmix_file::post_open()
 				}
 			}
 		}
-		else if (m_is_encrypted && get_c_files())
+		else
+		{
+			switch (m_game)
+			{
+			case game_dune2:
+			case game_rg:
+				break;
+			default:
+				int count[game_unknown] = {0};
+				for (int i = 0; i < get_c_files(); i++)
+				{
+					int id = get_id(i);
+					for (int game = game_td; game < game_unknown; game++)
+						count[game] += mix_database::get_name(static_cast<t_game>(game), id).empty();
+				}
+				int min = count[0];
+				for (int game = 0; game < game_unknown; game++)
+				{
+					if (count[game] < min)
+					{
+						m_game = static_cast<t_game>(game);
+						min = count[game];
+					}
+				}
+			}
+			if (can_probe)
+			{
+				m_index_ft.resize(get_c_files());
+				using t_block_map = multimap<int, int>;
+
+				t_block_map block_map;
+				for (int i = 0; i < get_c_files(); i++)
+					block_map.insert(t_block_map::value_type(get_offset(get_id(i)), i));
+				for (auto& i : block_map)
+				{
+					Ccc_file f(false);
+					f.open(get_id(i.second), *this);
+					auto& test = mix_database::get_name(m_game, get_id(i.second));
+					if (test.ends_with(".ini"))				//if it calls itself an ini, it probably is an ini file and not a text file
+						m_index_ft[i.second] = ft_ini;
+					else
+						m_index_ft[i.second] = f.get_file_type();
+				}
+				vector<int> lmd_indices;
+				for (int i = 0; i < get_c_files(); i++)
+				{
+					int id = get_id(i);
+					Cxcc_lmd_file f;
+					if (get_type(id) != ft_xcc_lmd || f.open(id, *this) || !f.is_valid())
+						continue;
+					lmd_indices.push_back(i);
+					m_game = f.get_game();
+					int count = f.get_c_fnames();
+					const char* r = f.get_fnames();
+					while (count--)
+					{
+						string name = r;
+						r += name.length() + 1;
+						mix_database::add_name(m_game, name, "");
+					}
+				}
+				mix_cache::Entry e;
+				e.game = static_cast<uint8_t>(m_game);
+				e.lmd = std::move(lmd_indices);
+				e.ft = Cvirtual_binary(&m_index_ft[0], get_c_files() * sizeof(t_file_type));
+				mix_cache::set_entry(crc, std::move(e));
+			}
+		}
+		if (m_is_encrypted && get_c_files())
 		{
 			// Body is ciphertext — can't probe content. Classify by filename
 			// extension from the mix database so palette auto-load still works.

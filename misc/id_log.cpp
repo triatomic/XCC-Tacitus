@@ -94,14 +94,16 @@ void mix_database::add_name(t_game game, const string& name, const string& descr
 	get_list(game)[Cmix_file::get_id(game, name)] = idinfo;
 }
 
-string mix_database::get_name(t_game game, int id)
+const string& mix_database::get_name(t_game game, int id)
 {
+	static const string empty;
 	auto i = find_ptr(get_list(game), id);
-	return i ? i->name : "";
+	return i ? i->name : empty;
 }
 
-string mix_database::get_description(t_game game, int id)
+const string& mix_database::get_description(t_game game, int id)
 {
+	static const string empty;
 	auto i = find_ptr(get_list(game), id);
-	return i ? i->description : "";
+	return i ? i->description : empty;
 }

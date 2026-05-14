@@ -37,6 +37,7 @@ int Cbig_file::post_open()
 	if (int error = read(index.write_start(header.cb_header() - sizeof(t_big_header)), header.cb_header() - sizeof(t_big_header)))
 		return error;
 	int size = header.c_files();
+	m_index.reserve(size);
 	m_old_index.reserve(size);
 	const byte* r = index.data();
 	while (size--)

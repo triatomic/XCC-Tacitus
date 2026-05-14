@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_map>
 #include "cc_file.h"
 #include "cc_structures.h"
 
@@ -95,7 +96,7 @@ public:
 		return &m_index[0];
 	}
 protected:
-	using t_id_index = map<int, int>;
+	using t_id_index = unordered_map<int, int>;
 
 	static bool m_ft_support;
 
