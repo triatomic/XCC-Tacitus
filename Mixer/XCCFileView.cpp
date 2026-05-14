@@ -530,7 +530,11 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	}
 
 	// No matching mouse binding: fall through to scroll. Shift scrolls
-	// horizontally, otherwise vertically.
+	// horizontally, otherwise vertically. In player mode the pane has no
+	// scrollable content (image is fit/zoomed in place), so swallow the
+	// wheel instead of moving the view origin.
+	if (m_player_mode)
+		return TRUE;
 	if (shift)
 	{
 		ScrollToPosition(CPoint(position.x - zDelta, position.y));
@@ -542,6 +546,8 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CXCCFileView::OnMouseHWheel(UINT nFlags, short zDelta, CPoint pt)
 {
+	if (m_player_mode)
+		return;
 	CPoint position = GetScrollPosition();
 	SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
 
