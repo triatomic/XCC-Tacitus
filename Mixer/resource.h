@@ -113,6 +113,14 @@
 #define IDC_RG_STATIC 									1050
 #define IDC_GR_STATIC 									1051
 #define IDC_GR_ZH_STATIC 								1052
+#define IDC_NOX                         1053
+#define IDC_EBFD                        1054
+#define IDC_BFME                        1055
+#define IDC_TW                          1056
+#define IDC_NOX_STATIC                  1057
+#define IDC_EBFD_STATIC                 1058
+#define IDC_BFME_STATIC                 1059
+#define IDC_TW_STATIC                   1060
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781
@@ -1516,13 +1524,13 @@
 #define ID_KEYBINDS_CONFIGURE             33139
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        147
 #define _APS_NEXT_COMMAND_VALUE         33140
-#define _APS_NEXT_CONTROL_VALUE         1179
+#define _APS_NEXT_CONTROL_VALUE         1190
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif

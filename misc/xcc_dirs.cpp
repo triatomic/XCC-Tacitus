@@ -1,6 +1,7 @@
 #include "xcc_dirs.h"
 
 #include <cassert>
+#include <map>
 #include <windows.h>
 #include "reg_key.h"
 #include "string_conversion.h"
@@ -237,14 +238,157 @@ void xcc_dirs::reset_data_dir()
 	set_data_dir(GetModuleFileName().get_path());
 }
 
+static std::map<int, std::vector<xcc_dirs::t_detected_source>> g_detected;
+
+static void record_source(t_game game, xcc_dirs::t_dir_source kind, const string& path, const string& label)
+{
+	auto& v = g_detected[game];
+	for (auto& e : v)
+		if (e.path == path)
+			return;
+	v.push_back({kind, path, label});
+}
+
 static void read_dir(const string& key, const string& value, t_game game)
 {
 	Creg_key h;
 	string s;
-	if (xcc_dirs::get_dir(game).empty() 
-		&& ERROR_SUCCESS == h.open(HKEY_LOCAL_MACHINE, key, KEY_QUERY_VALUE) 
+	if (ERROR_SUCCESS == h.open(HKEY_LOCAL_MACHINE, key, KEY_QUERY_VALUE)
 		&& ERROR_SUCCESS == h.query_value(value, s))
-		xcc_dirs::set_dir(game, Cfname(s).get_path());
+	{
+		string path = Cfname(s).get_path();
+		record_source(game, xcc_dirs::src_retail, path, "Retail");
+		if (xcc_dirs::get_dir(game).empty())
+			xcc_dirs::set_dir(game, path);
+	}
+}
+
+static bool dir_exists(const string& path)
+{
+	DWORD attr = GetFileAttributesA(path.c_str());
+	return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static string normalize_slashes(string s)
+{
+	for (auto& c : s) if (c == '/') c = '\\';
+	if (!s.empty() && s.back() != '\\') s += '\\';
+	return s;
+}
+
+static std::vector<string> parse_libraryfolders_vdf(const string& vdf_path)
+{
+	std::vector<string> roots;
+	HANDLE h = CreateFileA(vdf_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return roots;
+	DWORD size = GetFileSize(h, NULL);
+	if (size == 0 || size > 1u << 20)
+	{
+		CloseHandle(h);
+		return roots;
+	}
+	std::string buf;
+	buf.resize(size);
+	DWORD read = 0;
+	if (!ReadFile(h, &buf[0], size, &read, NULL))
+	{
+		CloseHandle(h);
+		return roots;
+	}
+	CloseHandle(h);
+	// Extract every "path" "<value>" pair (case-sensitive, Steam writes lowercase "path").
+	const char* needle = "\"path\"";
+	size_t i = 0;
+	while ((i = buf.find(needle, i)) != string::npos)
+	{
+		i += 6;
+		size_t q1 = buf.find('"', i);
+		if (q1 == string::npos) break;
+		size_t q2 = buf.find('"', q1 + 1);
+		if (q2 == string::npos) break;
+		string raw = buf.substr(q1 + 1, q2 - q1 - 1);
+		// VDF escapes backslashes as \\; collapse them.
+		string p;
+		p.reserve(raw.size());
+		for (size_t k = 0; k < raw.size(); ++k)
+		{
+			if (raw[k] == '\\' && k + 1 < raw.size() && raw[k + 1] == '\\') { p += '\\'; ++k; }
+			else p += raw[k];
+		}
+		roots.push_back(normalize_slashes(p));
+		i = q2 + 1;
+	}
+	return roots;
+}
+
+static std::vector<string> discover_steam_libraries()
+{
+	std::vector<string> libs;
+	Creg_key h;
+	string steam_path;
+	if (ERROR_SUCCESS != h.open(HKEY_CURRENT_USER, "Software\\Valve\\Steam", KEY_QUERY_VALUE))
+		return libs;
+	if (ERROR_SUCCESS != h.query_value("SteamPath", steam_path) || steam_path.empty())
+		return libs;
+	steam_path = normalize_slashes(steam_path);
+	libs.push_back(steam_path);
+	auto extra = parse_libraryfolders_vdf(steam_path + "steamapps\\libraryfolders.vdf");
+	for (auto& r : extra)
+	{
+		bool dup = false;
+		for (auto& e : libs) if (_stricmp(e.c_str(), r.c_str()) == 0) { dup = true; break; }
+		if (!dup) libs.push_back(r);
+	}
+	return libs;
+}
+
+struct t_steam_app
+{
+	t_game game;
+	const char* installdir;
+};
+
+// Per-app installdir as set by EA. Stable across user "move install" actions.
+// Sources: SteamDB + verified appmanifest_2229850.acf / appmanifest_2229890.acf
+// on a real install (2026-05-14). Note "Command and Conquer Generals" uses the
+// spelled-out 'and' instead of '&' — that is EA's inconsistency, not a typo.
+static const t_steam_app g_steam_apps[] =
+{
+	{ game_td,      "Command & Conquer" },
+	{ game_ra,      "Command & Conquer Red Alert" },
+	{ game_ts,      "Command & Conquer Tiberian Sun" },
+	{ game_ra2,     "Command & Conquer Red Alert II" },
+	{ game_rg,      "Command & Conquer Renegade" },
+	{ game_gr,      "Command and Conquer Generals" },
+	{ game_gr_zh,   "Command & Conquer Generals - Zero Hour" },
+	{ game_tw,      "Command & Conquer 3 Tiberium Wars" },
+};
+
+static void detect_steam_sources()
+{
+	auto libs = discover_steam_libraries();
+	if (libs.empty()) return;
+	for (const auto& app : g_steam_apps)
+	{
+		for (const auto& lib : libs)
+		{
+			string p = lib + "steamapps\\common\\" + app.installdir + "\\";
+			if (dir_exists(p))
+			{
+				record_source(app.game, xcc_dirs::src_steam, p, "Steam");
+				if (xcc_dirs::get_dir(app.game).empty())
+					xcc_dirs::set_dir(app.game, p);
+				break;
+			}
+		}
+	}
+}
+
+const std::vector<xcc_dirs::t_detected_source>& xcc_dirs::get_detected_sources(t_game game)
+{
+	return g_detected[game];
 }
 
 void xcc_dirs::load_from_registry()
@@ -310,6 +454,7 @@ void xcc_dirs::load_from_registry()
 	read_dir("Software\\Electronic Arts\\EA Games\\The Battle for Middle-earth", "InstallPath", game_bfme);
 	read_dir("Software\\Electronic Arts\\Electronic Arts\\Command and Conquer 3", "InstallPath", game_tw);
 	*/
+	detect_steam_sources();
 }
 
 void xcc_dirs::save_to_registry()

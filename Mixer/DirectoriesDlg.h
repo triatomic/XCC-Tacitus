@@ -1,6 +1,8 @@
 #pragma once
 
+#include <map>
 #include "resource.h"
+#include "cc_structures.h"
 
 class CDirectoriesDlg : public ETSLayoutDialog
 {
@@ -23,6 +25,10 @@ public:
 	CString	m_edit_rg;
 	CString	m_edit_gr;
 	CString	m_edit_gr_zh;
+	CString	m_edit_nox;
+	CString	m_edit_ebfd;
+	CString	m_edit_bfme;
+	CString	m_edit_tw;
 	//}}AFX_DATA
 
 
@@ -35,6 +41,31 @@ public:
 
 // Implementation
 protected:
+	std::map<int, CString> m_last_committed;
+	CToolTipCtrl m_tooltips;
+	void populate_path_combo(int combo_id);
+	void on_path_combo_change(int combo_id);
+
+public:
+	virtual BOOL PreTranslateMessage(MSG* pMsg) override;
+protected:
+
+	afx_msg void OnSelDune2();
+	afx_msg void OnSelTdPrimary();
+	afx_msg void OnSelTdSecondary();
+	afx_msg void OnSelRa();
+	afx_msg void OnSelDune2000();
+	afx_msg void OnSelTs();
+	afx_msg void OnSelRa2();
+	afx_msg void OnSelRg();
+	afx_msg void OnSelGr();
+	afx_msg void OnSelGrZh();
+	afx_msg void OnSelNox();
+	afx_msg void OnSelEbfd();
+	afx_msg void OnSelBfme();
+	afx_msg void OnSelTw();
+	afx_msg void OnSelData();
+	afx_msg void OnSelCd();
 
 	// Generated message map functions
 	//{{AFX_MSG(CDirectoriesDlg)
