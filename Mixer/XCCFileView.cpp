@@ -4598,42 +4598,33 @@ void CXCCFileView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		}
 		return;
 	}
-	// Same 16-bit nPos truncation guard as OnVScroll — for very wide content
-	// the horizontal thumb would snap to 0 past x=32767.
-	if ((nSBCode == SB_THUMBTRACK || nSBCode == SB_THUMBPOSITION) && pScrollBar == NULL)
-	{
-		SCROLLINFO si = { sizeof(si), SIF_TRACKPOS | SIF_PAGE | SIF_RANGE };
-		if (GetScrollInfo(SB_HORZ, &si))
-		{
-			CPoint p = GetScrollPosition();
-			p.x = si.nTrackPos;
-			ScrollToPosition(p);
-			return;
-		}
-	}
-	CScrollView::OnHScroll(nSBCode, nPos, pScrollBar);
+	if (!handle_thumb_scroll_32bit(SB_HORZ, nSBCode, pScrollBar))
+		CScrollView::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+// WM_VSCROLL/WM_HSCROLL pack the thumb position into the low 16 bits of
+// wParam, so MFC's nPos arg wraps once the real position passes 32767. For
+// content taller/wider than ~32k px (big MIX listings, hex dumps) this makes
+// the scrollbar snap to 0 mid-drag. For thumb codes, read the real 32-bit
+// position from SCROLLINFO::nTrackPos via GetScrollInfo and scroll directly;
+// other codes (line/page/end) fall through to the base class.
+bool CXCCFileView::handle_thumb_scroll_32bit(int bar, UINT nSBCode, CScrollBar* pScrollBar)
+{
+	if ((nSBCode != SB_THUMBTRACK && nSBCode != SB_THUMBPOSITION) || pScrollBar != NULL)
+		return false;
+	SCROLLINFO si = { sizeof(si), SIF_TRACKPOS | SIF_PAGE | SIF_RANGE };
+	if (!GetScrollInfo(bar, &si))
+		return false;
+	CPoint p = GetScrollPosition();
+	if (bar == SB_HORZ) p.x = si.nTrackPos; else p.y = si.nTrackPos;
+	ScrollToPosition(p);
+	return true;
 }
 
 void CXCCFileView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	// WM_VSCROLL packs the thumb position into the low 16 bits of wParam, so
-	// the nPos arg MFC hands us caps at 65535 and silently wraps to 0 when
-	// the real position passes 32767. For content taller than ~32k px (big
-	// MIX listings, hex dumps) this makes the scrollbar snap back to the top
-	// mid-drag. Fix: for thumb codes, read the real 32-bit position from
-	// SCROLLINFO::nTrackPos and ScrollToPosition there directly.
-	if ((nSBCode == SB_THUMBTRACK || nSBCode == SB_THUMBPOSITION) && pScrollBar == NULL)
-	{
-		SCROLLINFO si = { sizeof(si), SIF_TRACKPOS | SIF_PAGE | SIF_RANGE };
-		if (GetScrollInfo(SB_VERT, &si))
-		{
-			CPoint p = GetScrollPosition();
-			p.y = si.nTrackPos;
-			ScrollToPosition(p);
-			return;
-		}
-	}
-	CScrollView::OnVScroll(nSBCode, nPos, pScrollBar);
+	if (!handle_thumb_scroll_32bit(SB_VERT, nSBCode, pScrollBar))
+		CScrollView::OnVScroll(nSBCode, nPos, pScrollBar);
 }
 
 void CXCCFileView::OnPlayerPlay()

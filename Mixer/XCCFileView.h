@@ -95,6 +95,7 @@ protected:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	bool handle_thumb_scroll_32bit(int bar, UINT nSBCode, CScrollBar* pScrollBar);
 	afx_msg void OnPlayerPlay();
 	afx_msg void OnPlayerReverse();
 	afx_msg void OnPlayerGrid();
