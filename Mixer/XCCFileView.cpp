@@ -329,7 +329,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_player_reverse.GetSafeHwnd())  msg = "Reverse playback direction.";
 	else if (h == m_player_grid.GetSafeHwnd())     msg = "Show static grid of all frames instead of animation.";
 	else if (h == m_player_native.GetSafeHwnd())   msg = "Display at native resolution (no scaling).";
-	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Save the current frame as BMP / PNG / PCX (Ctrl+Shift+S).";
+	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Save the current frame as PNG / TGA / PCX (Ctrl+Shift+S). PNG/TGA carry alpha when BG = Alpha or Pane.";
 	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
 	else if (h == m_player_fps_edit.GetSafeHwnd()) msg = "Playback speed in frames per second.";
 	else if (h == m_player_fps_spin.GetSafeHwnd()) msg = "Playback speed in frames per second.";
@@ -4733,26 +4733,30 @@ static int get_png_encoder_clsid(CLSID& out)
 }
 
 // Helper: write a 32-bit top-down BMP from BGRA bytes.
-static bool write_bmp32(const char* path, const byte* bgra, int cx, int cy)
+// 32-bit uncompressed top-down TGA writer. Replaces the previous 32-bit BMP
+// writer in v9.62 — TGA carries a real alpha channel that every image editor
+// (Photoshop, GIMP, Krita, …) interprets correctly, while 32-bit BMPs are
+// historically ambiguous: some viewers treat the high byte as alpha, some as
+// padding. Switching to TGA also matches Westwood-tool conventions.
+//
+// Layout: 18-byte header, then cx*cy BGRA pixels. ImageDescriptor bit 5 = 1
+// flips origin to top-left so we don't have to row-flip the buffer; bits 0..3
+// = 8 declare 8 alpha bits. Pixel order BGRA matches our cache layout.
+static bool write_tga32(const char* path, const byte* bgra, int cx, int cy)
 {
 	if (!bgra || cx <= 0 || cy <= 0) return false;
+	byte hdr[18] = {};
+	hdr[2] = 2;                 // image type: uncompressed true-color
+	hdr[12] = static_cast<byte>(cx & 0xff);
+	hdr[13] = static_cast<byte>((cx >> 8) & 0xff);
+	hdr[14] = static_cast<byte>(cy & 0xff);
+	hdr[15] = static_cast<byte>((cy >> 8) & 0xff);
+	hdr[16] = 32;               // bits per pixel
+	hdr[17] = 0x28;             // ImageDescriptor: top-left origin (bit5) + 8 alpha bits (bits0..3)
 	const DWORD pixel_bytes = static_cast<DWORD>(cx) * cy * 4;
-	BITMAPFILEHEADER fh = {};
-	fh.bfType = 0x4D42; // 'BM'
-	fh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-	fh.bfSize = fh.bfOffBits + pixel_bytes;
-	BITMAPINFOHEADER ih = {};
-	ih.biSize = sizeof(BITMAPINFOHEADER);
-	ih.biWidth = cx;
-	ih.biHeight = -cy; // top-down
-	ih.biPlanes = 1;
-	ih.biBitCount = 32;
-	ih.biCompression = BI_RGB;
-	ih.biSizeImage = pixel_bytes;
 	FILE* f = std::fopen(path, "wb");
 	if (!f) return false;
-	bool ok = std::fwrite(&fh, sizeof(fh), 1, f) == 1
-		&& std::fwrite(&ih, sizeof(ih), 1, f) == 1
+	bool ok = std::fwrite(hdr, sizeof(hdr), 1, f) == 1
 		&& std::fwrite(bgra, pixel_bytes, 1, f) == 1;
 	std::fclose(f);
 	return ok;
@@ -4809,14 +4813,17 @@ bool CXCCFileView::take_screenshot()
 			frame_suffix.Format("_f%d", m_player_frame);
 			default_name += frame_suffix;
 		}
-		default_name += ".bmp";
+		default_name += ".png";
 	}
 
 	// Save dialog with three filters. The dialog's selected filter drives the
-	// default extension via the filter index — order: BMP, PNG, PCX.
-	CFileDialog dlg(FALSE, "bmp", default_name,
+	// default extension via the filter index — order: PNG (default), TGA, PCX.
+	// PNG is first because it's the lossless format users actually want for
+	// sharing screenshots, and (along with TGA) it carries a real alpha
+	// channel — see the bg_mode-driven transparency block below.
+	CFileDialog dlg(FALSE, "png", default_name,
 		OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-		"Bitmap (*.bmp)|*.bmp|PNG (*.png)|*.png|PCX (*.pcx)|*.pcx||",
+		"PNG (*.png)|*.png|Targa (*.tga)|*.tga|PCX (*.pcx)|*.pcx||",
 		this);
 	if (dlg.DoModal() != IDOK)
 		return false;
@@ -4827,22 +4834,22 @@ bool CXCCFileView::take_screenshot()
 	// filter 1 only, so handle 2/3 manually.
 	if (path.ReverseFind('.') <= path.ReverseFind('\\'))
 	{
-		path += (filter_idx == 2) ? ".png" : (filter_idx == 3) ? ".pcx" : ".bmp";
+		path += (filter_idx == 2) ? ".tga" : (filter_idx == 3) ? ".pcx" : ".png";
 	}
 
 	// Determine target format from filter index (preferred) with fallback to
 	// the extension the user actually typed — covers the case where the user
-	// typed "foo.png" but left the filter on Bitmap.
-	enum { fmt_bmp, fmt_png, fmt_pcx } fmt;
-	if      (filter_idx == 2) fmt = fmt_png;
+	// typed "foo.tga" but left the filter on PNG.
+	enum { fmt_png, fmt_tga, fmt_pcx } fmt;
+	if      (filter_idx == 2) fmt = fmt_tga;
 	else if (filter_idx == 3) fmt = fmt_pcx;
-	else                      fmt = fmt_bmp;
+	else                      fmt = fmt_png;
 	{
 		CString ext = path.Right(4);
 		ext.MakeLower();
 		if      (ext == ".png") fmt = fmt_png;
+		else if (ext == ".tga") fmt = fmt_tga;
 		else if (ext == ".pcx") fmt = fmt_pcx;
-		else if (ext == ".bmp") fmt = fmt_bmp;
 	}
 
 	bool ok = false;
@@ -4890,7 +4897,7 @@ bool CXCCFileView::take_screenshot()
 	}
 	else
 	{
-		// BMP / PNG: read the composited BGRA cache. Both VXL and SHP/WSA
+		// PNG / TGA: read the composited BGRA cache. Both VXL and SHP/WSA
 		// caches are populated by the paint that UpdateWindow() just forced.
 		// Caches are vector<DWORD> with cx_s*cy_s entries (4 bytes per pixel).
 		const DWORD* src_dwords = nullptr;
@@ -4914,19 +4921,61 @@ bool CXCCFileView::take_screenshot()
 				mf->SetMessageText("Screenshot: rendered buffer unavailable; try toggling the player or moving a slider, then retry.");
 			return false;
 		}
-		// The composite path stores BGRA as `B | G<<8 | R<<16` — the high byte
-		// (alpha) is left at 0. That's fine for GDI's SetDIBitsToDevice (ignores
-		// the channel) but PNG via GDI+ treats it as a real alpha and writes a
-		// fully transparent image; some viewers also read 32-bit BMPs as alpha
-		// and render transparent. Force the alpha byte to 0xFF on a copy so the
-		// exported file is fully opaque.
-		std::vector<DWORD> opaque(n_pixels);
-		for (int i = 0; i < n_pixels; i++)
-			opaque[i] = src_dwords[i] | 0xFF000000u;
-		const byte* bgra = reinterpret_cast<const byte*>(opaque.data());
-		if (fmt == fmt_bmp)
+
+		// Alpha channel: when BG mode is Alpha (1) or Pane (2) the user is
+		// asking to *see* transparency on screen, so they expect the saved
+		// PNG/TGA to carry a real alpha channel they can paste over any
+		// background. Source the alpha from the **indexed** buffer (palette
+		// index 0 = transparent), not the BGRA composite — the BGRA already
+		// has the checkerboard / pane color baked in for transparent pixels.
+		// In Color mode (0) the user explicitly wants the palette-0 color
+		// rendered as a real opaque pixel (engine appearance); leave the
+		// image fully opaque in that case.
+		const bool want_alpha = (m_player_bg_mode == 1 || m_player_bg_mode == 2);
+		const byte* indexed = nullptr;
+		if (want_alpha)
 		{
-			ok = write_bmp32(path, bgra, cx_s, cy_s);
+			if (vxl)
+			{
+				if (m_vxl_splat.buf.size() != 0) indexed = m_vxl_splat.buf.data();
+			}
+			else
+			{
+				if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
+					&& static_cast<int>(m_player_frames[m_player_frame].size()) >= n_pixels)
+				{
+					indexed = m_player_frames[m_player_frame].data();
+				}
+			}
+		}
+
+		// The composite path stores BGRA as `B | G<<8 | R<<16` — the high byte
+		// (alpha) is left at 0. PNG via GDI+ treats it as a real alpha (would
+		// write a fully transparent image otherwise) and TGA viewers do the
+		// same. Build a copy with the right alpha per pixel: 0 where the
+		// indexed pixel is transparent (and want_alpha), 0xFF otherwise.
+		std::vector<DWORD> out(n_pixels);
+		if (indexed)
+		{
+			for (int i = 0; i < n_pixels; i++)
+			{
+				const DWORD a = indexed[i] == 0 ? 0u : 0xFF000000u;
+				// Zero the RGB on transparent pixels too, so any image editor
+				// that displays semi-transparent / pre-multiplied previews
+				// won't show the leftover bg color through. Doesn't affect
+				// straight-alpha viewers (they ignore RGB where A=0).
+				out[i] = indexed[i] == 0 ? 0u : (src_dwords[i] | a);
+			}
+		}
+		else
+		{
+			for (int i = 0; i < n_pixels; i++)
+				out[i] = src_dwords[i] | 0xFF000000u;
+		}
+		const byte* bgra = reinterpret_cast<const byte*>(out.data());
+		if (fmt == fmt_tga)
+		{
+			ok = write_tga32(path, bgra, cx_s, cy_s);
 		}
 		else // fmt_png
 		{
