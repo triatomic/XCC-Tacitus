@@ -105,6 +105,7 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_WM_MEASUREITEM()
 	ON_WM_PAINT()
 	ON_WM_CTLCOLOR()
+	ON_WM_VSCROLL()
 END_MESSAGE_MAP()
 
 void CXCCFileView::OnLButtonDown(UINT nFlags, CPoint point)
@@ -4597,7 +4598,42 @@ void CXCCFileView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		}
 		return;
 	}
+	// Same 16-bit nPos truncation guard as OnVScroll — for very wide content
+	// the horizontal thumb would snap to 0 past x=32767.
+	if ((nSBCode == SB_THUMBTRACK || nSBCode == SB_THUMBPOSITION) && pScrollBar == NULL)
+	{
+		SCROLLINFO si = { sizeof(si), SIF_TRACKPOS | SIF_PAGE | SIF_RANGE };
+		if (GetScrollInfo(SB_HORZ, &si))
+		{
+			CPoint p = GetScrollPosition();
+			p.x = si.nTrackPos;
+			ScrollToPosition(p);
+			return;
+		}
+	}
 	CScrollView::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CXCCFileView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	// WM_VSCROLL packs the thumb position into the low 16 bits of wParam, so
+	// the nPos arg MFC hands us caps at 65535 and silently wraps to 0 when
+	// the real position passes 32767. For content taller than ~32k px (big
+	// MIX listings, hex dumps) this makes the scrollbar snap back to the top
+	// mid-drag. Fix: for thumb codes, read the real 32-bit position from
+	// SCROLLINFO::nTrackPos and ScrollToPosition there directly.
+	if ((nSBCode == SB_THUMBTRACK || nSBCode == SB_THUMBPOSITION) && pScrollBar == NULL)
+	{
+		SCROLLINFO si = { sizeof(si), SIF_TRACKPOS | SIF_PAGE | SIF_RANGE };
+		if (GetScrollInfo(SB_VERT, &si))
+		{
+			CPoint p = GetScrollPosition();
+			p.y = si.nTrackPos;
+			ScrollToPosition(p);
+			return;
+		}
+	}
+	CScrollView::OnVScroll(nSBCode, nPos, pScrollBar);
 }
 
 void CXCCFileView::OnPlayerPlay()
