@@ -3811,14 +3811,46 @@ void CXCCFileView::player_draw(CDC* pDC)
 			float vpl_lx = 0, vpl_ly = 0, vpl_lz = 1;
 			float vpl_ambient = 0.0f;
 			float vpl_diffuse = 1.0f;
+			float vpl_specular = 0.0f;
+			// Secondary fresnel-like light: l2 = normalize(l + (0,0,1)) per
+			// vxl-renderer's shaders.hlsl:131. Adds a vertical bias so
+			// top-facing surfaces pick up extra brightness (a cheap stand-in
+			// for view-dependent fresnel — view direction is implicit since the
+			// camera looks down +z in our cam space). Same for every voxel.
+			float vpl_l2x = 0, vpl_l2y = 0, vpl_l2z = 0;
 			bool vpl_faithful = true;
 			if (m_vpl_loaded)
 			{
 				theme::vxl_light_direction(vpl_lx, vpl_ly, vpl_lz);
 				vpl_ambient = theme::vxl_light_ambient();
 				vpl_diffuse = theme::vxl_light_diffuse();
+				vpl_specular = theme::vxl_light_specular();
 				vpl_faithful = theme::vxl_vpl_engine_faithful();
+				// l + (0,0,1), normalized. Degenerate when l == (0,0,-1) (light
+				// pointing straight down through the model from above-camera);
+				// fall back to zero so f2 contributes nothing in that case.
+				float sx = vpl_lx, sy = vpl_ly, sz = vpl_lz + 1.0f;
+				float slen = std::sqrt(sx * sx + sy * sy + sz * sz);
+				if (slen > 1e-4f)
+				{
+					vpl_l2x = sx / slen;
+					vpl_l2y = sy / slen;
+					vpl_l2z = sz / slen;
+				}
 			}
+			// Pre-compute the maximum value of vxl-renderer's VPL curve at f=2
+			// (both lights fully saturated). Used to normalize the selected
+			// brightness back into the stock VPL's [0..31] section range
+			// without re-baking the VPL itself. The curve (mainwindow.cpp:543):
+			//   f<1 ? amb + f*dif : amb + dif + (f-1)*(dif + spec)
+			// At f=2: amb + dif + (dif + spec) = amb + 2*dif + spec.
+			// In faithful mode amb/dif are ignored — we use 1.0 placeholders
+			// so the brightness still spans [0..1+spec/(1+spec)*..]. Keeping
+			// the same constants the engine bakes its VPL with (1.0 / 1.0)
+			// preserves the ratio between sections at spec=0.
+			const float curve_amb = vpl_faithful ? 1.0f : vpl_ambient;
+			const float curve_dif = vpl_faithful ? 1.0f : vpl_diffuse;
+			const float curve_max = curve_amb + 2.0f * curve_dif + vpl_specular;
 			// Parallelize the splat by partitioning *output rows*: each thread
 			// owns a contiguous row band [y_lo, y_hi) of the supersample
 			// framebuffer and iterates the entire voxel cloud, writing only when
@@ -3882,36 +3914,56 @@ void CXCCFileView::player_draw(CDC* pDC)
 					ni8z = q(nrz_p);
 					if (m_vpl_loaded && voxel_pal != 0)
 					{
-						// Section index in [0..31]: 0 = brightest (n·L = +1, normal
-						// facing the light), 31 = darkest (n·L = -1, normal facing
-						// away). Empirically verified by tracing remap entries in
-						// a real voxels.vpl — section 0 maps colors toward lighter
-						// ramp positions, sections grow darker toward 31. Stored
-						// normal is already in the "dot-with-light gives signed
-						// brightness" form.
+						// Section index in [0..31] for Mixer's stock-VPL convention:
+						// 0 = brightest (n·L = +1, normal facing the light), 31 =
+						// darkest. Verified empirically against a real voxels.vpl.
 						//
-						// Two formulas selected by theme::vxl_vpl_engine_faithful():
-						//   true  (default): engine-faithful (1 - N·L) / 2 * 31.
-						//                    Matches RA2 in-game; ignores Ambient/Diffuse.
-						//   false: ambient + diffuse * max(0, N·L) modulation, same
-						//                    formula as synthetic shading. Lets the user
-						//                    lift back-faces / compress contrast for
-						//                    creative effect; not what the engine does.
-						float ndotl = (ni8x * vpl_lx + ni8y * vpl_ly + ni8z * vpl_lz) / 127.0f;
-						int sec;
-						if (vpl_faithful)
+						// Two-light shading model ported from vxl-renderer
+						// (shaders.hlsl:127-135 + mainwindow.cpp:543):
+						//   f1 = clamp0(n . L)              primary directional light
+						//   f2 = clamp0((n . L2) / (d - (d-1) (n . L2)))   fresnel-like
+						//   f  = f1 + f2                    range [0..2]
+						// Then vxl-renderer's per-section VPL curve maps f to a
+						// brightness:
+						//   f<1 ? amb + f*dif : amb + dif + (f-1)*(dif + spec)
+						// vxl-renderer bakes that brightness into its own VPL. We
+						// don't re-bake — instead we normalize the brightness against
+						// curve_max and pick the stock-VPL section closest to that
+						// brightness, treating Mixer's section index as an inverse
+						// brightness scale (sec/31 = darkness; 1 - sec/31 = brightness).
+						//
+						// At specular = 0 with faithful constants, this collapses to
+						// the same per-voxel section the previous (1 - N.L)/2 * 31
+						// formula produced (within rounding) when l2 == 0; non-zero
+						// l2 always lifts top-facing brightness, which is the
+						// vxl-renderer behavior we're matching.
+						const float d2 = 3.0f;
+						float nL  = (ni8x * vpl_lx  + ni8y * vpl_ly  + ni8z * vpl_lz)  / 127.0f;
+						float nL2 = (ni8x * vpl_l2x + ni8y * vpl_l2y + ni8z * vpl_l2z) / 127.0f;
+						float f1 = nL  > 0.0f ? nL  : 0.0f;
+						// Guard: denominator d - (d-1)*nL2 = 3 - 2*nL2. nL2 <= 1
+						// makes denom >= 1 — never zero in practice, but clamp
+						// defensively.
+						float denom = d2 - (d2 - 1.0f) * nL2;
+						float f2 = nL2 > 0.0f && denom > 1e-4f ? nL2 / denom : 0.0f;
+						if (f2 < 0.0f) f2 = 0.0f;
+						float f = f1 + f2;
+						if (f > 2.0f) f = 2.0f;
+						float brightness = f < 1.0f
+							? curve_amb + f * curve_dif
+							: curve_amb + curve_dif + (f - 1.0f) * (curve_dif + vpl_specular);
+						// Modulated branch additionally rescales by ambient/diffuse
+						// the same way the previous floor-lift did, so the "Use VPL
+						// engine formula" checkbox keeps its existing meaning: when
+						// unchecked, ambient acts as a brightness floor for back-faces.
+						if (!vpl_faithful)
 						{
-							if (ndotl < -1.0f) ndotl = -1.0f;
-							else if (ndotl > 1.0f) ndotl = 1.0f;
-							sec = static_cast<int>((1.0f - ndotl) * 0.5f * 31.0f + 0.5f);
+							float floor_b = vpl_ambient;
+							if (brightness < floor_b) brightness = floor_b;
 						}
-						else
-						{
-							if (ndotl < 0.0f) ndotl = 0.0f;
-							float brightness = vpl_ambient + vpl_diffuse * ndotl;
-							if (brightness > 1.0f) brightness = 1.0f;
-							sec = static_cast<int>((1.0f - brightness) * 31.0f + 0.5f);
-						}
+						float norm = brightness / (curve_max > 1e-4f ? curve_max : 1.0f);
+						if (norm < 0.0f) norm = 0.0f; else if (norm > 1.0f) norm = 1.0f;
+						int sec = static_cast<int>((1.0f - norm) * 31.0f + 0.5f);
 						if (sec < 0) sec = 0; else if (sec > 31) sec = 31;
 						voxel_pal = m_vpl_file.get_section(sec)[v.color];
 					}

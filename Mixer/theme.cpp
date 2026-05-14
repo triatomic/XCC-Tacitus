@@ -41,10 +41,14 @@ namespace theme
 		const float k_default_el = -54.7356f;
 		const float k_default_ambient = 0.55f;
 		const float k_default_diffuse = 0.85f;
+		// Specular default matches vxl-renderer's colorset_desc::specular
+		// (mainwindow.cpp:36). Range 0..5 mirrors vxl-renderer's slider.
+		const float k_default_specular = 1.2f;
 		float g_vxl_light_az = k_default_az;
 		float g_vxl_light_el = k_default_el;
 		float g_vxl_light_ambient = k_default_ambient;
 		float g_vxl_light_diffuse = k_default_diffuse;
+		float g_vxl_light_specular = k_default_specular;
 		int g_vxl_lighting_version = 0;
 		// Set to true by any of the four lighting slider setters whenever they
 		// would otherwise have called save(). flush_lighting_save() consumes
@@ -218,6 +222,7 @@ namespace theme
 		g_vxl_light_el = load_f("vxl_light_el", k_default_el, -90.0f, 90.0f);
 		g_vxl_light_ambient = load_f("vxl_light_ambient", k_default_ambient, 0.0f, 1.0f);
 		g_vxl_light_diffuse = load_f("vxl_light_diffuse", k_default_diffuse, 0.0f, 1.0f);
+		g_vxl_light_specular = load_f("vxl_light_specular", k_default_specular, 0.0f, 5.0f);
 		g_vxl_vpl_engine_faithful = AfxGetApp()->GetProfileInt("Theme", "vxl_vpl_engine_faithful", 1) != 0;
 		{
 			int v = AfxGetApp()->GetProfileInt("Theme", "vxl_light_indicator_mode", static_cast<int>(vxl_light_indicator_overlay));
@@ -251,6 +256,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_diffuse", static_cast<int>(g_vxl_light_diffuse * 1000.0f));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_specular", static_cast<int>(g_vxl_light_specular * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_vpl_engine_faithful", g_vxl_vpl_engine_faithful ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_indicator_mode", static_cast<int>(g_vxl_light_indicator_mode));
 		AfxGetApp()->WriteProfileInt("Theme", "limit_vxl_cpu", g_limit_vxl_cpu ? 1 : 0);
@@ -347,6 +353,7 @@ namespace theme
 	float vxl_light_elevation() { return g_vxl_light_el; }
 	float vxl_light_ambient()   { return g_vxl_light_ambient; }
 	float vxl_light_diffuse()   { return g_vxl_light_diffuse; }
+	float vxl_light_specular()  { return g_vxl_light_specular; }
 	int   vxl_lighting_version(){ return g_vxl_lighting_version; }
 
 	// All four lighting slider setters defer the registry save() — they only
@@ -391,6 +398,15 @@ namespace theme
 		g_vxl_lighting_version++;
 		g_vxl_lighting_save_pending = true;
 	}
+	void set_vxl_light_specular(float v)
+	{
+		if (v < 0.0f) v = 0.0f;
+		if (v > 5.0f) v = 5.0f;
+		if (g_vxl_light_specular == v) return;
+		g_vxl_light_specular = v;
+		g_vxl_lighting_version++;
+		g_vxl_lighting_save_pending = true;
+	}
 
 	void flush_lighting_save()
 	{
@@ -404,6 +420,7 @@ namespace theme
 		g_vxl_light_el = k_default_el;
 		g_vxl_light_ambient = k_default_ambient;
 		g_vxl_light_diffuse = k_default_diffuse;
+		g_vxl_light_specular = k_default_specular;
 		g_vxl_lighting_version++;
 		save();
 	}

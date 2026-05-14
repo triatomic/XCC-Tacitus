@@ -24,6 +24,10 @@ namespace
 	float unscale_el(int v)        { return (static_cast<float>(v) / k_steps) * 180.0f - 90.0f; }
 	int  scale_unit(float v)       { return static_cast<int>(v * k_steps); }
 	float unscale_unit(int v)      { return static_cast<float>(v) / k_steps; }
+	// Specular spans 0..5 (matches vxl-renderer's slider range).
+	const float k_specular_max     = 5.0f;
+	int  scale_spec(float v)       { return static_cast<int>((v / k_specular_max) * k_steps); }
+	float unscale_spec(int v)      { return (static_cast<float>(v) / k_steps) * k_specular_max; }
 }
 
 CVxlLightingDlg::CVxlLightingDlg(CWnd* pParent)
@@ -38,10 +42,12 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_LIGHT_EL_SLIDER, m_el);
 	DDX_Control(pDX, IDC_VXL_LIGHT_AMBIENT_SLIDER, m_ambient);
 	DDX_Control(pDX, IDC_VXL_LIGHT_DIFFUSE_SLIDER, m_diffuse);
+	DDX_Control(pDX, IDC_VXL_LIGHT_SPECULAR_SLIDER, m_specular);
 	DDX_Control(pDX, IDC_VXL_LIGHT_AZ_VALUE, m_az_value);
 	DDX_Control(pDX, IDC_VXL_LIGHT_EL_VALUE, m_el_value);
 	DDX_Control(pDX, IDC_VXL_LIGHT_AMBIENT_VALUE, m_ambient_value);
 	DDX_Control(pDX, IDC_VXL_LIGHT_DIFFUSE_VALUE, m_diffuse_value);
+	DDX_Control(pDX, IDC_VXL_LIGHT_SPECULAR_VALUE, m_specular_value);
 	DDX_Control(pDX, IDC_VXL_NORMAL_METHOD, m_method);
 	DDX_Control(pDX, IDC_VXL_NORMAL_KERNEL, m_kernel);
 }
@@ -61,10 +67,11 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_OVERLAY, OnIndicatorOverlay)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_CORNER, OnIndicatorCorner)
 	ON_WM_SHOWWINDOW()
-	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AZ_VALUE,      OnAzEditKillFocus)
-	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_EL_VALUE,      OnElEditKillFocus)
-	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE, OnAmbientEditKillFocus)
-	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_DIFFUSE_VALUE, OnDiffuseEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AZ_VALUE,       OnAzEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_EL_VALUE,       OnElEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE,  OnAmbientEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_DIFFUSE_VALUE,  OnDiffuseEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_SPECULAR_VALUE, OnSpecularEditKillFocus)
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -75,6 +82,7 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_el.SetRange(0, k_steps);
 	m_ambient.SetRange(0, k_steps);
 	m_diffuse.SetRange(0, k_steps);
+	m_specular.SetRange(0, k_steps);
 	// Populate the Method + Kernel comboboxes once. Order matches the enum
 	// values in theme.h so the index can be passed straight through.
 	m_method.AddString("Basic (6 faces)");
@@ -106,6 +114,10 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"Shading range above ambient. Higher values = brighter highlights on "
 		"faces pointing at the light, more contrast. Final brightness peaks "
 		"at ambient + diffuse. Default: 0.85.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_SPECULAR_SLIDER),
+		"Specular peak above ambient + diffuse on fully-lit faces. Ported "
+		"from vxl-renderer's per-colorset VPL curve. 0 = strict Lambertian "
+		"(no specular bump), 1.2 = vxl-renderer default. Range 0..5.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_RESET),
 		"Restore all four sliders to their default values.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_SRC_COMPUTED),
@@ -144,10 +156,11 @@ BOOL CVxlLightingDlg::PreTranslateMessage(MSG* pMsg)
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
 	{
 		const HWND focus = ::GetFocus();
-		if      (focus == m_az_value.GetSafeHwnd())      { commit_az_edit();      return TRUE; }
-		else if (focus == m_el_value.GetSafeHwnd())      { commit_el_edit();      return TRUE; }
-		else if (focus == m_ambient_value.GetSafeHwnd()) { commit_ambient_edit(); return TRUE; }
-		else if (focus == m_diffuse_value.GetSafeHwnd()) { commit_diffuse_edit(); return TRUE; }
+		if      (focus == m_az_value.GetSafeHwnd())       { commit_az_edit();       return TRUE; }
+		else if (focus == m_el_value.GetSafeHwnd())       { commit_el_edit();       return TRUE; }
+		else if (focus == m_ambient_value.GetSafeHwnd())  { commit_ambient_edit();  return TRUE; }
+		else if (focus == m_diffuse_value.GetSafeHwnd())  { commit_diffuse_edit();  return TRUE; }
+		else if (focus == m_specular_value.GetSafeHwnd()) { commit_specular_edit(); return TRUE; }
 	}
 	return CDialog::PreTranslateMessage(pMsg);
 }
@@ -158,6 +171,7 @@ void CVxlLightingDlg::load_from_theme()
 	m_el.SetPos(scale_el(theme::vxl_light_elevation()));
 	m_ambient.SetPos(scale_unit(theme::vxl_light_ambient()));
 	m_diffuse.SetPos(scale_unit(theme::vxl_light_diffuse()));
+	m_specular.SetPos(scale_spec(theme::vxl_light_specular()));
 	// Sync the normal-source radios with the persisted value.
 	const bool is_file = theme::vxl_normal_src() == theme::vxl_normals_file;
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, is_file ? BST_UNCHECKED : BST_CHECKED);
@@ -219,6 +233,8 @@ void CVxlLightingDlg::update_value_labels()
 	m_ambient_value.SetWindowText(buf);
 	std::snprintf(buf, sizeof(buf), "%.2f", theme::vxl_light_diffuse());
 	m_diffuse_value.SetWindowText(buf);
+	std::snprintf(buf, sizeof(buf), "%.2f", theme::vxl_light_specular());
+	m_specular_value.SetWindowText(buf);
 	m_updating_ui = false;
 }
 
@@ -254,10 +270,11 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	float preview_value = 0.0f;
 	switch (id)
 	{
-	case IDC_VXL_LIGHT_AZ_SLIDER:      preview_value = unscale_az(m_az.GetPos()); break;
-	case IDC_VXL_LIGHT_EL_SLIDER:      preview_value = unscale_el(m_el.GetPos()); break;
-	case IDC_VXL_LIGHT_AMBIENT_SLIDER: preview_value = unscale_unit(m_ambient.GetPos()); break;
-	case IDC_VXL_LIGHT_DIFFUSE_SLIDER: preview_value = unscale_unit(m_diffuse.GetPos()); break;
+	case IDC_VXL_LIGHT_AZ_SLIDER:       preview_value = unscale_az(m_az.GetPos()); break;
+	case IDC_VXL_LIGHT_EL_SLIDER:       preview_value = unscale_el(m_el.GetPos()); break;
+	case IDC_VXL_LIGHT_AMBIENT_SLIDER:  preview_value = unscale_unit(m_ambient.GetPos()); break;
+	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  preview_value = unscale_unit(m_diffuse.GetPos()); break;
+	case IDC_VXL_LIGHT_SPECULAR_SLIDER: preview_value = unscale_spec(m_specular.GetPos()); break;
 	default:
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
@@ -266,10 +283,11 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	// slider event so the model reflects the live slider position.
 	switch (id)
 	{
-	case IDC_VXL_LIGHT_AZ_SLIDER:      theme::set_vxl_light_azimuth(preview_value); break;
-	case IDC_VXL_LIGHT_EL_SLIDER:      theme::set_vxl_light_elevation(preview_value); break;
-	case IDC_VXL_LIGHT_AMBIENT_SLIDER: theme::set_vxl_light_ambient(preview_value); break;
-	case IDC_VXL_LIGHT_DIFFUSE_SLIDER: theme::set_vxl_light_diffuse(preview_value); break;
+	case IDC_VXL_LIGHT_AZ_SLIDER:       theme::set_vxl_light_azimuth(preview_value); break;
+	case IDC_VXL_LIGHT_EL_SLIDER:       theme::set_vxl_light_elevation(preview_value); break;
+	case IDC_VXL_LIGHT_AMBIENT_SLIDER:  theme::set_vxl_light_ambient(preview_value); break;
+	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  theme::set_vxl_light_diffuse(preview_value); break;
+	case IDC_VXL_LIGHT_SPECULAR_SLIDER: theme::set_vxl_light_specular(preview_value); break;
 	}
 	update_value_labels();
 	invalidate_vxl_view();
@@ -343,10 +361,24 @@ void CVxlLightingDlg::commit_diffuse_edit()
 	theme::flush_lighting_save();
 }
 
-void CVxlLightingDlg::OnAzEditKillFocus()      { commit_az_edit(); }
-void CVxlLightingDlg::OnElEditKillFocus()      { commit_el_edit(); }
-void CVxlLightingDlg::OnAmbientEditKillFocus() { commit_ambient_edit(); }
-void CVxlLightingDlg::OnDiffuseEditKillFocus() { commit_diffuse_edit(); }
+void CVxlLightingDlg::commit_specular_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_specular_value.GetWindowText(s);
+	float v = static_cast<float>(_tstof(s));
+	if (v < 0.0f) v = 0.0f; else if (v > k_specular_max) v = k_specular_max;
+	theme::set_vxl_light_specular(v);
+	m_specular.SetPos(scale_spec(v));
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnAzEditKillFocus()       { commit_az_edit(); }
+void CVxlLightingDlg::OnElEditKillFocus()       { commit_el_edit(); }
+void CVxlLightingDlg::OnAmbientEditKillFocus()  { commit_ambient_edit(); }
+void CVxlLightingDlg::OnDiffuseEditKillFocus()  { commit_diffuse_edit(); }
+void CVxlLightingDlg::OnSpecularEditKillFocus() { commit_specular_edit(); }
 
 void CVxlLightingDlg::OnNormalSrcComputed()
 {

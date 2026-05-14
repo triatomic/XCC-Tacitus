@@ -44,6 +44,7 @@ protected:
 	afx_msg void OnElEditKillFocus();
 	afx_msg void OnAmbientEditKillFocus();
 	afx_msg void OnDiffuseEditKillFocus();
+	afx_msg void OnSpecularEditKillFocus();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -59,10 +60,12 @@ private:
 	CSliderCtrl m_el;
 	CSliderCtrl m_ambient;
 	CSliderCtrl m_diffuse;
+	CSliderCtrl m_specular;
 	CEdit m_az_value;
 	CEdit m_el_value;
 	CEdit m_ambient_value;
 	CEdit m_diffuse_value;
+	CEdit m_specular_value;
 	CComboBox m_method;
 	CComboBox m_kernel;
 	CToolTipCtrl m_tooltips;
@@ -83,4 +86,5 @@ private:
 	void commit_el_edit();
 	void commit_ambient_edit();
 	void commit_diffuse_edit();
+	void commit_specular_edit();
 };

@@ -122,10 +122,17 @@ namespace theme
 	float vxl_light_elevation();       // degrees, -90..90
 	float vxl_light_ambient();         // 0..1
 	float vxl_light_diffuse();         // 0..1
+	// Specular: peak intensity above (ambient + diffuse) when a face is
+	// fully lit. Ported from vxl-renderer's per-colorset VPL curve
+	// (mainwindow.cpp:543) where f<1 ? amb+f*dif : amb+dif+(f-1)*(dif+spec).
+	// 0 = strict Lambertian (matches Mixer's pre-specular behavior). 1.2 =
+	// vxl-renderer default. Range 0..5.
+	float vxl_light_specular();        // 0..5
 	void set_vxl_light_azimuth(float v);
 	void set_vxl_light_elevation(float v);
 	void set_vxl_light_ambient(float v);
 	void set_vxl_light_diffuse(float v);
+	void set_vxl_light_specular(float v);
 	void reset_vxl_lighting();
 	// Bumped on every lighting setter; used as a cheap cache key by the VXL
 	// splat cache so changing lighting invalidates without explicit flushes.
