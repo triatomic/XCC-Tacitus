@@ -113,21 +113,20 @@ void CSearchInPaneDlg::OnFind()
 
 void CSearchInPaneDlg::apply_sort()
 {
-	auto cmp = [this](const t_match& a, const t_match& b) {
-		bool less = false;
+	auto key_less = [this](const t_match& a, const t_match& b) {
 		switch (m_sort_column)
 		{
 		case 1:
-			less = a.size_bytes < b.size_bytes;
-			if (a.size_bytes == b.size_bytes)
-				less = _stricmp(a.name.c_str(), b.name.c_str()) < 0;
-			break;
+			if (a.size_bytes != b.size_bytes)
+				return a.size_bytes < b.size_bytes;
+			return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
 		case 0:
 		default:
-			less = _stricmp(a.name.c_str(), b.name.c_str()) < 0;
-			break;
+			return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
 		}
-		return m_sort_descending ? !less : less;
+	};
+	auto cmp = [this, &key_less](const t_match& a, const t_match& b) {
+		return m_sort_descending ? key_less(b, a) : key_less(a, b);
 	};
 	std::stable_sort(m_matches.begin(), m_matches.end(), cmp);
 }

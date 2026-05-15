@@ -262,29 +262,33 @@ void CSearchFileDlg::apply_sort()
 	// Group view sorts items within each group; group ordering itself is
 	// fixed by group_id (search-encounter order). Primary key is group_id
 	// so same-group rows stay clustered, then user-selected column.
-	auto cmp = [this](int ka, int kb) {
+	auto key_less = [this](const t_map_entry& a, const t_map_entry& b) {
+		switch (m_sort_column)
+		{
+		case 1: // Size
+		{
+			if (a.size_bytes != b.size_bytes)
+				return a.size_bytes < b.size_bytes;
+			return _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
+		}
+		case 2: // Path
+		{
+			int c = _stricmp(a.top_mix_path.c_str(), b.top_mix_path.c_str());
+			if (c != 0)
+				return c < 0;
+			return _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
+		}
+		case 0: // File
+		default:
+			return _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
+		}
+	};
+	auto cmp = [this, &key_less](int ka, int kb) {
 		const t_map_entry& a = m_map.find(ka)->second;
 		const t_map_entry& b = m_map.find(kb)->second;
 		if (a.group_id != b.group_id)
 			return a.group_id < b.group_id;
-		bool less = false;
-		switch (m_sort_column)
-		{
-		case 0: // File
-			less = _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
-			break;
-		case 1: // Size
-			less = a.size_bytes < b.size_bytes;
-			if (a.size_bytes == b.size_bytes)
-				less = _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
-			break;
-		case 2: // Path
-			less = _stricmp(a.top_mix_path.c_str(), b.top_mix_path.c_str()) < 0;
-			if (!less && _stricmp(a.top_mix_path.c_str(), b.top_mix_path.c_str()) == 0)
-				less = _stricmp(file_part(a.name).c_str(), file_part(b.name).c_str()) < 0;
-			break;
-		}
-		return m_sort_descending ? !less : less;
+		return m_sort_descending ? key_less(b, a) : key_less(a, b);
 	};
 	std::stable_sort(m_order.begin(), m_order.end(), cmp);
 }
