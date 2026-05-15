@@ -471,7 +471,22 @@ double Cvqa_file::frame_rate()
 		{
 			if (saw_video)
 				break;
+			// Reset the sample counter at the first video chunk. The audio
+			// that precedes VQFR0 (FINF prefetch + first chunk's worth of
+			// samples in some VQAs) doesn't represent a single frame's
+			// worth — RA1 VQAs stuff a multi-second audio prefetch there.
+			// Counting it inflates samples_per_frame, which makes the
+			// reported fps absurdly low (1-2 fps), and that drives the
+			// dialog timer at ~half-second intervals. We want only the
+			// audio between VQFR0 and VQFR1.
+			samples = 0;
 			saw_video = true;
+			skip_chunk();
+			continue;
+		}
+		if (!saw_video)
+		{
+			// Pre-VQFR0 audio is the prefetch buffer; skip without counting.
 			skip_chunk();
 			continue;
 		}

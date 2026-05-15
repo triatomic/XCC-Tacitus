@@ -336,11 +336,23 @@ int Cmix_file::post_open()
 				mix_cache::set_entry(crc, std::move(e));
 			}
 		}
-		if (m_is_encrypted && get_c_files())
+		if (get_c_files())
 		{
-			// Body is ciphertext — can't probe content. Classify by filename
-			// extension from the mix database so palette auto-load still works.
+			// Extension-driven classifier. Runs for three cases:
+			//   1. Encrypted body — content probe is impossible.
+			//   2. Streamed/large MIX where can_probe was false — m_index_ft
+			//      is still empty after the probe block, so every entry
+			//      otherwise reports ft_unknown via mix_file.h:50 fallback.
+			//   3. Probe ran but Cxxx_file::is_valid() rejected the bytes
+			//      (e.g. RA1 .wsa files whose trailing-offset check is too
+			//      strict, .icn/.fnt/.urb whose probes don't exist). Fill in
+			//      only entries that came back ft_unknown — don't override
+			//      a real probe match.
 			m_index_ft.resize(get_c_files(), ft_unknown);
+			// SHP/TMP variant depends on the game family. TD/RA1 use the
+			// classic SHP (Cshp_file) and TMP (Ctmp_file/Ctmp_ra_file)
+			// formats; TS/RA2/YR use the iso SHP_TS and TMP_TS family.
+			const bool is_td_ra = (m_game == game_td || m_game == game_ra);
 			for (int i = 0; i < get_c_files(); i++)
 			{
 				string name = mix_database::get_name(m_game, get_id(i));
@@ -349,17 +361,37 @@ int Cmix_file::post_open()
 				auto dot = name.rfind('.');
 				string ext = dot != string::npos ? name.substr(dot) : string();
 				for (auto& c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+				// Extensions whose content probes are known to misclassify
+				// (.urb and .icn both share enough header shape with SHP/TMP
+				// that Cshp_file::is_valid / Ctmp_file::is_valid return true
+				// on the wrong variant). Force these to the filename-derived
+				// type even when the probe produced something.
+				const bool force_ext = (ext == ".urb" || ext == ".icn" || ext == ".pkt" || ext == ".cps" || ext == ".eng" || ext == ".fre" || ext == ".ger" || ext == ".tem");
+				if (!force_ext && m_index_ft[i] != ft_unknown)
+					continue;
 				if (ext == ".pal") m_index_ft[i] = ft_pal;
 				else if (ext == ".mix") m_index_ft[i] = ft_mix;
-				else if (ext == ".ini" || ext == ".map") m_index_ft[i] = ft_ini;
-				else if (ext == ".shp") m_index_ft[i] = ft_shp_ts;
+				else if (ext == ".ini" || ext == ".map" || ext == ".pkt") m_index_ft[i] = ft_ini;
+				else if (ext == ".cps") m_index_ft[i] = ft_cps;
+				else if (ext == ".eng" || ext == ".fre" || ext == ".ger") m_index_ft[i] = ft_st;
+				else if (ext == ".shp") m_index_ft[i] = is_td_ra ? ft_shp : ft_shp_ts;
 				else if (ext == ".vxl") m_index_ft[i] = ft_vxl;
 				else if (ext == ".hva") m_index_ft[i] = ft_hva;
 				else if (ext == ".aud") m_index_ft[i] = ft_aud;
 				else if (ext == ".vqa") m_index_ft[i] = ft_vqa;
 				else if (ext == ".csf") m_index_ft[i] = ft_csf;
 				else if (ext == ".pcx") m_index_ft[i] = ft_pcx;
-				else if (ext == ".tmp") m_index_ft[i] = ft_tmp_ts;
+				else if (ext == ".tmp") m_index_ft[i] = m_game == game_td ? ft_tmp : (m_game == game_ra ? ft_tmp_ra : ft_tmp_ts);
+				else if (ext == ".wsa") m_index_ft[i] = ft_wsa;
+				else if (ext == ".fnt") m_index_ft[i] = ft_fnt;
+				else if (ext == ".icn") m_index_ft[i] = ft_tmp;
+				else if (ext == ".urb" || ext == ".tem") m_index_ft[i] = ft_tmp_ra;
+				else if (ext == ".vpl") m_index_ft[i] = ft_vpl;
+				else if (ext == ".voc") m_index_ft[i] = ft_voc;
+				else if (ext == ".wav") m_index_ft[i] = ft_wav;
+				else if (ext == ".mp3") m_index_ft[i] = ft_mp3;
+				else if (ext == ".ogg") m_index_ft[i] = ft_ogg;
+				else if (ext == ".bin") m_index_ft[i] = ft_bin;
 			}
 		}
 	}

@@ -14,6 +14,8 @@ Cdlg_shp_viewer::Cdlg_shp_viewer(CWnd* pParent /*=NULL*/)
 	, m_av_fps(0)
 	, m_av_started(false)
 	, m_paused(false)
+	, m_fps_value(15)
+	, m_updating_fps(false)
 {
 	//{{AFX_DATA_INIT(Cdlg_shp_viewer)
 	//}}AFX_DATA_INIT
@@ -26,6 +28,8 @@ void Cdlg_shp_viewer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER, m_slider);
 	DDX_Control(pDX, IDC_IMAGE, m_image);
 	DDX_Control(pDX, IDC_DURATION, m_duration);
+	DDX_Control(pDX, IDC_SHPVIEW_FPS_EDIT, m_fps_edit);
+	DDX_Control(pDX, IDC_SHPVIEW_FPS_SPIN, m_fps_spin);
 	DDX_Text(pDX, IDC_FRAME, m_index);
 	//}}AFX_DATA_MAP
 }
@@ -35,8 +39,10 @@ BEGIN_MESSAGE_MAP(Cdlg_shp_viewer, ETSLayoutDialog)
 	ON_WM_TIMER()
 	ON_BN_CLICKED(IDC_PLAY, OnPlay)
 	ON_WM_DESTROY()
+	ON_EN_CHANGE(IDC_SHPVIEW_FPS_EDIT, OnFpsChange)
 	//}}AFX_MSG_MAP
 	ON_WM_CTLCOLOR()
+	ON_NOTIFY(UDN_DELTAPOS, IDC_SHPVIEW_FPS_SPIN, &Cdlg_shp_viewer::OnDeltaposShpviewFpsSpin)
 END_MESSAGE_MAP()
 
 HBRUSH Cdlg_shp_viewer::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -120,6 +126,9 @@ BOOL Cdlg_shp_viewer::OnInitDialog()
 			<< item(IDC_FRAME, NORESIZE)
 			<< item(IDC_DURATION, NORESIZE)
 			<< item(IDC_SLIDER, GREEDY)
+			<< item(IDC_SHPVIEW_FPS_LABEL, NORESIZE)
+			<< item(IDC_SHPVIEW_FPS_EDIT, NORESIZE)
+			<< item(IDC_SHPVIEW_FPS_SPIN, NORESIZE)
 			<< item(IDC_PLAY, NORESIZE)
 			<< item(IDOK, NORESIZE)
 			);
@@ -129,22 +138,34 @@ BOOL Cdlg_shp_viewer::OnInitDialog()
 	show_frame();
 	update_duration_label();
 	m_last_access = 0;
-	// VQA: drive the timer at the source frame rate so video and audio
-	// stay aligned. Non-VQA decoders (SHP/WSA) keep the legacy 100 ms
-	// poll + 15 s auto-advance behaviour.
-	const UINT period = (m_av_fps > 0)
-		? static_cast<UINT>(1000.0 / m_av_fps + 0.5)
-		: 100;
-	m_timer_id = SetTimer(1, period > 0 ? period : 1, NULL);
+	// Seed FPS: VQA uses the file's declared frame rate; SHP/WSA defaults
+	// to 15 (RA1/TD/TS sprite convention). User can edit either.
+	const int seed = (m_av_fps > 0)
+		? std::max(1, static_cast<int>(m_av_fps + 0.5))
+		: 15;
+	m_fps_value = seed;
+	m_fps_spin.SetBuddy(&m_fps_edit);
+	m_fps_spin.SetRange(1, 120);
+	m_updating_fps = true;
+	{
+		char buf[16];
+		wsprintfA(buf, "%d", m_fps_value);
+		m_fps_edit.SetWindowText(buf);
+	}
+	m_fps_spin.SetPos(m_fps_value);
+	m_updating_fps = false;
+	m_timer_id = SetTimer(1, 1000 / std::max(1, m_fps_value), NULL);
 	theme::apply_dialog(GetSafeHwnd());
-	// Start audio if we were handed a pre-decoded WAV buffer.
+	// Start audio if we were handed a pre-decoded WAV buffer. Button text
+	// reflects current transport state: animation always starts playing,
+	// so "Pause" is the action label.
 	if (m_av_wav.size() && GetMainFrame() && GetMainFrame()->get_ds())
 	{
 		xap_play(GetMainFrame()->get_ds(), m_av_wav, m_av_name);
 		m_av_started = true;
-		if (CWnd* btn = GetDlgItem(IDC_PLAY))
-			btn->SetWindowText("Pause");
 	}
+	if (CWnd* btn = GetDlgItem(IDC_PLAY))
+		btn->SetWindowText("Pause");
 	return true;
 }
 
@@ -176,15 +197,16 @@ void Cdlg_shp_viewer::OnTimer(UINT nIDEvent)
 			if (m_av_started && m_decoder->cf() > 1)
 				xap_seek(static_cast<double>(frame) / (m_decoder->cf() - 1));
 		}
-		else if (m_av_fps > 0)
+		else if (m_paused)
 		{
-			// VQA: drive video frame off audio playback position so we don't
-			// drift on coarse timer ticks. xap_get_progress returns 0..1 of
-			// the WAV buffer; the buffer was decoded at the file's frame
-			// rate, so progress * cf is the target frame. Falls back to a
-			// tick-based advance when audio is paused or unavailable.
-			if (m_paused)
-				return;
+			return;
+		}
+		else if (m_av_started && m_av_fps > 0)
+		{
+			// VQA with audio: drive video frame off audio playback position
+			// so the two stay aligned regardless of the user-chosen timer
+			// rate. xap_get_progress returns 0..1 of the WAV; multiplying
+			// by cf gives the target video frame.
 			int target = m_frame;
 			const double p = xap_get_progress();
 			if (p >= 0)
@@ -197,14 +219,14 @@ void Cdlg_shp_viewer::OnTimer(UINT nIDEvent)
 				return;
 			m_frame = target;
 		}
-		else if (t - m_last_access > 15)
-		{
-			// SHP/WSA legacy behaviour: auto-advance after 15 s of idle.
-			m_frame++;
-			m_frame %= m_decoder->cf();
-		}
 		else
-			return;
+		{
+			// SHP/WSA (or VQA without audio): advance one frame per tick at
+			// the user-chosen FPS, wrap at the end. No more 15 s idle wait.
+			m_frame++;
+			if (m_frame >= m_decoder->cf())
+				m_frame = 0;
+		}
 		show_frame();
 	}
 	else
@@ -243,15 +265,11 @@ void Cdlg_shp_viewer::show_frame()
 
 void Cdlg_shp_viewer::OnPlay()
 {
-	// SHP/WSA: legacy "kick the 15 s idle auto-advance" behaviour.
-	if (m_av_fps <= 0)
-	{
-		m_last_access = 0;
-		return;
-	}
-	// VQA: real pause/resume. Pause both the audio (DirectSound buffer
-	// stays alive at its current byte offset) and the video advance in
-	// OnTimer. Slider scrubbing still works while paused.
+	// Real pause/resume for everything. SHP/WSA: the OnTimer auto-advance
+	// branch checks m_paused first and returns. VQA: also pause the audio
+	// so the DirectSound buffer stays alive at its current byte offset and
+	// the next tick's xap_get_progress doesn't snap video back to where
+	// audio is. Slider scrubbing still works while paused.
 	m_paused = !m_paused;
 	if (m_av_started)
 	{
@@ -262,4 +280,35 @@ void Cdlg_shp_viewer::OnPlay()
 	}
 	if (CWnd* btn = GetDlgItem(IDC_PLAY))
 		btn->SetWindowText(m_paused ? "Play" : "Pause");
+}
+
+void Cdlg_shp_viewer::OnFpsChange()
+{
+	if (m_updating_fps || !m_fps_edit.GetSafeHwnd())
+		return;
+	CString s;
+	m_fps_edit.GetWindowText(s);
+	if (s.IsEmpty())
+		return;
+	int v = atoi(s);
+	if (v < 1) v = 1;
+	if (v > 120) v = 120;
+	if (v == m_fps_value)
+		return;
+	m_fps_value = v;
+	restart_timer();
+}
+
+void Cdlg_shp_viewer::restart_timer()
+{
+	if (m_timer_id)
+		KillTimer(m_timer_id);
+	m_timer_id = SetTimer(1, 1000 / std::max(1, m_fps_value), NULL);
+}
+
+void Cdlg_shp_viewer::OnDeltaposShpviewFpsSpin(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	LPNMUPDOWN pNMUpDown = reinterpret_cast<LPNMUPDOWN>(pNMHDR);
+	// TODO: Add your control notification handler code here
+	*pResult = 0;
 }

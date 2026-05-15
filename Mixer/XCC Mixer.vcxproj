@@ -279,6 +279,7 @@
     <ClInclude Include="XSTE_edit_dlg.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\data\global mix database.dat" />
     <None Include="res\XCC Mixer.ico" />
     <None Include="res\XCC Mixer.rc2" />
     <None Include="res\XCC MixerDoc.ico" />

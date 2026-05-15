@@ -23,6 +23,8 @@ public:
 	CSliderCtrl	m_slider;
 	CStatic	m_image;
 	CStatic m_duration;
+	CEdit   m_fps_edit;
+	CSpinButtonCtrl m_fps_spin;
 	int		m_index;
 	//}}AFX_DATA
 
@@ -40,6 +42,7 @@ protected:
 	afx_msg void OnTimer(UINT nIDEvent);
 	afx_msg void OnPlay();
 	afx_msg void OnDestroy();
+	afx_msg void OnFpsChange();
 	//}}AFX_MSG
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
@@ -55,4 +58,9 @@ private:
 	std::string m_av_name;
 	bool m_av_started;
 	bool m_paused;
+	int m_fps_value;
+	bool m_updating_fps;
+	void restart_timer();
+public:
+	afx_msg void OnDeltaposShpviewFpsSpin(NMHDR* pNMHDR, LRESULT* pResult);
 };

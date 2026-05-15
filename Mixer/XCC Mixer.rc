@@ -67,13 +67,12 @@ IDR_MAINFRAME           ICON                    "res\\XCC Mixer.ico"
 
 IDR_XCCMIXTYPE          ICON                    "res\\XCC MixerDoc.ico"
 
+
 /////////////////////////////////////////////////////////////////////////////
 //
-// Embedded fallback CRC->name database. Used by InitInstance when the
-// on-disk <data dir>\global mix database.dat is missing so the listview
-// shows real filenames instead of 8-hex-digit IDs even on a fresh
-// install. User-extended on-disk dat (when present) still wins.
+// RCDATA
 //
+
 GLOBAL_MIX_DATABASE     RCDATA                  "..\\data\\global mix database.dat"
 
 
@@ -86,155 +85,155 @@ IDR_MAINFRAME MENU
 BEGIN
     POPUP "&File"
     BEGIN
-        MENUITEM "&New Archive...\tCtrl+N",							ID_FILE_NEW
-        MENUITEM "&Open...\tCtrl+O",										ID_FILE_OPEN
-        MENUITEM "Close\tBackspace",										ID_FILE_CLOSE
-        MENUITEM "Find here...\tCtrl+F",								ID_FILE_SEARCH_IN_MIX
-        MENUITEM "Find everywhere...\tCtrl+Shift+F",		ID_FILE_SEARCH
+        MENUITEM "&New Archive...\tCtrl+N",     ID_FILE_NEW
+        MENUITEM "&Open...\tCtrl+O",            ID_FILE_OPEN
+        MENUITEM "Close\tBackspace",            ID_FILE_CLOSE
+        MENUITEM "Find here...\tCtrl+F",        ID_FILE_SEARCH_IN_MIX
+        MENUITEM "Find everywhere...\tCtrl+Shift+F", ID_FILE_SEARCH
         POPUP "&Found"
         BEGIN
-            MENUITEM "Update",													ID_FILE_FOUND_UPDATE
+            MENUITEM "Update",                      ID_FILE_FOUND_UPDATE
         END
         MENUITEM SEPARATOR
-        MENUITEM "E&xit",																ID_APP_EXIT
+        MENUITEM "E&xit",                       ID_APP_EXIT
     END
     POPUP "&Conversion"
     BEGIN
-        MENUITEM "Combine Shadows",											ID_CONVERSION_COMBINE_SHADOWS
-        MENUITEM "Enable Compression",									ID_CONVERSION_ENABLE_COMPRESSION
-        MENUITEM "Fix Shadows",													ID_CONVERSION_FIX_SHADOWS
-        MENUITEM "Split Shadows",												ID_CONVERSION_SPLIT_SHADOWS
+        MENUITEM "Combine Shadows",             ID_CONVERSION_COMBINE_SHADOWS
+        MENUITEM "Enable Compression",          ID_CONVERSION_ENABLE_COMPRESSION
+        MENUITEM "Fix Shadows",                 ID_CONVERSION_FIX_SHADOWS
+        MENUITEM "Split Shadows",               ID_CONVERSION_SPLIT_SHADOWS
     END
     POPUP "&View"
     BEGIN
         POPUP "&Game"
         BEGIN
-            MENUITEM "Tiberium Dawn",										ID_VIEW_GAME_TD
-            MENUITEM "Red Alert",												ID_VIEW_GAME_RA
-            MENUITEM "Tiberian Sun",										ID_VIEW_GAME_TS
-            MENUITEM "Auto",														ID_VIEW_GAME_AUTO
+            MENUITEM "Tiberium Dawn",               ID_VIEW_GAME_TD
+            MENUITEM "Red Alert",                   ID_VIEW_GAME_RA
+            MENUITEM "Tiberian Sun",                ID_VIEW_GAME_TS
+            MENUITEM "Auto",                        ID_VIEW_GAME_AUTO
         END
         POPUP "&Palette"
         BEGIN
-            MENUITEM "Update",													ID_VIEW_PALETTE_UPDATE
-            MENUITEM "Auto",														ID_VIEW_PALETTE_AUTO
-            MENUITEM "Auto select\tCtrl+Q",							ID_VIEW_PALETTE_AUTO_SELECT
-            MENUITEM "&Select...\tCtrl+R",							ID_VIEW_PALETTE_SELECT
-            MENUITEM "Previous\tCtrl+[",								ID_VIEW_PALETTE_PREV_SIBLING
-            MENUITEM "Next\tCtrl+]",										ID_VIEW_PALETTE_NEXT_SIBLING
-            MENUITEM "Convert from TD",									ID_VIEW_PALETTE_CONVERT_FROM_TD
-            MENUITEM "Convert from RA",									ID_VIEW_PALETTE_CONVERT_FROM_RA
-            MENUITEM "Use for Conversion",							ID_VIEW_PALETTE_USE_FOR_CONVERSION
+            MENUITEM "Update",                      ID_VIEW_PALETTE_UPDATE
+            MENUITEM "Auto",                        ID_VIEW_PALETTE_AUTO
+            MENUITEM "Auto select\tCtrl+Q",         ID_VIEW_PALETTE_AUTO_SELECT
+            MENUITEM "&Select...\tCtrl+R",          ID_VIEW_PALETTE_SELECT
+            MENUITEM "Previous\tCtrl+[",            ID_VIEW_PALETTE_PREV_SIBLING
+            MENUITEM "Next\tCtrl+]",                ID_VIEW_PALETTE_NEXT_SIBLING
+            MENUITEM "Convert from TD",             ID_VIEW_PALETTE_CONVERT_FROM_TD
+            MENUITEM "Convert from RA",             ID_VIEW_PALETTE_CONVERT_FROM_RA
+            MENUITEM "Use for Conversion",          ID_VIEW_PALETTE_USE_FOR_CONVERSION
         END
         POPUP "&Voxel"
         BEGIN
-            MENUITEM "&Colors",													ID_VIEW_VOXEL_NORMAL
-            MENUITEM "Surface &Normals",								ID_VIEW_VOXEL_SURFACE_NORMALS
-            MENUITEM "&Depth information",							ID_VIEW_VOXEL_DEPTH_INFORMATION
+            MENUITEM "&Colors",                     ID_VIEW_VOXEL_NORMAL
+            MENUITEM "Surface &Normals",            ID_VIEW_VOXEL_SURFACE_NORMALS
+            MENUITEM "&Depth information",          ID_VIEW_VOXEL_DEPTH_INFORMATION
         END
-        MENUITEM "Directories...",											ID_VIEW_DIRECTORIES
-        MENUITEM "&Report",															ID_VIEW_REPORT
+        MENUITEM "Directories...",              ID_VIEW_DIRECTORIES
+        MENUITEM "&Report",                     ID_VIEW_REPORT
     END
     POPUP "&Launch"
     BEGIN
         POPUP "XCC &Sound Editor"
         BEGIN
-            MENUITEM "&Red Alert 2",										ID_LAUNCH_XSE_RA2
-            MENUITEM "Red Alert 2: &Yuri's Revenge",		ID_LAUNCH_XSE_RA2_YR
+            MENUITEM "&Red Alert 2",                ID_LAUNCH_XSE_RA2
+            MENUITEM "Red Alert 2: &Yuri's Revenge", ID_LAUNCH_XSE_RA2_YR
             MENUITEM SEPARATOR
-            MENUITEM "&Open...",												ID_LAUNCH_XSE_OPEN
+            MENUITEM "&Open...",                    ID_LAUNCH_XSE_OPEN
         END
         POPUP "XCC &String Table Editor"
         BEGIN
-            MENUITEM "&Red Alert 2",										ID_LAUNCH_XSTE_RA2
-            MENUITEM "Red Alert 2: &Yuri's Revenge",		ID_LAUNCH_XSTE_RA2_YR
-            MENUITEM "&Generals",												ID_LAUNCH_XSTE_GR
-            MENUITEM "Generals: &Zero Hour",						ID_LAUNCH_XSTE_GR_ZH
+            MENUITEM "&Red Alert 2",                ID_LAUNCH_XSTE_RA2
+            MENUITEM "Red Alert 2: &Yuri's Revenge", ID_LAUNCH_XSTE_RA2_YR
+            MENUITEM "&Generals",                   ID_LAUNCH_XSTE_GR
+            MENUITEM "Generals: &Zero Hour",        ID_LAUNCH_XSTE_GR_ZH
             MENUITEM SEPARATOR
-            MENUITEM "&Open...",												ID_LAUNCH_XSTE_OPEN
+            MENUITEM "&Open...",                    ID_LAUNCH_XSTE_OPEN
         END
         POPUP "XCC &Theme Writer"
         BEGIN
-            MENUITEM "&Tiberian Sun",										ID_LAUNCH_XTW_TS
-            MENUITEM "&Red Alert 2",										ID_LAUNCH_XTW_RA2
-            MENUITEM "&Red Alert 2: &Yuri's Revenge",   ID_LAUNCH_XTW_RA2_YR
+            MENUITEM "&Tiberian Sun",               ID_LAUNCH_XTW_TS
+            MENUITEM "&Red Alert 2",                ID_LAUNCH_XTW_RA2
+            MENUITEM "&Red Alert 2: &Yuri's Revenge", ID_LAUNCH_XTW_RA2_YR
         END
     END
     POPUP "&Theme"
     BEGIN
         POPUP "&Color"
         BEGIN
-            MENUITEM "&Light Mode\tCtrl+1",             ID_THEME_LIGHT
-            MENUITEM "&Dark Mode\tCtrl+2",              ID_THEME_DARK
-            MENUITEM "&System Default",                 ID_THEME_SYSTEM
+            MENUITEM "&Light Mode\tCtrl+1",         ID_THEME_LIGHT
+            MENUITEM "&Dark Mode\tCtrl+2",          ID_THEME_DARK
+            MENUITEM "&System Default",             ID_THEME_SYSTEM
         END
         POPUP "&Pane Layout"
         BEGIN
-            MENUITEM "&One Pane",                       ID_THEME_PANES_ONE
-            MENUITEM "&Two Panes",                      ID_THEME_PANES_TWO
+            MENUITEM "&One Pane",                   ID_THEME_PANES_ONE
+            MENUITEM "&Two Panes",                  ID_THEME_PANES_TWO
         END
         POPUP "&Size Format"
         BEGIN
-            MENUITEM "&Auto",                           ID_THEME_SIZE_FORMAT_AUTO
-            MENUITEM "&Bytes",                          ID_THEME_SIZE_FORMAT_BYTES
+            MENUITEM "&Auto",                       ID_THEME_SIZE_FORMAT_AUTO
+            MENUITEM "&Bytes",                      ID_THEME_SIZE_FORMAT_BYTES
         END
-        MENUITEM "Show &Grid Lines",                    ID_THEME_SHOW_GRID
+        MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
         MENUITEM SEPARATOR
         POPUP "&Image"
         BEGIN
-            MENUITEM "&Alpha Color...",                 ID_THEME_ALPHA_COLOR
-            MENUITEM "&Use Checkerboard",               ID_THEME_USE_CHECKERBOARD
-            MENUITEM "SHP &Transparency",               ID_THEME_SHP_TRANSPARENCY
+            MENUITEM "&Alpha Color...",             ID_THEME_ALPHA_COLOR
+            MENUITEM "&Use Checkerboard",           ID_THEME_USE_CHECKERBOARD
+            MENUITEM "SHP &Transparency",           ID_THEME_SHP_TRANSPARENCY
         END
     END
     POPUP "&Graphics"
     BEGIN
         POPUP "&Image Interpolation"
         BEGIN
-            MENUITEM "&Nearest (Sharp Pixels)",         ID_THEME_INTERP_NEAREST
-            MENUITEM "&Bilinear",                       ID_THEME_INTERP_BILINEAR
-            MENUITEM "B&icubic",                        ID_THEME_INTERP_BICUBIC
-            MENUITEM "&Lanczos-2",                      ID_THEME_INTERP_LANCZOS
+            MENUITEM "&Nearest (Sharp Pixels)",     ID_THEME_INTERP_NEAREST
+            MENUITEM "&Bilinear",                   ID_THEME_INTERP_BILINEAR
+            MENUITEM "B&icubic",                    ID_THEME_INTERP_BICUBIC
+            MENUITEM "&Lanczos-2",                  ID_THEME_INTERP_LANCZOS
         END
         POPUP "S&harpen"
         BEGIN
-            MENUITEM "&Off",                            ID_THEME_SHARPEN_0
-            MENUITEM "&25%",                            ID_THEME_SHARPEN_25
-            MENUITEM "&50%",                            ID_THEME_SHARPEN_50
-            MENUITEM "&75%",                            ID_THEME_SHARPEN_75
-            MENUITEM "&100%",                           ID_THEME_SHARPEN_100
+            MENUITEM "&Off",                        ID_THEME_SHARPEN_0
+            MENUITEM "&25%",                        ID_THEME_SHARPEN_25
+            MENUITEM "&50%",                        ID_THEME_SHARPEN_50
+            MENUITEM "&75%",                        ID_THEME_SHARPEN_75
+            MENUITEM "&100%",                       ID_THEME_SHARPEN_100
         END
         POPUP "&Frame Rate Cap"
         BEGIN
-            MENUITEM "&30 fps",                         ID_THEME_FPS_30
-            MENUITEM "&60 fps",                         ID_THEME_FPS_60
-            MENUITEM "1&20 fps",                        ID_THEME_FPS_120
-            MENUITEM "&Unlimited (soft cap 1000)",      ID_THEME_FPS_UNLIMITED
-            MENUITEM "&Custom...",                      ID_THEME_FPS_CUSTOM
+            MENUITEM "&30 fps",                     ID_THEME_FPS_30
+            MENUITEM "&60 fps",                     ID_THEME_FPS_60
+            MENUITEM "1&20 fps",                    ID_THEME_FPS_120
+            MENUITEM "&Unlimited (soft cap 1000)",  ID_THEME_FPS_UNLIMITED
+            MENUITEM "&Custom...",                  ID_THEME_FPS_CUSTOM
         END
         POPUP "&VXL Supersampling"
         BEGIN
-            MENUITEM "&Off",                            ID_THEME_VXL_SS_OFF
-            MENUITEM "&2x",                             ID_THEME_VXL_SS_2
-            MENUITEM "&4x",                             ID_THEME_VXL_SS_4
-            MENUITEM "&8x",                             ID_THEME_VXL_SS_8
-            MENUITEM "1&6x",                            ID_THEME_VXL_SS_16
+            MENUITEM "&Off",                        ID_THEME_VXL_SS_OFF
+            MENUITEM "&2x",                         ID_THEME_VXL_SS_2
+            MENUITEM "&4x",                         ID_THEME_VXL_SS_4
+            MENUITEM "&8x",                         ID_THEME_VXL_SS_8
+            MENUITEM "1&6x",                        ID_THEME_VXL_SS_16
         END
-        MENUITEM "VXL &Shading",                        ID_THEME_VXL_SHADING
-        MENUITEM "VXL &Lighting...\tCtrl+L",            ID_THEME_VXL_LIGHTING
-        MENUITEM "&Limit VXL CPU",                      ID_THEME_LIMIT_VXL_CPU
-        MENUITEM "Load &Full Hierarchy",                ID_THEME_VXL_FULL_HIER
+        MENUITEM "VXL &Shading",                ID_THEME_VXL_SHADING
+        MENUITEM "VXL &Lighting...\tCtrl+L",    ID_THEME_VXL_LIGHTING
+        MENUITEM "&Limit VXL CPU",              ID_THEME_LIMIT_VXL_CPU
+        MENUITEM "Load &Full Hierarchy",        ID_THEME_VXL_FULL_HIER
     END
     POPUP "&Configure"
     BEGIN
-        MENUITEM "&Keybinds...",                        ID_KEYBINDS_CONFIGURE
+        MENUITEM "&Keybinds...",                ID_KEYBINDS_CONFIGURE
         MENUITEM SEPARATOR
-        MENUITEM "Use &External Programs",              ID_THEME_USE_EXTERNAL_PROGRAMS
-        MENUITEM "&Parallel Extract",                   ID_THEME_PARALLEL_EXTRACT
+        MENUITEM "Use &External Programs",      ID_THEME_USE_EXTERNAL_PROGRAMS
+        MENUITEM "&Parallel Extract",           ID_THEME_PARALLEL_EXTRACT
         POPUP "&Settings Directory"
         BEGIN
-            MENUITEM "&AppData",                        ID_SETTINGS_DIR_APPDATA
-            MENUITEM "Next to &Exe",                    ID_SETTINGS_DIR_EXE
+            MENUITEM "&AppData",                    ID_SETTINGS_DIR_APPDATA
+            MENUITEM "Next to &Exe",                ID_SETTINGS_DIR_EXE
         END
     END
 END
@@ -243,58 +242,58 @@ CG_IDR_POPUP_MIX_VIEW MENU
 BEGIN
     POPUP "_POPUP_"
     BEGIN
-        MENUITEM "Open\tEnter",													ID_POPUP_OPEN
-        MENUITEM "Open &With...",												ID_POPUP_OPEN_WITH
-        MENUITEM "&Explore...",													ID_POPUP_EXPLORE
-				MENUITEM "&New Archive...",											ID_FILE_NEW
+        MENUITEM "Open\tEnter",                 ID_POPUP_OPEN
+        MENUITEM "Open &With...",               ID_POPUP_OPEN_WITH
+        MENUITEM "&Explore...",                 ID_POPUP_EXPLORE
+        MENUITEM "&New Archive...",             ID_FILE_NEW
         MENUITEM SEPARATOR
         POPUP "Clipboard"
         BEGIN
-            MENUITEM "Copy\tCtrl+C",										ID_EDIT_COPY
-            MENUITEM "Paste as JPEG",										ID_POPUP_CLIPBOARD_PASTE_AS_JPEG
-            MENUITEM "Paste as PCX",										ID_POPUP_CLIPBOARD_PASTE_AS_PCX
-            MENUITEM "Paste as PNG",										ID_POPUP_CLIPBOARD_PASTE_AS_PNG
-            MENUITEM "Paste as SHP (TS)",								ID_POPUP_CLIPBOARD_PASTE_AS_SHP_TS
-            MENUITEM "Paste as TGA",										ID_POPUP_CLIPBOARD_PASTE_AS_TGA
+            MENUITEM "Copy\tCtrl+C",                ID_EDIT_COPY
+            MENUITEM "Paste as JPEG",               ID_POPUP_CLIPBOARD_PASTE_AS_JPEG
+            MENUITEM "Paste as PCX",                ID_POPUP_CLIPBOARD_PASTE_AS_PCX
+            MENUITEM "Paste as PNG",                ID_POPUP_CLIPBOARD_PASTE_AS_PNG
+            MENUITEM "Paste as SHP (TS)",           ID_POPUP_CLIPBOARD_PASTE_AS_SHP_TS
+            MENUITEM "Paste as TGA",                ID_POPUP_CLIPBOARD_PASTE_AS_TGA
         END
-        MENUITEM "&Extract...",													ID_POPUP_EXTRACT
-        MENUITEM "&Batch Extract...",										ID_POPUP_BATCH_EXTRACT
-        MENUITEM "Batch Extract (preserve)...",					ID_POPUP_BATCH_EXTRACT_PRESERVE
-        MENUITEM "Copy &Name",													ID_POPUP_COPY_NAME
-        MENUITEM "Copy",																ID_POPUP_COPY
+        MENUITEM "&Extract...",                 ID_POPUP_EXTRACT
+        MENUITEM "&Batch Extract...",           ID_POPUP_BATCH_EXTRACT
+        MENUITEM "Batch Extract (preserve)...", ID_POPUP_BATCH_EXTRACT_PRESERVE
+        MENUITEM "Copy &Name",                  ID_POPUP_COPY_NAME
+        MENUITEM "Copy",                        ID_POPUP_COPY
         POPUP "Copy as..."
         BEGIN
-            MENUITEM "Copy as AUD",											ID_POPUP_COPY_AS_AUD
-            MENUITEM "Copy as AVI",											ID_POPUP_COPY_AS_AVI
-            MENUITEM "Copy as CPS",											ID_POPUP_COPY_AS_CPS
-            MENUITEM "Copy as CSV",											ID_POPUP_COPY_AS_CSV
-            MENUITEM "Copy as HTML",										ID_POPUP_COPY_AS_HTML
-            MENUITEM "Copy as HVA",											ID_POPUP_COPY_AS_HVA
-            MENUITEM "Copy as JPEG (Single)",						ID_POPUP_COPY_AS_JPEG_SINGLE
-            MENUITEM "Copy as JPEG",										ID_POPUP_COPY_AS_JPEG
-            MENUITEM "Copy as MAP (TS) Preview",				ID_POPUP_COPY_AS_MAP_TS_PREVIEW
-            MENUITEM "Copy as PAL",											ID_POPUP_COPY_AS_PAL
-            MENUITEM "Copy as PAL (JASC)",							ID_POPUP_COPY_AS_PAL_JASC
-            MENUITEM "Copy as PCX (Single)",						ID_POPUP_COPY_AS_PCX_SINGLE
-            MENUITEM "Copy as PCX",											ID_POPUP_COPY_AS_PCX
-            MENUITEM "Copy as PNG (Single)",						ID_POPUP_COPY_AS_PNG_SINGLE
-            MENUITEM "Copy as PNG",											ID_POPUP_COPY_AS_PNG
-            MENUITEM "Copy as SHP (TD)",								ID_POPUP_COPY_AS_SHP
-            MENUITEM "Copy as SHP (TS)",								ID_POPUP_COPY_AS_SHP_TS
-            MENUITEM "Copy as TGA (Single)",						ID_POPUP_COPY_AS_TGA_SINGLE
-            MENUITEM "Copy as TGA",											ID_POPUP_COPY_AS_TGA
-            MENUITEM "Copy as TEXT",										ID_POPUP_COPY_AS_TEXT
-            MENUITEM "Copy as VOXEL",										ID_POPUP_COPY_AS_VXL
-            MENUITEM "Copy as WAV (IMA ADPCM)",					ID_POPUP_COPY_AS_WAV_IMA_ADPCM
-            MENUITEM "Copy as WAV (PCM)",								ID_POPUP_COPY_AS_WAV_PCM
-            MENUITEM "Copy as WSA",											ID_POPUP_COPY_AS_WSA
-            MENUITEM "Copy as XIF",											ID_POPUP_COPY_AS_XIF
+            MENUITEM "Copy as AUD",                 ID_POPUP_COPY_AS_AUD
+            MENUITEM "Copy as AVI",                 ID_POPUP_COPY_AS_AVI
+            MENUITEM "Copy as CPS",                 ID_POPUP_COPY_AS_CPS
+            MENUITEM "Copy as CSV",                 ID_POPUP_COPY_AS_CSV
+            MENUITEM "Copy as HTML",                ID_POPUP_COPY_AS_HTML
+            MENUITEM "Copy as HVA",                 ID_POPUP_COPY_AS_HVA
+            MENUITEM "Copy as JPEG (Single)",       ID_POPUP_COPY_AS_JPEG_SINGLE
+            MENUITEM "Copy as JPEG",                ID_POPUP_COPY_AS_JPEG
+            MENUITEM "Copy as MAP (TS) Preview",    ID_POPUP_COPY_AS_MAP_TS_PREVIEW
+            MENUITEM "Copy as PAL",                 ID_POPUP_COPY_AS_PAL
+            MENUITEM "Copy as PAL (JASC)",          ID_POPUP_COPY_AS_PAL_JASC
+            MENUITEM "Copy as PCX (Single)",        ID_POPUP_COPY_AS_PCX_SINGLE
+            MENUITEM "Copy as PCX",                 ID_POPUP_COPY_AS_PCX
+            MENUITEM "Copy as PNG (Single)",        ID_POPUP_COPY_AS_PNG_SINGLE
+            MENUITEM "Copy as PNG",                 ID_POPUP_COPY_AS_PNG
+            MENUITEM "Copy as SHP (TD)",            ID_POPUP_COPY_AS_SHP
+            MENUITEM "Copy as SHP (TS)",            ID_POPUP_COPY_AS_SHP_TS
+            MENUITEM "Copy as TGA (Single)",        ID_POPUP_COPY_AS_TGA_SINGLE
+            MENUITEM "Copy as TGA",                 ID_POPUP_COPY_AS_TGA
+            MENUITEM "Copy as TEXT",                ID_POPUP_COPY_AS_TEXT
+            MENUITEM "Copy as VOXEL",               ID_POPUP_COPY_AS_VXL
+            MENUITEM "Copy as WAV (IMA ADPCM)",     ID_POPUP_COPY_AS_WAV_IMA_ADPCM
+            MENUITEM "Copy as WAV (PCM)",           ID_POPUP_COPY_AS_WAV_PCM
+            MENUITEM "Copy as WSA",                 ID_POPUP_COPY_AS_WSA
+            MENUITEM "Copy as XIF",                 ID_POPUP_COPY_AS_XIF
         END
         MENUITEM SEPARATOR
-        MENUITEM "Refresh\tF5",													ID_POPUP_REFRESH
-        MENUITEM "Resize Image...",											ID_POPUP_RESIZE
-        MENUITEM "Compact",															ID_POPUP_COMPACT
-        MENUITEM "Delete\tDel",													ID_POPUP_DELETE
+        MENUITEM "Refresh\tF5",                 ID_POPUP_REFRESH
+        MENUITEM "Resize Image...",             ID_POPUP_RESIZE
+        MENUITEM "Compact",                     ID_POPUP_COMPACT
+        MENUITEM "Delete\tDel",                 ID_POPUP_DELETE
     END
 END
 
@@ -306,24 +305,24 @@ END
 
 IDR_MAINFRAME ACCELERATORS
 BEGIN
-    27,             ID_VIEW_PALETTE_PREV_SIBLING,     ASCII,  NOINVERT
-    29,             ID_VIEW_PALETTE_NEXT_SIBLING,     ASCII,  NOINVERT
-    "A",            ID_EDIT_SELECT_ALL,						VIRTKEY, CONTROL, NOINVERT
-    "C",            ID_EDIT_COPY,									VIRTKEY, CONTROL, NOINVERT
-    "F",            ID_FILE_SEARCH_IN_MIX,					VIRTKEY, CONTROL, NOINVERT
-    "F",            ID_FILE_SEARCH,								VIRTKEY, CONTROL, SHIFT, NOINVERT
-    "N",            ID_FILE_NEW,									VIRTKEY, CONTROL, NOINVERT
-    "O",            ID_FILE_OPEN,									VIRTKEY, CONTROL, NOINVERT
-    "R",            ID_VIEW_PALETTE_SELECT,				VIRTKEY, CONTROL, NOINVERT
-    "Q",            ID_VIEW_PALETTE_AUTO_SELECT,	VIRTKEY, CONTROL, NOINVERT
-    VK_BACK,        ID_FILE_CLOSE,								VIRTKEY, NOINVERT
-    VK_DELETE,      ID_POPUP_DELETE,							VIRTKEY, NOINVERT
-    VK_DELETE,      ID_POPUP_DELETE,							VIRTKEY, SHIFT, NOINVERT
-    VK_F5,          ID_POPUP_REFRESH,							VIRTKEY, NOINVERT
-    VK_RETURN,      ID_POPUP_OPEN,								VIRTKEY, NOINVERT
-    "1",            ID_THEME_LIGHT,								VIRTKEY, CONTROL, NOINVERT
-    "2",            ID_THEME_DARK,								VIRTKEY, CONTROL, NOINVERT
-    "L",            ID_THEME_VXL_LIGHTING,				VIRTKEY, CONTROL, NOINVERT
+    27,             ID_VIEW_PALETTE_PREV_SIBLING, ASCII, NOINVERT
+    29,             ID_VIEW_PALETTE_NEXT_SIBLING, ASCII, NOINVERT
+    "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
+    "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
+    "F",            ID_FILE_SEARCH_IN_MIX,  VIRTKEY, CONTROL, NOINVERT
+    "F",            ID_FILE_SEARCH,         VIRTKEY, SHIFT, CONTROL, NOINVERT
+    "N",            ID_FILE_NEW,            VIRTKEY, CONTROL, NOINVERT
+    "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
+    "R",            ID_VIEW_PALETTE_SELECT, VIRTKEY, CONTROL, NOINVERT
+    "Q",            ID_VIEW_PALETTE_AUTO_SELECT, VIRTKEY, CONTROL, NOINVERT
+    VK_BACK,        ID_FILE_CLOSE,          VIRTKEY, NOINVERT
+    VK_DELETE,      ID_POPUP_DELETE,        VIRTKEY, NOINVERT
+    VK_DELETE,      ID_POPUP_DELETE,        VIRTKEY, SHIFT, NOINVERT
+    VK_F5,          ID_POPUP_REFRESH,       VIRTKEY, NOINVERT
+    VK_RETURN,      ID_POPUP_OPEN,          VIRTKEY, NOINVERT
+    "1",            ID_THEME_LIGHT,         VIRTKEY, CONTROL, NOINVERT
+    "2",            ID_THEME_DARK,          VIRTKEY, CONTROL, NOINVERT
+    "L",            ID_THEME_VXL_LIGHTING,  VIRTKEY, CONTROL, NOINVERT
 END
 
 
@@ -404,7 +403,8 @@ BEGIN
     LTEXT           "Filename:",IDC_FILENAME_STATIC,7,9,32,8
     EDITTEXT        IDC_FILENAME,42,7,231,14,ES_AUTOHSCROLL
     CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,28,266,148
-    CONTROL         "Preserve folder structure",IDC_PRESERVE_STRUCTURE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,184,100,10
+    CONTROL         "Preserve folder structure",IDC_PRESERVE_STRUCTURE,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,184,100,10
     CONTROL         "Include game MIXes",IDC_INCLUDE_GAME_MIXES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,197,100,10
     DEFPUSHBUTTON   "Search",IDOK,109,196,50,14
     PUSHBUTTON      "Extract...",IDC_EXTRACT,166,196,50,14
@@ -504,17 +504,20 @@ BEGIN
     EDITTEXT        IDC_C_FRAMES,64,30,57,13,ES_AUTOHSCROLL | ES_NUMBER
 END
 
-IDD_SHP_VIEWER DIALOGEX 0, 0, 280, 122
+IDD_SHP_VIEWER DIALOGEX 0, 0, 340, 122
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Video Viewer"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
-    DEFPUSHBUTTON   "Play",IDC_PLAY,177,101,50,14
-    PUSHBUTTON      "Close",IDOK,231,101,50,14
-    CONTROL         "",IDC_IMAGE,"Static",SS_BITMAP | SS_CENTERIMAGE,7,7,266,88
-    CONTROL         "Slider1",IDC_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,107,100,66,15
+    DEFPUSHBUTTON   "Pause",IDC_PLAY,255,101,36,14
+    PUSHBUTTON      "Close",IDOK,294,101,40,14
+    CONTROL         "",IDC_IMAGE,"Static",SS_BITMAP | SS_CENTERIMAGE,7,7,327,88
+    CONTROL         "Slider1",IDC_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,107,100,73,15
     EDITTEXT        IDC_FRAME,7,101,22,14,ES_RIGHT | ES_AUTOHSCROLL | ES_READONLY | ES_NUMBER
     LTEXT           "",IDC_DURATION,33,103,70,12,SS_CENTERIMAGE
+    LTEXT           "FPS",IDC_SHPVIEW_FPS_LABEL,184,103,14,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_SHPVIEW_FPS_EDIT,200,101,22,14,ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "",IDC_SHPVIEW_FPS_SPIN,"msctls_updown32",UDS_SETBUDDYINT | UDS_ARROWKEYS | WS_TABSTOP,224,101,11,14
 END
 
 IDD_SEARCH_STRING DIALOGEX 0, 0, 186, 95
@@ -582,7 +585,7 @@ BEGIN
     IDD_SHP_VIEWER, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 179
+        RIGHTMARGIN, 334
         TOPMARGIN, 7
         BOTTOMMARGIN, 115
     END
@@ -674,56 +677,64 @@ BEGIN
     AFX_IDS_IDLEMESSAGE     "Ready"
 END
 
-// Status-bar prompts for menu items. MFC's CFrameWnd pushes these to the
-// status bar on hover, keyed on the command ID. Text before \n is the
-// status prompt; text after is the (unused) tooltip.
+STRINGTABLE
+BEGIN
+    ID_THEME_LIGHT          "Use light mode colors"
+    ID_THEME_DARK           "Use dark mode colors"
+    ID_THEME_SHOW_GRID      "Toggle grid lines between list-view rows"
+    ID_THEME_ALPHA_COLOR    "Pick the color used to mark transparent pixels"
+    ID_THEME_INTERP_NEAREST "Sharp pixel scaling (no smoothing). Best for sprites."
+    ID_THEME_INTERP_BILINEAR 
+                            "Bilinear scaling. Smooth, slight blur on upscale."
+    ID_THEME_INTERP_BICUBIC "Bicubic scaling. Sharper edges than bilinear, slower."
+    ID_THEME_INTERP_LANCZOS "Lanczos-2 scaling. Sharpest smooth filter, more aliasing on diagonals."
+END
 
 STRINGTABLE
 BEGIN
-    // Theme menu
-    ID_THEME_LIGHT              "Use light mode colors"
-    ID_THEME_DARK               "Use dark mode colors"
-    ID_THEME_SYSTEM             "Follow the Windows app color setting"
-    ID_THEME_PANES_ONE          "Hide the middle MIX pane (file-info takes the slack)"
-    ID_THEME_PANES_TWO          "Show both MIX panes side-by-side"
-    ID_THEME_SIZE_FORMAT_AUTO   "Display file sizes scaled (e.g. 1.5 MB)"
-    ID_THEME_SIZE_FORMAT_BYTES  "Display file sizes as raw byte counts"
-    ID_THEME_SHOW_GRID          "Toggle grid lines between list-view rows"
-    ID_THEME_ALPHA_COLOR        "Pick the color used to mark transparent pixels"
-    ID_THEME_USE_CHECKERBOARD   "Show a checkerboard pattern over transparent pixels instead of a solid color"
-    ID_THEME_SHP_TRANSPARENCY   "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
+    ID_THEME_LIMIT_VXL_CPU  "Limit voxel rendering to fewer CPU threads to leave headroom for other apps"
+    ID_THEME_VXL_LIGHTING   "Open the VXL lighting and normals dialog (azimuth, elevation, ambient, diffuse)"
+    ID_THEME_VXL_FULL_HIER  "Auto-load matching turret and barrel voxels when opening a VXL"
+    ID_THEME_SHARPEN_0      "Disable unsharp-mask post-pass"
+    ID_THEME_SHARPEN_25     "Apply 25% sharpen to scaled images"
+    ID_THEME_SHARPEN_50     "Apply 50% sharpen to scaled images"
+    ID_THEME_SHARPEN_75     "Apply 75% sharpen to scaled images"
+    ID_THEME_SHARPEN_100    "Apply maximum sharpen to scaled images"
+    ID_THEME_FPS_30         "Cap repaint and input handling at 30 fps"
+    ID_THEME_FPS_60         "Cap repaint and input handling at 60 fps"
+    ID_THEME_FPS_120        "Cap repaint and input handling at 120 fps"
+    ID_THEME_FPS_UNLIMITED  "No frame rate cap (soft-capped at 1000 fps)"
+    ID_THEME_FPS_CUSTOM     "Set a custom frame rate cap value"
+    ID_THEME_SYSTEM         "Follow the Windows app color setting"
+    ID_SETTINGS_DIR_APPDATA "Store settings under %APPDATA%\\XCC\\Mixer"
+    ID_SETTINGS_DIR_EXE     "Store settings next to the XCC Mixer executable (portable)"
+END
 
-    // Graphics menu
-    ID_THEME_INTERP_NEAREST     "Sharp pixel scaling (no smoothing). Best for sprites."
-    ID_THEME_INTERP_BILINEAR    "Bilinear scaling. Smooth, slight blur on upscale."
-    ID_THEME_INTERP_BICUBIC     "Bicubic scaling. Sharper edges than bilinear, slower."
-    ID_THEME_INTERP_LANCZOS     "Lanczos-2 scaling. Sharpest smooth filter, more aliasing on diagonals."
-    ID_THEME_SHARPEN_0          "Disable unsharp-mask post-pass"
-    ID_THEME_SHARPEN_25         "Apply 25% sharpen to scaled images"
-    ID_THEME_SHARPEN_50         "Apply 50% sharpen to scaled images"
-    ID_THEME_SHARPEN_75         "Apply 75% sharpen to scaled images"
-    ID_THEME_SHARPEN_100        "Apply maximum sharpen to scaled images"
-    ID_THEME_FPS_30             "Cap repaint and input handling at 30 fps"
-    ID_THEME_FPS_60             "Cap repaint and input handling at 60 fps"
-    ID_THEME_FPS_120            "Cap repaint and input handling at 120 fps"
-    ID_THEME_FPS_UNLIMITED      "No frame rate cap (soft-capped at 1000 fps)"
-    ID_THEME_FPS_CUSTOM         "Set a custom frame rate cap value"
-    ID_THEME_VXL_SS_OFF         "No supersampling (1x). Fastest, aliased edges."
-    ID_THEME_VXL_SS_2           "2x supersampling. Slight edge smoothing."
-    ID_THEME_VXL_SS_4           "4x supersampling. Default. Good balance of quality and speed."
-    ID_THEME_VXL_SS_8           "8x supersampling. Smoother edges, more CPU."
-    ID_THEME_VXL_SS_16          "16x supersampling. Highest quality, heaviest CPU cost."
-    ID_THEME_VXL_SHADING        "Toggle camera-relative directional lighting on voxel models"
-    ID_THEME_VXL_LIGHTING       "Open the VXL lighting and normals dialog (azimuth, elevation, ambient, diffuse)"
-    ID_THEME_LIMIT_VXL_CPU      "Limit voxel rendering to fewer CPU threads to leave headroom for other apps"
-    ID_THEME_VXL_FULL_HIER      "Auto-load matching turret and barrel voxels when opening a VXL"
+STRINGTABLE
+BEGIN
+    ID_THEME_SHP_TRANSPARENCY 
+                            "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
+    ID_THEME_USE_CHECKERBOARD 
+                            "Show a checkerboard pattern over transparent pixels instead of a solid color"
+    ID_THEME_USE_EXTERNAL_PROGRAMS 
+                            "Open files in registered external programs when launched from XCC"
+    ID_THEME_PANES_ONE      "Hide the middle MIX pane (file-info takes the slack)"
+    ID_THEME_PANES_TWO      "Show both MIX panes side-by-side"
+    ID_THEME_SIZE_FORMAT_AUTO "Display file sizes scaled (e.g. 1.5 MB)"
+    ID_THEME_SIZE_FORMAT_BYTES "Display file sizes as raw byte counts"
+    ID_THEME_VXL_SS_OFF     "No supersampling (1x). Fastest, aliased edges."
+    ID_THEME_VXL_SS_2       "2x supersampling. Slight edge smoothing."
+    ID_THEME_VXL_SS_4       "4x supersampling. Default. Good balance of quality and speed."
+    ID_THEME_VXL_SS_8       "8x supersampling. Smoother edges, more CPU."
+    ID_THEME_VXL_SS_16      "16x supersampling. Highest quality, heaviest CPU cost."
+    ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
+    ID_THEME_PARALLEL_EXTRACT 
+                            "Extract batch selections in parallel (faster on SSDs)"
+END
 
-    // Configure menu
-    ID_KEYBINDS_CONFIGURE       "Customize keyboard shortcuts"
-    ID_THEME_USE_EXTERNAL_PROGRAMS  "Open files in registered external programs when launched from XCC"
-    ID_THEME_PARALLEL_EXTRACT   "Extract batch selections in parallel (faster on SSDs)"
-    ID_SETTINGS_DIR_APPDATA     "Store settings under %APPDATA%\\XCC\\Mixer"
-    ID_SETTINGS_DIR_EXE         "Store settings next to the XCC Mixer executable (portable)"
+STRINGTABLE
+BEGIN
+    ID_KEYBINDS_CONFIGURE   "Customize keyboard shortcuts"
 END
 
 #endif    // English (United States) resources
@@ -762,7 +773,7 @@ CAPTION "Audio Player"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     LTEXT           "",IDC_AUDIO_FILENAME,7,7,226,10
-    CONTROL         "",IDC_AUDIO_SEEK,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,7,22,226,15
+    CONTROL         "",IDC_AUDIO_SEEK,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,7,22,226,15
     LTEXT           "0:00",IDC_AUDIO_TIME,7,42,80,10
     PUSHBUTTON      "Pause",IDC_AUDIO_PLAY_PAUSE,128,49,50,14
     PUSHBUTTON      "Stop",IDC_AUDIO_STOP,183,49,50,14
@@ -773,34 +784,36 @@ STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "VXL Lighting"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
-    AUTOCHECKBOX    "Use VPL engine formula (ignore Ambient/Diffuse)",IDC_VXL_LIGHT_VPL_FAITHFUL,7,8,226,10,WS_TABSTOP
+    CONTROL         "Use VPL engine formula (ignore Ambient/Diffuse)",IDC_VXL_LIGHT_VPL_FAITHFUL,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,8,226,10
     LTEXT           "Azimuth",IDC_VXL_LIGHT_AZ_LABEL,7,25,40,10
-    CONTROL         "",IDC_VXL_LIGHT_AZ_SLIDER,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,50,23,145,15
-    EDITTEXT        IDC_VXL_LIGHT_AZ_VALUE,200,24,35,12,ES_AUTOHSCROLL | ES_RIGHT
+    CONTROL         "",IDC_VXL_LIGHT_AZ_SLIDER,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,50,23,145,15
+    EDITTEXT        IDC_VXL_LIGHT_AZ_VALUE,200,24,35,12,ES_RIGHT | ES_AUTOHSCROLL
     LTEXT           "Elevation",IDC_VXL_LIGHT_EL_LABEL,7,45,40,10
-    CONTROL         "",IDC_VXL_LIGHT_EL_SLIDER,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,50,43,145,15
-    EDITTEXT        IDC_VXL_LIGHT_EL_VALUE,200,44,35,12,ES_AUTOHSCROLL | ES_RIGHT
+    CONTROL         "",IDC_VXL_LIGHT_EL_SLIDER,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,50,43,145,15
+    EDITTEXT        IDC_VXL_LIGHT_EL_VALUE,200,44,35,12,ES_RIGHT | ES_AUTOHSCROLL
     LTEXT           "Diffuse",IDC_VXL_LIGHT_DIFFUSE_LABEL,7,65,40,10
-    CONTROL         "",IDC_VXL_LIGHT_DIFFUSE_SLIDER,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,50,63,145,15
-    EDITTEXT        IDC_VXL_LIGHT_DIFFUSE_VALUE,200,64,35,12,ES_AUTOHSCROLL | ES_RIGHT
+    CONTROL         "",IDC_VXL_LIGHT_DIFFUSE_SLIDER,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,50,63,145,15
+    EDITTEXT        IDC_VXL_LIGHT_DIFFUSE_VALUE,200,64,35,12,ES_RIGHT | ES_AUTOHSCROLL
     LTEXT           "Ambient",IDC_VXL_LIGHT_AMBIENT_LABEL,7,85,40,10
-    CONTROL         "",IDC_VXL_LIGHT_AMBIENT_SLIDER,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,50,83,145,15
-    EDITTEXT        IDC_VXL_LIGHT_AMBIENT_VALUE,200,84,35,12,ES_AUTOHSCROLL | ES_RIGHT
+    CONTROL         "",IDC_VXL_LIGHT_AMBIENT_SLIDER,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,50,83,145,15
+    EDITTEXT        IDC_VXL_LIGHT_AMBIENT_VALUE,200,84,35,12,ES_RIGHT | ES_AUTOHSCROLL
     LTEXT           "Specular",IDC_VXL_LIGHT_SPECULAR_LABEL,7,105,40,10
-    CONTROL         "",IDC_VXL_LIGHT_SPECULAR_SLIDER,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,50,103,145,15
-    EDITTEXT        IDC_VXL_LIGHT_SPECULAR_VALUE,200,104,35,12,ES_AUTOHSCROLL | ES_RIGHT
+    CONTROL         "",IDC_VXL_LIGHT_SPECULAR_SLIDER,"msctls_trackbar32",TBS_NOTICKS | WS_TABSTOP,50,103,145,15
+    EDITTEXT        IDC_VXL_LIGHT_SPECULAR_VALUE,200,104,35,12,ES_RIGHT | ES_AUTOHSCROLL
     GROUPBOX        "Normal source",IDC_VXL_NORMAL_SRC_GROUP,7,126,226,75
-    AUTORADIOBUTTON "",IDC_VXL_NORMAL_SRC_FILE,15,139,12,10,WS_GROUP | WS_TABSTOP
+    CONTROL         "",IDC_VXL_NORMAL_SRC_FILE,"Button",BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,15,139,12,10
     LTEXT           "File (Westwood normal index)",IDC_VXL_NORMAL_SRC_FILE_LABEL,28,140,140,10,SS_NOTIFY
-    AUTORADIOBUTTON "",IDC_VXL_NORMAL_SRC_COMPUTED,15,152,12,10
+    CONTROL         "",IDC_VXL_NORMAL_SRC_COMPUTED,"Button",BS_AUTORADIOBUTTON,15,152,12,10
     LTEXT           "Computed (occupancy)",IDC_VXL_NORMAL_SRC_COMPUTED_LABEL,28,153,110,10,SS_NOTIFY
     LTEXT           "Method:",IDC_VXL_NORMAL_METHOD_LABEL,28,170,40,10
-    COMBOBOX        IDC_VXL_NORMAL_METHOD,70,168,155,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_VXL_NORMAL_METHOD,70,168,152,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Kernel:",IDC_VXL_NORMAL_KERNEL_LABEL,28,186,40,10
-    COMBOBOX        IDC_VXL_NORMAL_KERNEL,70,184,80,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_VXL_NORMAL_KERNEL,70,184,152,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     GROUPBOX        "Light indicator",IDC_VXL_LIGHT_INDICATOR_GROUP,7,206,226,35
-    AUTORADIOBUTTON "Overlay on model",IDC_VXL_LIGHT_INDICATOR_OVERLAY,15,220,90,10,WS_GROUP | WS_TABSTOP
-    AUTORADIOBUTTON "Corner widget",IDC_VXL_LIGHT_INDICATOR_CORNER,120,220,90,10
+    CONTROL         "Overlay on model",IDC_VXL_LIGHT_INDICATOR_OVERLAY,
+                    "Button",BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,15,220,90,10
+    CONTROL         "Corner widget",IDC_VXL_LIGHT_INDICATOR_CORNER,"Button",BS_AUTORADIOBUTTON,120,220,90,10
     PUSHBUTTON      "Reset",IDC_VXL_LIGHT_RESET,7,248,50,14
     DEFPUSHBUTTON   "Close",IDOK,183,248,50,14
 END
@@ -815,7 +828,6 @@ BEGIN
     DEFPUSHBUTTON   "OK",IDOK,66,49,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,123,49,50,14
 END
-
 
 IDD_PAL_PATHS DIALOGEX 0, 0, 410, 200
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
@@ -833,7 +845,6 @@ BEGIN
     DEFPUSHBUTTON   "OK",IDOK,313,176,45,14
     PUSHBUTTON      "Cancel",IDCANCEL,360,176,44,14
 END
-
 
 IDD_KEYBINDS DIALOGEX 0, 0, 540, 280
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
@@ -853,14 +864,13 @@ BEGIN
     PUSHBUTTON      "Cancel",IDCANCEL,495,250,38,14
 END
 
-
 IDD_KEY_CAPTURE DIALOGEX 0, 0, 220, 90
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Capture key"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     LTEXT           "Press the key combination to assign. Esc cancels.",IDC_KEYCAP_PROMPT,7,7,206,10
-    LTEXT           "(press a key)",IDC_KEYCAP_PREVIEW,7,25,206,16,SS_CENTER
+    CTEXT           "(press a key)",IDC_KEYCAP_PREVIEW,7,25,206,16
     DEFPUSHBUTTON   "OK",IDOK,108,68,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,163,68,50,14
 END
@@ -880,6 +890,30 @@ BEGIN
         RIGHTMARGIN, 112
         TOPMARGIN, 7
         BOTTOMMARGIN, 51
+    END
+
+    IDD_AUDIO_PLAYER, DIALOG
+    BEGIN
+    END
+
+    IDD_VXL_LIGHTING, DIALOG
+    BEGIN
+    END
+
+    IDD_FPS_CUSTOM, DIALOG
+    BEGIN
+    END
+
+    IDD_PAL_PATHS, DIALOG
+    BEGIN
+    END
+
+    IDD_KEYBINDS, DIALOG
+    BEGIN
+    END
+
+    IDD_KEY_CAPTURE, DIALOG
+    BEGIN
     END
 END
 #endif    // APSTUDIO_INVOKED
@@ -906,6 +940,11 @@ BEGIN
 END
 
 IDD_KEY_CAPTURE AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_VXL_LIGHTING AFX_DIALOG_LAYOUT
 BEGIN
     0
 END
