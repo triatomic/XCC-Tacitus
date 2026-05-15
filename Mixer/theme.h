@@ -374,4 +374,12 @@ namespace theme
 	// ComboBox that also has CBS_HASSTRINGS — must NOT be combined with
 	// CBS_OWNERDRAWFIXED/VARIABLE (the subclass owns WM_PAINT itself).
 	void subclass_combobox(HWND h_combo);
+
+	// Bilinear resample of a 32bpp BGRA top-down image. The same routine
+	// the splat path uses internally; exposed so the turntable Record
+	// dialog can downscale supersampled frames to logical size before
+	// GIF / PNG encoding (so the output matches what the user sees on
+	// screen instead of being SS-bigger). Both upscale and downscale.
+	void bilinear_resample_bgra(const DWORD* src, int sw, int sh,
+		DWORD* dst, int dw, int dh);
 }

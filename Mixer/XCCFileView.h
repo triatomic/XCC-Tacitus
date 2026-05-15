@@ -101,6 +101,7 @@ protected:
 	afx_msg void OnPlayerGrid();
 	afx_msg void OnPlayerNative();
 	afx_msg void OnPlayerScreenshot();
+	afx_msg void OnPlayerTurntable();
 	afx_msg void OnPlayerFpsChange();
 	afx_msg void OnPlayerShadows();
 	afx_msg void OnPlayerBg();
@@ -159,6 +160,19 @@ public:
 	// or error. Used by both the player-band Screenshot button and the
 	// Ctrl+Shift+S accelerator routed via CMainFrame.
 	bool take_screenshot();
+	// Capture the currently-rendered frame into out_bgra (cx*cy DWORDs,
+	// `B|G<<8|R<<16|A<<24` with alpha already derived from BG mode per the
+	// v9.62 rule). Returns false if no rendered frame is available. Used by
+	// take_screenshot() and the turntable capture loop. UpdateWindow() is
+	// the caller's responsibility — turntable batches it across N frames.
+	// wysiwyg=true skips the indexed-buffer alpha derivation entirely and
+	// writes the cached BGRA as-is (with alpha=0xFF). Used by Record so
+	// every BG mode (Color / Alpha / Pane) is captured exactly as the user
+	// sees it on screen — checker / pane color baked in instead of being
+	// erased to black-with-alpha=0. take_screenshot defaults to false to
+	// preserve v9.62 single-shot transparency semantics.
+	bool capture_current_frame(std::vector<DWORD>& out_bgra, int& out_cx, int& out_cy,
+		bool wysiwyg = false);
 	DWORD m_last_input_ms = 0;
 	// Set/clear the interactive low-SS flag from outside (e.g. the VXL
 	// Lighting dialog while a slider is being dragged). When clearing,
@@ -205,6 +219,7 @@ protected:
 	CButton m_player_grid;
 	CButton m_player_native;
 	CButton m_player_screenshot;
+	CButton m_player_turntable;
 	bool m_player_native_size = false;
 	// Ctrl+wheel zoom override for the player (SHP/WSA/VXL). 0 = follow
 	// auto-fit / Native mode; otherwise an explicit percentage 25..1600.

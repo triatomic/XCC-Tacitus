@@ -26,6 +26,7 @@
 #define IDD_KEYBINDS                    145
 #define IDD_KEY_CAPTURE                 146
 #define IDD_FPS_CUSTOM                  147
+#define IDD_VXL_TURNTABLE               148
 #define IDC_DUNE2                       1000
 #define IDC_TD_PRIMARY                  1001
 #define IDC_CY                          1001
@@ -191,6 +192,24 @@
 #define IDC_SHPVIEW_FPS_LABEL           1185
 #define IDC_SHPVIEW_FPS_EDIT            1186
 #define IDC_SHPVIEW_FPS_SPIN            1187
+#define IDC_PLAYER_TURNTABLE            1188
+#define IDC_TT_FRAMES_LABEL             1190
+#define IDC_TT_FRAMES_EDIT              1191
+#define IDC_TT_FRAMES_SPIN              1192
+#define IDC_TT_FORMAT_LABEL             1193
+#define IDC_TT_FORMAT_COMBO             1194
+#define IDC_TT_DIR_LABEL                1195
+#define IDC_TT_DIR_CW                   1196
+#define IDC_TT_DIR_CCW                  1197
+#define IDC_TT_ANIM_LABEL               1198
+#define IDC_TT_ANIM_COMBO               1199
+#define IDC_TT_DELAY_LABEL              1200
+#define IDC_TT_DELAY_EDIT               1201
+#define IDC_TT_DELAY_SPIN               1202
+#define IDC_TT_HINT                     1203
+#define IDC_TT_DOWNSCALE_LABEL          1204
+#define IDC_TT_DOWNSCALE_COMBO          1205
+#define IDC_TT_TRANSPARENT_PAL0         1206
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781
@@ -1530,9 +1549,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        148
+#define _APS_NEXT_RESOURCE_VALUE        149
 #define _APS_NEXT_COMMAND_VALUE         33140
-#define _APS_NEXT_CONTROL_VALUE         1190
+#define _APS_NEXT_CONTROL_VALUE         1210
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif

@@ -803,6 +803,16 @@ namespace theme
 		}
 	}
 
+	// Public forwarder for the file-private bilinear_resample inside the
+	// anonymous namespace above. Kept as a thin wrapper rather than moved
+	// out of the anon namespace to avoid disturbing the existing splat /
+	// stretch_image plumbing that calls bilinear_resample directly.
+	void bilinear_resample_bgra(const DWORD* src, int sw, int sh,
+		DWORD* dst, int dw, int dh)
+	{
+		bilinear_resample(src, sw, sh, dst, dw, dh);
+	}
+
 	namespace
 	{
 		// 3x3 unsharp mask on a 32bpp BGRA top-down buffer, in-place.

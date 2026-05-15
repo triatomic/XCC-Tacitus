@@ -56,6 +56,12 @@
 #include <png_file.h>
 #include <numbers>
 #include "theme.h"
+#include "TurntableDlg.h"
+// gif.h is a public-domain single-header animated-GIF encoder by Charlie
+// Tangora. Vendored under Mixer/gif.h. Used only by OnPlayerTurntable below;
+// no other TU should include it (it defines functions in-header without
+// inline/static guards beyond what's natural for a single-TU embed).
+#include "gif.h"
 
 IMPLEMENT_DYNCREATE(CXCCFileView, CListView)
 
@@ -89,6 +95,7 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_PLAYER_GRID, OnPlayerGrid)
 	ON_BN_CLICKED(IDC_PLAYER_NATIVE, OnPlayerNative)
 	ON_BN_CLICKED(IDC_PLAYER_SCREENSHOT, OnPlayerScreenshot)
+	ON_BN_CLICKED(IDC_PLAYER_TURNTABLE, OnPlayerTurntable)
 	ON_EN_CHANGE(IDC_PLAYER_FPS_EDIT, OnPlayerFpsChange)
 	ON_BN_CLICKED(IDC_PLAYER_SHADOWS, OnPlayerShadows)
 	ON_BN_CLICKED(IDC_PLAYER_BG, OnPlayerBg)
@@ -340,6 +347,9 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_vxl_hva_load.GetSafeHwnd())    msg = "Load an HVA animation. Lists matching HVAs from the source MIX.";
 	else if (h == m_vxl_hva_loop.GetSafeHwnd())    msg = "Loop HVA animation. When off, playback stops at the last keyframe.";
 	else if (h == m_vxl_vpl_load.GetSafeHwnd())    msg = "Load a VPL palette mapper for engine-faithful VXL shading. Auto-loads voxels.vpl on file open.";
+	else if (h == m_player_turntable.GetSafeHwnd()) msg = is_vxl_view()
+		? "Record an animated turntable: rotate the voxel 360\xb0 (and/or play the HVA), save as GIF or PNG sequence. Honors current SS, lighting, VPL."
+		: "Record the SHP/WSA animation frames as GIF or PNG sequence. Honors current side color, BG, shadows, palette.";
 	else if (h == m_vxl_side_custom.GetSafeHwnd()) msg = "Custom VXL side color: opens picker. Click again to clear.";
 	else
 	{
@@ -3203,6 +3213,7 @@ void CXCCFileView::player_enter()
 		m_player_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
 		m_player_native.Create("Native", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_NATIVE);
 		m_player_screenshot.Create("Screenshot", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_SCREENSHOT);
+		m_player_turntable.Create("Record", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_TURNTABLE);
 		m_player_slider.Create(WS_CHILD | TBS_HORZ | TBS_NOTICKS, r, this, IDC_PLAYER_SLIDER);
 		m_player_label.Create("", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FRAME_LABEL);
 		m_player_fps_label.Create("FPS", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, r, this, IDC_PLAYER_FPS_LABEL);
@@ -3215,6 +3226,7 @@ void CXCCFileView::player_enter()
 		m_player_grid.SetFont(&m_font);
 		m_player_native.SetFont(&m_font);
 		m_player_screenshot.SetFont(&m_font);
+		m_player_turntable.SetFont(&m_font);
 		m_player_label.SetFont(&m_font);
 		m_player_fps_label.SetFont(&m_font);
 		m_player_fps_edit.SetFont(&m_font);
@@ -3223,6 +3235,7 @@ void CXCCFileView::player_enter()
 		theme::apply_window(m_player_grid.GetSafeHwnd());
 		theme::apply_window(m_player_native.GetSafeHwnd());
 		theme::apply_window(m_player_screenshot.GetSafeHwnd());
+		theme::apply_window(m_player_turntable.GetSafeHwnd());
 		theme::apply_window(m_player_slider.GetSafeHwnd());
 		theme::apply_window(m_player_label.GetSafeHwnd());
 		theme::apply_window(m_player_fps_label.GetSafeHwnd());
@@ -3316,6 +3329,13 @@ void CXCCFileView::player_enter()
 	m_player_grid.ShowWindow(SW_SHOW);
 	m_player_native.ShowWindow(SW_SHOW);
 	m_player_screenshot.ShowWindow(SW_SHOW);
+	// Record lives on two different rows depending on file kind:
+	//   - VXL: upper row next to Load VPL... (turntable + HVA + downscale).
+	//   - SHP/WSA with cf > 1: bottom transport row after Native (frame
+	//     capture into GIF / PNG sequence).
+	// Single-frame SHPs hide it (nothing to record).
+	const bool shp_animated = !vxl && m_player_cf > 1;
+	m_player_turntable.ShowWindow((vxl || shp_animated) ? SW_SHOW : SW_HIDE);
 	m_player_native.SetCheck(m_player_native_size ? BST_CHECKED : BST_UNCHECKED);
 	m_player_slider.ShowWindow(playback_show);
 	m_player_label.ShowWindow(playback_show);
@@ -3472,6 +3492,13 @@ void CXCCFileView::player_layout_controls()
 	m_player_reverse.MoveWindow(x, y, 30, H);         x += 30 + pad;
 	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
 	m_player_native.MoveWindow(x, y, 60, H);          x += 60 + pad;
+	// SHP/WSA Record button slot — only consumes layout space when this is
+	// SHP territory. VXL Record lives on the upper VXL row and is sized
+	// inside the vxl branch below.
+	if (!vxl && m_player_cf > 1)
+	{
+		m_player_turntable.MoveWindow(x, y, 70, H);   x += 70 + pad;
+	}
 	int label_w = 110;
 	m_player_label.MoveWindow(x, y, label_w, H); x += label_w + pad;
 	int fps_label_w = 26;
@@ -3511,6 +3538,9 @@ void CXCCFileView::player_layout_controls()
 		// VPL load button — alongside HVA. Auto-detection covers most cases;
 		// the button is the manual override.
 		m_vxl_vpl_load.MoveWindow(x2, y2, 90, H); x2 += 90 + pad;
+		// Record (turntable) — sits on the VXL upper row right after Load VPL
+		// so it's discoverable next to the other VXL-specific controls.
+		m_player_turntable.MoveWindow(x2, y2, 70, H); x2 += 70 + pad;
 		// Loop checkbox — only visible while an HVA is loaded.
 		m_vxl_hva_loop.MoveWindow(x2, y2, 56, H); x2 += 56 + pad;
 		if (vxl_hva)
@@ -4768,6 +4798,100 @@ static bool write_tga32(const char* path, const byte* bgra, int cx, int cy)
 	return ok;
 }
 
+// Capture the currently-rendered frame into a freshly-sized BGRA vector with
+// alpha derived from BG mode (per the v9.62 indexed-buffer rule). Used by both
+// the single-shot screenshot path and the turntable capture loop. UpdateWindow()
+// is the caller's responsibility — turntable batches it across N frames so we
+// don't re-pump messages from inside the hot loop.
+bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_cx, int& out_cy,
+	bool wysiwyg)
+{
+	if (!m_player_mode || !m_is_open)
+		return false;
+	const bool vxl = is_vxl_view();
+
+	// VXL: cx_s/cy_s include supersampling. SHP/WSA/etc.: native player size.
+	int cx_s = 0, cy_s = 0;
+	if (vxl)
+	{
+		cx_s = m_vxl_splat.cx_s;
+		cy_s = m_vxl_splat.cy_s;
+	}
+	else
+	{
+		cx_s = m_player_cx;
+		cy_s = m_player_cy;
+	}
+	if (cx_s <= 0 || cy_s <= 0)
+		return false;
+
+	const int n_pixels = cx_s * cy_s;
+	const DWORD* src_dwords = nullptr;
+	if (vxl)
+	{
+		if (static_cast<int>(m_vxl_bgra.bgra.size()) == n_pixels)
+			src_dwords = m_vxl_bgra.bgra.data();
+	}
+	else
+	{
+		if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_bgra.size())
+			&& static_cast<int>(m_player_bgra[m_player_frame].bgra.size()) == n_pixels)
+		{
+			src_dwords = m_player_bgra[m_player_frame].bgra.data();
+		}
+	}
+	if (!src_dwords)
+		return false;
+
+	// BG-mode-driven alpha: in Alpha (1) / Pane (2) the user wants real
+	// transparency in the output; pull from the indexed buffer because the
+	// BGRA cache has bg color baked into transparent pixels. Color (0): keep
+	// the image fully opaque so engine appearance is preserved.
+	// wysiwyg short-circuits the indexed-buffer alpha path: every output
+	// pixel falls through to the (src_dwords | 0xFF000000) branch below,
+	// preserving whatever the cache builder baked in for transparent
+	// pixels (palette-0 color in BG=Color, 8x8 checker in BG=Alpha, pane
+	// color in BG=Pane). This is what Record wants — match the on-screen
+	// view exactly. The single-shot screenshot path leaves wysiwyg=false
+	// and keeps the v9.62 real-transparency behavior in Alpha/Pane modes.
+	const bool want_alpha = !wysiwyg && (m_player_bg_mode == 1 || m_player_bg_mode == 2);
+	const byte* indexed = nullptr;
+	if (want_alpha)
+	{
+		if (vxl)
+		{
+			if (m_vxl_splat.buf.size() != 0) indexed = m_vxl_splat.buf.data();
+		}
+		else
+		{
+			if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
+				&& static_cast<int>(m_player_frames[m_player_frame].size()) >= n_pixels)
+			{
+				indexed = m_player_frames[m_player_frame].data();
+			}
+		}
+	}
+
+	out_bgra.assign(n_pixels, 0);
+	if (indexed)
+	{
+		for (int i = 0; i < n_pixels; i++)
+		{
+			const DWORD a = indexed[i] == 0 ? 0u : 0xFF000000u;
+			out_bgra[i] = indexed[i] == 0 ? 0u : (src_dwords[i] | a);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < n_pixels; i++)
+			out_bgra[i] = src_dwords[i] | 0xFF000000u;
+	}
+
+	out_cx = cx_s;
+	out_cy = cy_s;
+	return true;
+}
+
 bool CXCCFileView::take_screenshot()
 {
 	// Player mode + a renderable frame is the prerequisite. Outside player mode
@@ -4903,81 +5027,18 @@ bool CXCCFileView::take_screenshot()
 	}
 	else
 	{
-		// PNG / TGA: read the composited BGRA cache. Both VXL and SHP/WSA
-		// caches are populated by the paint that UpdateWindow() just forced.
-		// Caches are vector<DWORD> with cx_s*cy_s entries (4 bytes per pixel).
-		const DWORD* src_dwords = nullptr;
-		const int n_pixels = cx_s * cy_s;
-		if (vxl)
-		{
-			if (static_cast<int>(m_vxl_bgra.bgra.size()) == n_pixels)
-				src_dwords = m_vxl_bgra.bgra.data();
-		}
-		else
-		{
-			if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_bgra.size())
-				&& static_cast<int>(m_player_bgra[m_player_frame].bgra.size()) == n_pixels)
-			{
-				src_dwords = m_player_bgra[m_player_frame].bgra.data();
-			}
-		}
-		if (!src_dwords)
+		// PNG / TGA: capture the composited BGRA frame with BG-mode-driven
+		// alpha (the v9.62 indexed-buffer rule lives in capture_current_frame).
+		std::vector<DWORD> out;
+		int out_cx = 0, out_cy = 0;
+		if (!capture_current_frame(out, out_cx, out_cy))
 		{
 			if (CMainFrame* mf = GetMainFrame())
 				mf->SetMessageText("Screenshot: rendered buffer unavailable; try toggling the player or moving a slider, then retry.");
 			return false;
 		}
-
-		// Alpha channel: when BG mode is Alpha (1) or Pane (2) the user is
-		// asking to *see* transparency on screen, so they expect the saved
-		// PNG/TGA to carry a real alpha channel they can paste over any
-		// background. Source the alpha from the **indexed** buffer (palette
-		// index 0 = transparent), not the BGRA composite — the BGRA already
-		// has the checkerboard / pane color baked in for transparent pixels.
-		// In Color mode (0) the user explicitly wants the palette-0 color
-		// rendered as a real opaque pixel (engine appearance); leave the
-		// image fully opaque in that case.
-		const bool want_alpha = (m_player_bg_mode == 1 || m_player_bg_mode == 2);
-		const byte* indexed = nullptr;
-		if (want_alpha)
-		{
-			if (vxl)
-			{
-				if (m_vxl_splat.buf.size() != 0) indexed = m_vxl_splat.buf.data();
-			}
-			else
-			{
-				if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
-					&& static_cast<int>(m_player_frames[m_player_frame].size()) >= n_pixels)
-				{
-					indexed = m_player_frames[m_player_frame].data();
-				}
-			}
-		}
-
-		// The composite path stores BGRA as `B | G<<8 | R<<16` — the high byte
-		// (alpha) is left at 0. PNG via GDI+ treats it as a real alpha (would
-		// write a fully transparent image otherwise) and TGA viewers do the
-		// same. Build a copy with the right alpha per pixel: 0 where the
-		// indexed pixel is transparent (and want_alpha), 0xFF otherwise.
-		std::vector<DWORD> out(n_pixels);
-		if (indexed)
-		{
-			for (int i = 0; i < n_pixels; i++)
-			{
-				const DWORD a = indexed[i] == 0 ? 0u : 0xFF000000u;
-				// Zero the RGB on transparent pixels too, so any image editor
-				// that displays semi-transparent / pre-multiplied previews
-				// won't show the leftover bg color through. Doesn't affect
-				// straight-alpha viewers (they ignore RGB where A=0).
-				out[i] = indexed[i] == 0 ? 0u : (src_dwords[i] | a);
-			}
-		}
-		else
-		{
-			for (int i = 0; i < n_pixels; i++)
-				out[i] = src_dwords[i] | 0xFF000000u;
-		}
+		cx_s = out_cx;
+		cy_s = out_cy;
 		const byte* bgra = reinterpret_cast<const byte*>(out.data());
 		if (fmt == fmt_tga)
 		{
@@ -5010,6 +5071,581 @@ bool CXCCFileView::take_screenshot()
 void CXCCFileView::OnPlayerScreenshot()
 {
 	take_screenshot();
+}
+
+namespace {
+
+// Self-contained paletted GIF frame writer. Lifted from gif.h's
+// GifWriteLzwImage but parameterized: caller supplies the palette + the
+// indexed pixels directly, plus the disposal byte (so we can request
+// disposal=2 "restore to background" when emitting transparent frames
+// without having to patch the file post-hoc).
+//
+// Why bypass gif.h's GifWriteFrame for the SHP-with-transparency path:
+// gif.h expects RGBA8 input and runs its own per-frame quantizer. Forcing
+// transparency on top of that with the oldImage trick poisons gif.h's
+// inter-frame delta encoder (any sprite pixel that happens to match the
+// previous frame at the same position gets emitted as transparent), so
+// frames 2+ end up shredded. Writing paletted frames directly with the
+// SHP's actual palette sidesteps all of that: every input pixel is
+// already a palette index, palette index 0 is the GIF transparent index,
+// no quantization, no delta-encoding surprises.
+//
+// Format reference: GIF89a per-frame block sequence is GCE -> Image
+// Descriptor -> local color table -> LZW data. Disposal byte fields are
+// at GCE byte 4 (bits 4-2 = disposal method, bit 0 = transparency flag).
+void gif_write_paletted_frame(FILE* f, const unsigned char* indexed,
+	int w, int h, int delay_cs,
+	const DWORD* color_table_256, int trans_idx, int disposal)
+{
+	// --- Graphics Control Extension ---
+	fputc(0x21, f);
+	fputc(0xf9, f);
+	fputc(0x04, f);
+	const unsigned char gce_flags = static_cast<unsigned char>(
+		((disposal & 0x07) << 2) | 0x01);  // bit 0: transparency flag
+	fputc(gce_flags, f);
+	fputc(delay_cs & 0xff, f);
+	fputc((delay_cs >> 8) & 0xff, f);
+	fputc(trans_idx & 0xff, f);
+	fputc(0, f); // block terminator
+
+	// --- Image Descriptor ---
+	fputc(0x2c, f);
+	fputc(0, f); fputc(0, f);   // left
+	fputc(0, f); fputc(0, f);   // top
+	fputc(w & 0xff, f); fputc((w >> 8) & 0xff, f);
+	fputc(h & 0xff, f); fputc((h >> 8) & 0xff, f);
+	// 0x87 = local color table present, sorted=no, 256 entries (size=7 -> 2^(7+1))
+	fputc(0x87, f);
+
+	// --- Local Color Table (256 entries) ---
+	// color_table_256 is BGRA in DWORD (B|G<<8|R<<16). Emit as RGB triples.
+	// Entry 0 forced to (0,0,0): it's the transparent index, the actual
+	// color doesn't matter because no opaque pixel ever references it,
+	// but writing zeros makes the global bg-color reference resolve to
+	// black (which is also the canvas-clear color when disposal=2).
+	fputc(0, f); fputc(0, f); fputc(0, f);
+	for (int i = 1; i < 256; i++)
+	{
+		const DWORD bgra = color_table_256[i];
+		const unsigned char b = static_cast<unsigned char>(bgra & 0xff);
+		const unsigned char g = static_cast<unsigned char>((bgra >> 8) & 0xff);
+		const unsigned char r = static_cast<unsigned char>((bgra >> 16) & 0xff);
+		fputc(r, f); fputc(g, f); fputc(b, f);
+	}
+
+	// --- LZW data ---
+	// 8-bit min code size matches the 256-entry palette. Code dictionary
+	// starts at 258 (256 + clear + EOI) and grows up to 4095, then resets.
+	const int min_code_size = 8;
+	const uint32_t clear_code = 1u << min_code_size; // 256
+	const uint32_t eoi_code   = clear_code + 1;      // 257
+	fputc(min_code_size, f);
+
+	struct lzw_node { uint16_t next_[256]; };
+	std::vector<lzw_node> tree(4096);
+	memset(tree.data(), 0, sizeof(lzw_node) * 4096);
+
+	// Bit-stream writer with 255-byte sub-block chunking (GIF spec).
+	struct bit_writer {
+		FILE* f;
+		uint8_t chunk[256];
+		int chunk_idx;
+		uint8_t byte_;
+		int bit_idx;
+		void init(FILE* fp) { f = fp; chunk_idx = 0; byte_ = 0; bit_idx = 0; }
+		void write_chunk()
+		{
+			fputc(chunk_idx, f);
+			fwrite(chunk, 1, chunk_idx, f);
+			chunk_idx = 0;
+		}
+		void write_bit(uint32_t bit)
+		{
+			byte_ |= (bit & 1) << bit_idx;
+			bit_idx++;
+			if (bit_idx > 7)
+			{
+				chunk[chunk_idx++] = byte_;
+				byte_ = 0;
+				bit_idx = 0;
+				if (chunk_idx == 255) write_chunk();
+			}
+		}
+		void write_code(uint32_t code, int length)
+		{
+			for (int b = 0; b < length; b++)
+			{
+				write_bit(code);
+				code >>= 1;
+			}
+		}
+		void flush()
+		{
+			while (bit_idx) write_bit(0);
+			if (chunk_idx) write_chunk();
+		}
+	} bw;
+	bw.init(f);
+
+	int32_t cur_code = -1;
+	int code_size = min_code_size + 1;       // 9 bits initially
+	uint32_t max_code = clear_code + 1;       // 257 (clear + EOI assigned)
+
+	bw.write_code(clear_code, code_size);
+
+	for (int yy = 0; yy < h; yy++)
+	{
+		for (int xx = 0; xx < w; xx++)
+		{
+			const uint8_t v = indexed[yy * w + xx];
+			if (cur_code < 0)
+			{
+				cur_code = v;
+			}
+			else if (tree[cur_code].next_[v])
+			{
+				cur_code = tree[cur_code].next_[v];
+			}
+			else
+			{
+				bw.write_code(static_cast<uint32_t>(cur_code), code_size);
+				tree[cur_code].next_[v] = static_cast<uint16_t>(++max_code);
+				if (max_code >= (1u << code_size))
+					code_size++;
+				if (max_code == 4095)
+				{
+					bw.write_code(clear_code, code_size);
+					memset(tree.data(), 0, sizeof(lzw_node) * 4096);
+					code_size = min_code_size + 1;
+					max_code = clear_code + 1;
+				}
+				cur_code = v;
+			}
+		}
+	}
+
+	bw.write_code(static_cast<uint32_t>(cur_code), code_size);
+	bw.write_code(clear_code, code_size);
+	bw.write_code(eoi_code, min_code_size + 1);
+	bw.flush();
+
+	fputc(0, f); // block terminator (end of image data)
+}
+
+} // anonymous namespace
+
+// Animated capture: VXL turntable (rotation / HVA / combined) or SHP/WSA
+// frame walk. Drives the relevant frame state through N frames, captures
+// each via capture_current_frame(), and emits either an animated GIF
+// (gif.h) or a numbered PNG sequence. SS / lighting / VPL / shading
+// (VXL) and side color / BG / shadows / palette (SHP) all flow through
+// player_draw's existing rendering, so every theme setting the user has
+// dialed in is honored without us touching the renderer.
+void CXCCFileView::OnPlayerTurntable()
+{
+	const bool vxl = is_vxl_view();
+	const bool shp_animated = !vxl && m_player_cf > 1;
+	if (!m_player_mode || !m_is_open || (!vxl && !shp_animated))
+	{
+		if (CMainFrame* mf = GetMainFrame())
+			mf->SetMessageText("Record needs a VXL or a multi-frame SHP/WSA in player mode.");
+		return;
+	}
+
+	const bool hva_available = vxl && m_hva_loaded && m_player_cf > 1;
+	const int  hva_cf = hva_available ? m_player_cf : 0;
+	const int  ss = vxl ? std::max(1, static_cast<int>(theme::vxl_supersample())) : 1;
+
+	CTurntableDlg dlg(hva_available, hva_cf, ss, this,
+		shp_animated, shp_animated ? m_player_cf : 0);
+	if (dlg.DoModal() != IDOK)
+		return;
+
+	const int  N         = dlg.m_frames;
+	const bool dir_cw    = dlg.m_dir_cw;
+	const int  fmt       = dlg.m_format;
+	const int  anim_mode = dlg.m_anim;
+	const int  delay_cs  = dlg.m_delay_cs;
+	const int  ds_mode   = dlg.m_downscale;
+	// SHP-only: emit palette index 0 as transparent. PNG gets real alpha=0;
+	// GIF uses gif.h's inter-frame transparency mechanism (oldImage trick).
+	const bool transparent_pal0 = dlg.m_transparent_pal0 && shp_animated;
+
+	// Build default filename from asset basename, append turntable tag so the
+	// user can tell screenshots and turntables apart at a glance.
+	CString default_name = m_fname.empty() ? (shp_animated ? "recording" : "turntable") : m_fname.c_str();
+	{
+		int dot = default_name.ReverseFind('.');
+		if (dot > 0) default_name = default_name.Left(dot);
+		default_name += shp_animated ? "_rec" : "_tt";
+		default_name += (fmt == CTurntableDlg::fmt_gif) ? ".gif" : "";
+	}
+
+	// Path collection — GIF: single .gif. PNG sequence: pick a base name; we
+	// derive name_yNNN_hNNN.png per frame in the same directory.
+	CString out_path;
+	CString out_dir;
+	CString out_base;
+	if (fmt == CTurntableDlg::fmt_gif)
+	{
+		CFileDialog fdlg(FALSE, "gif", default_name,
+			OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
+			"Animated GIF (*.gif)|*.gif||", this);
+		if (fdlg.DoModal() != IDOK)
+			return;
+		out_path = fdlg.GetPathName();
+		if (out_path.ReverseFind('.') <= out_path.ReverseFind('\\'))
+			out_path += ".gif";
+	}
+	else
+	{
+		// PNG sequence: pick a base path; per-frame names are derived from it.
+		// CFileDialog with no real format makes for a reasonable folder picker
+		// (the user types/picks a base name in their preferred folder).
+		CFileDialog fdlg(FALSE, "png", default_name,
+			OFN_HIDEREADONLY,
+			"PNG sequence base name (*.png)|*.png||", this);
+		if (fdlg.DoModal() != IDOK)
+			return;
+		out_path = fdlg.GetPathName();
+		int slash = out_path.ReverseFind('\\');
+		out_dir = (slash >= 0) ? out_path.Left(slash) : CString(".");
+		out_base = (slash >= 0) ? out_path.Mid(slash + 1) : out_path;
+		// Strip extension from base so we can append our own _yNNN_hNNN.png.
+		int dot = out_base.ReverseFind('.');
+		if (dot > 0) out_base = out_base.Left(dot);
+	}
+
+	// Save originals so we can restore exactly when capture finishes (or the
+	// user cancels mid-loop). Resetting m_vxl_yaw to start_yaw isn't enough —
+	// the user expects the model to look the same as before they clicked.
+	const double start_yaw = m_vxl_yaw;
+	const int    start_frame = m_player_frame;
+
+	// CLSID for PNG (only needed for PNG sequence path).
+	CLSID png_clsid = {};
+	bool png_clsid_ok = false;
+	if (fmt == CTurntableDlg::fmt_png_seq)
+		png_clsid_ok = (get_png_encoder_clsid(png_clsid) == 0);
+
+	// GIF writer state. Two paths:
+	//   - Default (gif.h GifWriter): RGB->palette quantization done by
+	//     gif.h. Used for VXL captures and SHP captures without
+	//     transparency. Header takes the first frame's dimensions;
+	//     deferred until we have the first capture.
+	//   - Paletted (raw FILE* + gif_write_paletted_frame): used when
+	//     transparent_pal0 is on for SHP. Bypasses gif.h's quantizer +
+	//     delta encoder so per-frame transparency masks survive intact.
+	GifWriter gif = {};
+	bool gif_open = false;
+	FILE* pal_gif_file = nullptr;
+	bool pal_gif_open = false;
+
+	int succeeded = 0;
+	int failed = 0;
+	const double two_pi = 6.283185307179586476925286766559;
+	// Reused across frames so we don't reallocate on every step. Sized
+	// lazily inside the loop based on the chosen ds_mode + actual capture
+	// dimensions.
+	std::vector<DWORD> ds_scratch;
+	bool cancelled = false;
+	// Drain any ESC keystroke that might have been pressed while the file
+	// dialog was open, so the loop only sees fresh presses. GetAsyncKeyState
+	// returns the key's state since the last call to itself for this thread,
+	// so a throwaway read clears the sticky bit.
+	GetAsyncKeyState(VK_ESCAPE);
+
+	for (int i = 0; i < N; i++)
+	{
+		// Cancel check at the top of each frame: ESC pressed since the last
+		// poll. Cheaper than running a CWaitCursor / PeekMessage pump and
+		// works while the window has no focus (e.g. user clicked away mid-
+		// capture). Stops the loop cleanly so the GifEnd / yaw-restore code
+		// below still runs and the partial GIF is at least playable.
+		if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+		{
+			cancelled = true;
+			break;
+		}
+		if (shp_animated)
+		{
+			// SHP/WSA: walk the native frames in order. player_set_frame
+			// updates m_player_frame + slider + label; the existing BGRA
+			// cache (m_player_bgra[i]) is already populated for SHP/WSA so
+			// the next paint just blits the cached frame.
+			player_set_frame(i);
+		}
+		else
+		{
+			// Update yaw / HVA frame for this step. anim_combined and anim_hva are
+			// only reachable when hva_available is true (dialog enforces it), so
+			// player_set_frame is safe to call for those modes.
+			if (anim_mode != CTurntableDlg::anim_hva)
+			{
+				const double step = two_pi / N;
+				const double signed_step = dir_cw ? step : -step;
+				m_vxl_yaw = start_yaw + signed_step * i;
+			}
+			if (anim_mode != CTurntableDlg::anim_rotation && hva_available)
+			{
+				// Map turntable frame i -> HVA timeline frame. Round so endpoints
+				// land cleanly: i=0 -> 0, i=N-1 -> ~hva_cf-1.
+				int hf = static_cast<int>((static_cast<double>(i) * hva_cf) / N + 0.5);
+				if (hf >= hva_cf) hf = hva_cf - 1;
+				player_set_frame(hf);
+			}
+
+			// Force splat rebuild for the new yaw/frame. SS=-1 sentinel matches
+			// the trick used elsewhere when external state changes invalidate
+			// the splat key (lines 158, 213). SHP path doesn't have a splat.
+			m_vxl_splat.ss = -1;
+		}
+		Invalidate(FALSE);
+		UpdateWindow();
+
+		std::vector<DWORD> bgra;
+		int cx = 0, cy = 0;
+		// wysiwyg=true: capture the on-screen composite as-is (BG color/
+		// checker/pane already baked into the cached BGRA). Without this
+		// flag, BG=Alpha and BG=Pane would write black-with-alpha=0 instead
+		// of the visible BG, which surprises users who expect the recorded
+		// GIF / PNG sequence to match their preview.
+		if (!capture_current_frame(bgra, cx, cy, /*wysiwyg=*/true))
+		{
+			failed++;
+			continue;
+		}
+
+		// Optional SS downscale before the writer sees the buffer. ds_full
+		// (or SS=1) skips this entirely; ds_native targets the logical voxel
+		// size; ds_half halves the supersampled dimensions. theme::bilinear_
+		// resample_bgra handles the alpha channel in the same averaging pass
+		// as RGB, so BG=Alpha screenshots get a clean anti-aliased mask.
+		if (ds_mode != CTurntableDlg::ds_full && ss > 1)
+		{
+			int out_w = cx;
+			int out_h = cy;
+			if (ds_mode == CTurntableDlg::ds_native)
+			{
+				out_w = std::max(1, cx / ss);
+				out_h = std::max(1, cy / ss);
+			}
+			else if (ds_mode == CTurntableDlg::ds_half)
+			{
+				out_w = std::max(1, cx / 2);
+				out_h = std::max(1, cy / 2);
+			}
+			if (out_w != cx || out_h != cy)
+			{
+				ds_scratch.assign(static_cast<size_t>(out_w) * out_h, 0);
+				theme::bilinear_resample_bgra(bgra.data(), cx, cy,
+					ds_scratch.data(), out_w, out_h);
+				bgra.swap(ds_scratch);
+				cx = out_w;
+				cy = out_h;
+			}
+		}
+
+		// SHP/WSA + transparency: grab the raw indexed buffer for the current
+		// frame. cx must equal m_player_cx here (downscale is forced off for
+		// SHP), so the indexed buffer's size matches the BGRA's pixel count
+		// one-to-one. Palette index 0 in the SHP becomes the transparent
+		// index in the GIF / the alpha=0 pixel in the PNG. No flood-fill,
+		// no inside-vs-outside heuristic — palette 0 always means "no
+		// sprite here" in the original asset, including shadows (which the
+		// renderer paints as darkened BG over palette-0 positions; in pure
+		// sprite-only output those drop to transparent too, by design).
+		const byte* shp_indexed = nullptr;
+		if (transparent_pal0
+			&& m_player_frame >= 0
+			&& m_player_frame < static_cast<int>(m_player_frames.size())
+			&& static_cast<int>(m_player_frames[m_player_frame].size()) >= cx * cy)
+		{
+			shp_indexed = m_player_frames[m_player_frame].data();
+		}
+
+		if (fmt == CTurntableDlg::fmt_gif && shp_indexed)
+		{
+			// Paletted-GIF path. Open the file once on first frame, write
+			// header (GifBegin's screen descriptor + NETSCAPE2.0 loop block),
+			// then per frame call our own gif_write_paletted_frame with the
+			// SHP's indexed buffer + m_color_table as the palette, with
+			// disposal=2 so transparent areas reset cleanly between frames.
+			if (!pal_gif_open)
+			{
+				fopen_s(&pal_gif_file, std::string(out_path).c_str(), "wb");
+				if (!pal_gif_file)
+				{
+					if (CMainFrame* mf = GetMainFrame())
+						mf->SetMessageText("Turntable: GIF open failed.");
+					break;
+				}
+				// File scaffolding: GIF89a + logical screen descriptor +
+				// global color table (256 entries from m_color_table) +
+				// optional NETSCAPE2.0 looping extension. Mirrors gif.h's
+				// GifBegin but with our actual palette as the global table
+				// (each frame still emits its own local table, but having a
+				// real global table is harmless and helps decoders that
+				// peek before the first image block).
+				FILE* f = pal_gif_file;
+				fputs("GIF89a", f);
+				fputc(cx & 0xff, f); fputc((cx >> 8) & 0xff, f);
+				fputc(cy & 0xff, f); fputc((cy >> 8) & 0xff, f);
+				fputc(0xf7, f); // global color table present, 256 entries
+				fputc(0, f);    // bg color index = 0 (transparent index)
+				fputc(0, f);    // pixel aspect ratio
+				fputc(0, f); fputc(0, f); fputc(0, f); // global pal entry 0
+				for (int e = 1; e < 256; e++)
+				{
+					const DWORD d = m_color_table[e];
+					fputc(static_cast<int>((d >> 16) & 0xff), f); // R
+					fputc(static_cast<int>((d >>  8) & 0xff), f); // G
+					fputc(static_cast<int>( d        & 0xff), f); // B
+				}
+				if (delay_cs != 0)
+				{
+					fputc(0x21, f); fputc(0xff, f); fputc(11, f);
+					fputs("NETSCAPE2.0", f);
+					fputc(3, f); fputc(1, f);
+					fputc(0, f); fputc(0, f); // loop infinitely
+					fputc(0, f);
+				}
+				pal_gif_open = true;
+			}
+			gif_write_paletted_frame(pal_gif_file, shp_indexed,
+				cx, cy, delay_cs, m_color_table, /*trans_idx=*/0,
+				/*disposal=*/2);
+			succeeded++;
+		}
+		else if (fmt == CTurntableDlg::fmt_gif)
+		{
+			// gif.h wants RGBA8 (alpha is ignored). Our buffer is BGRA — swap
+			// B<->R into a scratch buffer per frame. Note: the GIF encoder
+			// quantizes to 256 colors per frame, which is effectively lossless
+			// for VXL output (source is already a 256-entry palette).
+			std::vector<uint8_t> rgba(static_cast<size_t>(cx) * cy * 4);
+			for (int p = 0; p < cx * cy; p++)
+			{
+				const DWORD d = bgra[p];
+				rgba[p * 4 + 0] = static_cast<uint8_t>((d >> 16) & 0xff); // R
+				rgba[p * 4 + 1] = static_cast<uint8_t>((d >>  8) & 0xff); // G
+				rgba[p * 4 + 2] = static_cast<uint8_t>( d        & 0xff); // B
+				rgba[p * 4 + 3] = static_cast<uint8_t>((d >> 24) & 0xff); // A (gif ignores)
+			}
+			if (!gif_open)
+			{
+				if (!GifBegin(&gif, std::string(out_path).c_str(),
+					static_cast<uint32_t>(cx), static_cast<uint32_t>(cy),
+					static_cast<uint32_t>(delay_cs)))
+				{
+					if (CMainFrame* mf = GetMainFrame())
+						mf->SetMessageText("Turntable: GIF open failed.");
+					break;
+				}
+				gif_open = true;
+			}
+			if (GifWriteFrame(&gif, rgba.data(),
+				static_cast<uint32_t>(cx), static_cast<uint32_t>(cy),
+				static_cast<uint32_t>(delay_cs)))
+				succeeded++;
+			else
+				failed++;
+		}
+		else // PNG sequence
+		{
+			if (!png_clsid_ok)
+			{
+				failed++;
+				continue;
+			}
+			CString frame_path;
+			if (shp_animated)
+			{
+				// SHP/WSA: filename reflects native frame index, not yaw/HVA.
+				frame_path.Format("%s\\%s_f%03d.png", (LPCSTR)out_dir, (LPCSTR)out_base, i);
+			}
+			else
+			{
+				const int hf = (anim_mode == CTurntableDlg::anim_rotation || !hva_available)
+					? -1
+					: static_cast<int>((static_cast<double>(i) * hva_cf) / N + 0.5);
+				if (hf >= 0)
+					frame_path.Format("%s\\%s_y%03d_h%03d.png", (LPCSTR)out_dir, (LPCSTR)out_base, i, hf);
+				else
+					frame_path.Format("%s\\%s_y%03d.png", (LPCSTR)out_dir, (LPCSTR)out_base, i);
+			}
+			// Palette-0 transparency for PNG: clear alpha + zero RGB on pixels
+			// where the source palette index is 0. Mutates bgra in place; the
+			// per-frame buffer is throwaway, no aliasing risk. Pure
+			// sprite-only output — shadows (which the renderer paints as
+			// darkened BG over palette-0 positions) drop to transparent
+			// along with the rest of the BG, by design.
+			if (shp_indexed)
+			{
+				for (int p = 0; p < cx * cy; p++)
+					if (shp_indexed[p] == 0)
+						bgra[p] = 0;
+			}
+			Gdiplus::Bitmap bmp(cx, cy, cx * 4, PixelFormat32bppARGB,
+				const_cast<BYTE*>(reinterpret_cast<const BYTE*>(bgra.data())));
+			wchar_t wpath[MAX_PATH * 2] = {};
+			::MultiByteToWideChar(CP_ACP, 0, frame_path, -1, wpath, _countof(wpath));
+			if (bmp.Save(wpath, &png_clsid, NULL) == Gdiplus::Ok)
+				succeeded++;
+			else
+				failed++;
+		}
+
+		// Status update so the user sees progress on a slow capture (high SS
+		// or many frames). Updated every frame; the existing message-bar
+		// throttle keeps repaint cost bounded.
+		if (CMainFrame* mf = GetMainFrame())
+		{
+			CString msg;
+			msg.Format("Turntable: %d / %d  (press ESC to cancel)", i + 1, N);
+			mf->SetMessageText(msg);
+		}
+	}
+
+	if (gif_open)
+		GifEnd(&gif);
+	if (pal_gif_open && pal_gif_file)
+	{
+		// GIF89a trailer + close. Mirrors GifEnd's tail.
+		fputc(0x3b, pal_gif_file);
+		fclose(pal_gif_file);
+		pal_gif_file = nullptr;
+		pal_gif_open = false;
+	}
+
+	// Restore pre-capture state. Bump splat ss=-1 so the post-capture paint
+	// rebuilds at the original yaw/frame (otherwise the model is frozen at
+	// the last captured pose until the user touches a slider). For SHP we
+	// just restore the frame; yaw / splat invalidation are no-ops for it.
+	if (!shp_animated)
+		m_vxl_yaw = start_yaw;
+	if (shp_animated || (anim_mode != CTurntableDlg::anim_rotation && hva_available))
+		player_set_frame(start_frame);
+	m_vxl_splat.ss = -1;
+	Invalidate(FALSE);
+
+	if (CMainFrame* mf = GetMainFrame())
+	{
+		CString msg;
+		if (cancelled)
+			msg.Format("Turntable: cancelled after %d / %d frame(s) (ESC). Partial output saved to %s",
+				succeeded,
+				N,
+				(fmt == CTurntableDlg::fmt_gif) ? (LPCSTR)out_path : (LPCSTR)out_dir);
+		else if (failed == 0)
+			msg.Format("Turntable: saved %d frame(s) to %s", succeeded,
+				(fmt == CTurntableDlg::fmt_gif) ? (LPCSTR)out_path : (LPCSTR)out_dir);
+		else
+			msg.Format("Turntable: %d ok, %d failed", succeeded, failed);
+		mf->SetMessageText(msg);
+	}
 }
 
 HBRUSH CXCCFileView::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -5644,6 +6280,9 @@ void CXCCFileView::OnVxlHvaLoad()
 
 	Cvirtual_binary data;
 	string source_label;
+	// Captured here (rather than in the Browse branch's inner scope) so the
+	// part-HVA auto-pair block below can derive the folder from it.
+	string picked_disk_path;
 	if (chosen >= k_mix_base && chosen < k_mix_base + static_cast<int>(mix_choices.size()))
 	{
 		const mix_choice& c = mix_choices[chosen - k_mix_base];
@@ -5668,6 +6307,7 @@ void CXCCFileView::OnVxlHvaLoad()
 			AfxMessageBox("Could not read the selected HVA file.", MB_ICONERROR);
 			return;
 		}
+		picked_disk_path = path;
 	}
 
 	// Validate by parsing — Chva_file::is_valid() checks the header sizing
@@ -5682,6 +6322,76 @@ void CXCCFileView::OnVxlHvaLoad()
 	m_hva_data = data;
 	m_hva_loaded = true;
 	m_hva_vxl_half = 0;
+
+	// Auto-pair part HVAs for any sub-VXLs currently loaded by Full Hierarchy.
+	// vxl_load_parts() ran at file open and stored each tur/barl in
+	// m_vxl_parts; if their .hva siblings weren't co-located with the body
+	// at that time (or weren't probed), the parts stay frozen even after the
+	// user manually picks a body HVA here. Re-probe now using the same
+	// naming scheme vxl_load_parts uses (<base><suffix>.hva), looking in
+	// (1) the source MIX when a MIX entry was chosen, (2) the picked HVA's
+	// disk folder when Browse was used. Existing per-part HVAs are not
+	// overwritten — the user may have manually loaded them too.
+	if (!m_vxl_parts.empty())
+	{
+		string body_base = Cfname(m_fname).get_ftitle();
+		for (auto& c : body_base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+
+		// Probe order: source MIX first (matches OnVxlHvaLoad's own
+		// preference), then the disk folder of the picked HVA when Browse
+		// was used. The MIX scan helps even on Browse if the part HVAs
+		// happen to live in the same MIX as the part VXLs.
+		string disk_dir;
+		if (!picked_disk_path.empty())
+		{
+			int slash = static_cast<int>(picked_disk_path.find_last_of("\\/"));
+			if (slash > 0)
+				disk_dir = picked_disk_path.substr(0, slash);
+		}
+
+		auto try_pair_part = [&](t_vxl_part& p) {
+			if (p.hva_loaded && p.hva_data.size() > 0)
+				return;	// keep existing pairing
+			// Derive the part suffix from the part's name vs body_base.
+			// p.name is "<body_base><suffix>.vxl" lowercased by vxl_load_parts.
+			string pname = p.name;
+			for (auto& c : pname) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			string pstem = pname;
+			if (pstem.size() >= 4 && pstem.substr(pstem.size() - 4) == ".vxl")
+				pstem.resize(pstem.size() - 4);
+			if (pstem.size() <= body_base.size() ||
+				pstem.compare(0, body_base.size(), body_base) != 0)
+				return;
+			const string hva_name = pstem + ".hva";
+
+			Cvirtual_binary hva_bytes;
+			// (1) Source MIX (covers both MIX-pick and Browse cases when the
+			// part HVAs happen to live in the same MIX as the part VXLs).
+			hva_bytes = find_in_sources(hva_name);
+			// (2) Disk folder of the picked HVA (Browse case).
+			if (hva_bytes.size() == 0 && !disk_dir.empty())
+			{
+				string disk_path = disk_dir + "\\" + hva_name;
+				Cvirtual_binary t;
+				if (!t.load(disk_path) && t.size() > 0)
+					hva_bytes = t;
+			}
+			if (hva_bytes.size() == 0)
+				return;
+
+			Chva_file hva_probe;
+			hva_probe.load(hva_bytes);
+			if (!hva_probe.is_valid() || hva_probe.get_c_frames() <= 0
+				|| hva_probe.get_c_sections() <= 0)
+				return;
+			p.hva_data = hva_bytes;
+			p.hva_loaded = true;
+		};
+
+		for (auto& p : m_vxl_parts)
+			try_pair_part(p);
+	}
+
 	// Re-enter the player so the transport row / slider rebind to the new
 	// frame count. player_enter calls player_decode_frames which now sees
 	// m_hva_loaded and produces m_player_cf = HVA frame count.
