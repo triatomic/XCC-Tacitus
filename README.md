@@ -18,6 +18,34 @@ This project descends from a chain of forks:
 
 Credit for the underlying app and the bulk of the modern improvements goes to Olaf van der Spek and Vodrix respectively. This fork's contribution is the additions described below.
 
+## Recent releases
+
+- **v10.0** (2026-05-15) — **Animated Recording**. New `Record` button on the player band captures animated voxel
+  turntables (rotation / HVA / combined) and SHP/WSA frame animations as animated GIF or numbered PNG sequence. ESC
+  cancels mid-capture. SS-aware downscale combobox so VXL recordings can land at native size with the supersampling
+  cleanup baked in. SHP-only "Make palette index 0 transparent" checkbox emits real per-frame transparency in both
+  formats (the GIF path uses a custom paletted writer with disposal=2 so transparent regions reset cleanly between
+  frames). `Load HVA…` on the body now auto-pairs `<base>tur.hva` / `<base>barl.hva` for sub-VXL parts loaded by
+  Full Hierarchy. Non-transparent recordings are WYSIWYG across all three BG modes.
+- **v9.75** (2026-05-15) — RA1-quality batch. Extension-driven MIX type fallback now runs for non-encrypted MIXes
+  too, fixing `.wsa`, `.fnt`, `.icn`, `.urb`, `.cps`, `.pkt`, `.eng`/`.fre`/`.ger`, `.tem` showing as unknown or
+  wrong variant; SHP/TMP variant respects game family (TD/RA → `shp (td)` / `tmp` / `tmp (ra)`, not the iso TS
+  variant). VQA framerate fix: `Cvqa_file::frame_rate()` zeros the audio-sample counter at the first VQFR boundary
+  so multi-second RA1 audio prefetch before VQFR0 doesn't collapse reported fps to 1-2. Video Viewer dialog: FPS
+  edit + spin, real pause/resume, per-tick auto-advance (no 15s idle wait).
+- **v9.70** (2026-05-14) — MIX/BIG reopen-latency optimization batch. Extended `global mix cache.dat` record
+  format (`probe-v5-game`) so warm reopen skips game-detection and the per-entry LMD scan; container indexes
+  switched to hash tables with capacity pre-reserved.
+- **v9.63** (2026-05-14) — Suppress mouse-wheel scroll on player pane.
+- **v9.62** (2026-05-14) — Screenshot export overhaul: PNG default, BMP→TGA, real alpha channel derived from the
+  indexed buffer when player BG = Alpha or Pane.
+- **v9.61** (2026-05-14) — Specular slider + two-light VPL section selection ported from vxl-renderer; Diffuse /
+  Ambient reordered.
+- **v9.0**  (2026-05-13) — SHP playback CPU fix via OpenMP wait-policy self-relaunch shim, plus dark-mode
+  dropdown listbox theming.
+
+For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/tags).
+
 ## What's new in this fork
 
   - **Win11-style dark mode** — full theming via uxtheme ordinals + DWM immersive dark, owner-draw menus (bar + popups),
@@ -39,7 +67,9 @@ Credit for the underlying app and the bulk of the modern improvements goes to Ol
   overlay sun indicator while the dialog is open.
   - **HVA animation playback for VXL** — `Load HVA…` button auto-matches HVAs in the same MIX by basename fuzzy match.
   Quaternion-slerp interpolation between keyframes (12 timeline steps per keyframe), Loop toggle, slider scrubbing.
-  Sibling-part HVAs play independently from the body's HVA.
+  Sibling-part HVAs play independently from the body's HVA. Picking a body HVA from the menu (or Browse...) also
+  auto-pairs `<base>tur.hva` / `<base>barl.hva` for any sub-VXL parts loaded by Full Hierarchy, searching both the
+  source MIX and the picked HVA's disk folder — so picking a single HVA animates the whole rig, not just the body.
   - **Image interpolation modes** — Nearest / Bilinear / Bicubic / Lanczos-2 (hand-rolled CPU separable resampler)
   selectable from `Graphics → Image Interpolation`. Persisted per-app.
   - **Sharpen post-pass** — `Graphics → Sharpen` (0 / 25 / 50 / 75 / 100 %), 3×3 unsharp mask applied after resample.
@@ -76,6 +106,14 @@ Credit for the underlying app and the bulk of the modern improvements goes to Ol
   - **Screenshot export** (VXL/SHP player) — `Screenshot` button or `Ctrl+Shift+S`. PNG (default), TGA, PCX. Real alpha
   channel derived from the indexed buffer when BG = Alpha or BG = Pane, transparent pixels zeroed in RGB. PCX uses the
   gamma-corrected color table so exports match BMP/PNG.
+  - **Animated Recording** (VXL/SHP/WSA player) — `Record` button captures animations to GIF or numbered PNG sequence.
+  **VXL** modes: rotation only (360° turntable), HVA only, or combined rotation + HVA. **SHP/WSA**: walks the asset's
+  own frame animation. Captures honor every active player setting (SS, lighting, VPL, shading, side color, BG mode,
+  shadows, palette). **Downscale combobox** for VXL with supersampling on (Native / Half SS / Full SS) — the
+  render-high/output-low trick gives clean GIFs at native voxel size with the SS edge cleanup baked in. **Make palette
+  index 0 transparent** checkbox for SHP exports real per-frame transparency in both formats — the GIF path uses a
+  custom paletted writer (the SHP's own palette as the GIF local palette, disposal=2 for clean per-frame masks). **ESC
+  cancels** mid-capture, partial output is preserved.
   - **Embedded global mix database fallback** — the on-disk `data/global mix database.dat` is also compiled into the
   Mixer EXE as `RCDATA GLOBAL_MIX_DATABASE`. If the on-disk dat is missing, the embedded copy is used; the title bar
   shows `[DB: on-disk]` / `[DB: embedded]` / `[DB: missing]`. On-disk wins, so user/mod-shipped dats override the
