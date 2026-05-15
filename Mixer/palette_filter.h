@@ -8,7 +8,7 @@ class Cpalette_filter
 {
 public:
 	string pick(t_game& game);
-	void select(t_file_type ft, int cx, int cy, string fname);
+	void select(t_file_type ft, int cx, int cy, string fname, t_game current_game = game_unknown);
 	Cpalette_filter();
 private:
 	class Clist_entry

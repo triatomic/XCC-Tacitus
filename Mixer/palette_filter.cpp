@@ -29,6 +29,20 @@ Cpalette_filter::Cpalette_filter()
 	m_list.push_back(Clist_entry(game_td, "temperat.pal", ft_shp, "*.tem"));
 	m_list.push_back(Clist_entry(game_td, "winter.pal", ft_shp, "*.win"));
 
+	// RA1: SHPs are mostly numeric-id named (no extension hint). The three
+	// theatre rules below use empty fname so they all score equally in
+	// q() — that lets the +3 View->Game=RA bias hoist all three into
+	// m_vector with the same score, and pick() rotates through them on
+	// repeated Ctrl+Q presses (matching pre-existing TD/TS/RA2 cycling).
+	// Order = first hit on press 1: temperat → snow → interior.
+	// RA1 templates use ft_tmp (24x24), distinct from TS's ft_tmp_ts (48x24).
+	m_list.push_back(Clist_entry(game_ra, "temperat.pal", ft_shp));
+	m_list.push_back(Clist_entry(game_ra, "snow.pal",     ft_shp));
+	m_list.push_back(Clist_entry(game_ra, "interior.pal", ft_shp));
+	m_list.push_back(Clist_entry(game_ra, "temperat.pal", ft_tmp));
+	m_list.push_back(Clist_entry(game_ra, "snow.pal",     ft_tmp));
+	m_list.push_back(Clist_entry(game_ra, "interior.pal", ft_tmp));
+
 	m_list.push_back(Clist_entry(game_ts, "cameo.pal", ft_shp_ts, "*icon*", 64, 48));
 	m_list.push_back(Clist_entry(game_ts, "dropship.pal", ft_shp_ts, "drop000?*"));
 	m_list.push_back(Clist_entry(game_ts, "isosno.pal", ft_tmp_ts, "*.sno"));
@@ -183,13 +197,20 @@ Cpalette_filter::Cpalette_filter()
 
 }
 
-void Cpalette_filter::select(t_file_type ft, int cx, int cy, string fname)
+void Cpalette_filter::select(t_file_type ft, int cx, int cy, string fname, t_game current_game)
 {
 	m_vector.clear();
 	int best_q = INT_MIN;
 	for (auto& i : m_list)
 	{
 		int q = i.q(ft, cx, cy, fname);
+		// View->Game tiebreaker: prefer rules for the currently-selected game
+		// when the user has picked one explicitly (not Auto / game_unknown).
+		// +3 outranks per-attribute +2/+1 increments so a matching game wins
+		// among otherwise comparable rules, without overriding a far more
+		// specific glob+dimension rule of a different game.
+		if (current_game != game_unknown && i.game() == current_game)
+			q += 3;
 		if (q < best_q)
 			continue;
 		if (q > best_q)

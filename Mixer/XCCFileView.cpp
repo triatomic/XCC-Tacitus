@@ -5996,7 +5996,13 @@ void CXCCFileView::auto_select()
 {
 	if (!m_can_pick)
 	{
-		m_palette_filter.select(m_ft, m_cx, m_cy, m_fname);
+		// View->Game (m_game) is the user's explicit selection; the -1 sentinel
+		// means Auto, in which case we pass game_unknown so the filter applies
+		// no bias and rotates rules in score order as before.
+		t_game cur = GetMainFrame()->get_game();
+		if (static_cast<int>(cur) < 0 || cur >= game_unknown)
+			cur = game_unknown;
+		m_palette_filter.select(m_ft, m_cx, m_cy, m_fname, cur);
 		m_can_pick = true;
 	}
 	t_game game;
