@@ -2,6 +2,8 @@
 
 A fork of XCC Mixer focused on a Win11-style dark mode, an in-pane SHP/WSA/VXL player, and improved search & navigation.
 
+<img width="2559" height="1130" alt="image" src="https://github.com/user-attachments/assets/288f76ca-4ab1-4993-92e0-b30eaa0ae68f" />
+
 ## Downloads
 
 Download latest official release: <https://github.com/triatomic/XCC-Tacitus/releases>
@@ -18,24 +20,82 @@ Credit for the underlying app and the bulk of the modern improvements goes to Ol
 
 ## What's new in this fork
 
-- **Win11-style dark mode** — full theming via uxtheme ordinals + DWM immersive dark, owner-draw menus (bar + popups), themed splitter / status bar / list-view headers, dialog walker, dark `SysHeader32` subclass for embedded headers. Light and dark switchable via `Theme` menu (Ctrl+1 / Ctrl+2).
-- **In-pane SHP/WSA/VXL player** — press `P` on a SHP/WSA/VXL to enter player mode without leaving the file pane. Play/pause, reverse, frame slider, FPS control. SHP-specific extras: shadow pair-mode, BG toggle, 8 side-color preset swatches + custom, isometric game grid (TS 48px / RA2 60px) drawn into the source DIB before scaling. VXL gets a 3dsmax-style orbit viewer with a Gaussian-footprint splat for smooth silhouettes during rotation.
-- **Image interpolation modes** — Nearest / Bilinear / Bicubic / Lanczos-3 (hand-rolled CPU separable resampler) selectable from the `Theme` menu. Persisted per-app.
-- **SHP transparency toggle** — palette index 0 paints the alpha checkerboard instead of the literal palette color. Applies to SHP/PCX/CPS/WSA/TMP and the VXL background.
-- **Two search dialogs**:
-  - `Ctrl+F` — `CSearchInPaneDlg` searches the current MIX/folder, regex toggle, sortable Name / Size, multi-select.
-  - `Ctrl+Shift+F` — `CSearchFileDlg` searches recursively across both panes; results captured with `top_mix_path` so extract still works after pane navigation. List view groups results by source MIX chain.
-- **Per-pane forward/back navigation stack** — XButton1 mouse, the `..` row, and `File → Close` all route through the same nav stack. Forward/back works as expected; `Browse...` and `..` rows are pinned to the top regardless of sort.
-- **Numeric size sort** — listviews sort by raw bytes, not formatted size strings.
-- **Batch extract** — flat (filenames sanitized) and preserve (under `<chosen>/<source_mix_name>/<file>`) variants.
-- **Window placement persistence** — restored-rect + maximized state both remembered across sessions.
-- **One-pane / two-pane layout toggle** — `Theme → Panes`, persisted.
-- **Listview gridlines** — theme-aware. Custom-drawn in dark mode (the system `LVS_EX_GRIDLINES` paints unthemable light gray).
-- **Folder-loaded palettes** — `CSelectPaletteDlg` "Load Folder..." reads palettes from disk. `Ctrl+[` / `Ctrl+]` cycle siblings of the current palette.
-- **Embedded global mix database fallback** — the on-disk `data/global mix database.dat` is also compiled into the Mixer EXE as `RCDATA GLOBAL_MIX_DATABASE`. If the on-disk dat is missing, the embedded copy is used; the title bar shows `[DB: on-disk]` / `[DB: embedded]` / `[DB: missing]`. On-disk wins, so user/mod-shipped dats override the embedded one.
-- **Format-probe optimizations** — magic-byte short-circuit in `Ccc_file::get_file_type` for PNG / OGG / DDS / BINK / VOC / JPEG. `looks_like_ini` heuristic gates the heavy text/INI parser tail. `mix_cache` `probe-v2` sentinel auto-invalidates stale on-disk format-table caches.
+  - **Win11-style dark mode** — full theming via uxtheme ordinals + DWM immersive dark, owner-draw menus (bar + popups),
+   themed splitter / status bar / list-view headers, dialog walker, dark `SysHeader32` subclass for embedded headers.
+  Light and dark switchable via `Theme` menu (Ctrl+1 / Ctrl+2). System Default mode follows Windows' light/dark setting
+  and refreshes on `WM_SETTINGCHANGE`.
+  - **In-pane SHP/WSA/VXL player** — press `P` on a SHP/WSA/VXL to enter player mode without leaving the file pane.
+  Play/pause, reverse, frame slider, FPS control. SHP-specific extras: shadow pair-mode, 3-state BG toggle (Color /
+  Alpha-checkerboard / Pane), 8 side-color preset swatches + custom, isometric game grid (TS 48px / RA2 60px) drawn into
+   the source DIB before scaling. **Ctrl+wheel zoom + right-drag pan** in player mode (SHP/WSA and VXL).
+  - **VXL orbit viewer + voxel splat** — 3dsmax-style left-drag rotates (yaw/pitch), incremental warp-back drag,
+  infinite mouse travel. Voxel splat with rotation-aware footprint, OpenMP-parallel by output row, supersampling
+  1×/2×/4×/8×/16×, optional FXAA post-pass, per-voxel shading with the loaded VPL (auto-detected `voxels.vpl`). Sibling
+  parts (`tur`, `barl`) auto-load and play together.
+  - **VXL Lighting dialog** (`Graphics → VXL Lighting…`, `Ctrl+L`) — Azimuth / Elevation / Diffuse / Ambient / Specular
+  sliders with two-way edit boxes, live commits during slider drag. Normal source choice: file (Westwood normal table
+  per section type) vs computed (6-face / 26-neighbor weighted / smooth Gaussian gradient with 3³ or 5³ kernel).
+  Engine-faithful VPL section mapping (specular-aware two-light formula ported from vxl-renderer). Light-direction
+  overlay sun indicator while the dialog is open.
+  - **HVA animation playback for VXL** — `Load HVA…` button auto-matches HVAs in the same MIX by basename fuzzy match.
+  Quaternion-slerp interpolation between keyframes (12 timeline steps per keyframe), Loop toggle, slider scrubbing.
+  Sibling-part HVAs play independently from the body's HVA.
+  - **Image interpolation modes** — Nearest / Bilinear / Bicubic / Lanczos-2 (hand-rolled CPU separable resampler)
+  selectable from `Graphics → Image Interpolation`. Persisted per-app.
+  - **Sharpen post-pass** — `Graphics → Sharpen` (0 / 25 / 50 / 75 / 100 %), 3×3 unsharp mask applied after resample.
+  Auto-bypasses the 1:1 BitBlt fast path at Native zoom when active.
+  - **Frame-rate cap + input throttle** — `Graphics → Frame Rate Cap` (30 / 60 / 120 / Unlimited / Custom…). Caps both
+  paint invalidation and mouse-input handler bodies; high-poll mice no longer eat a CPU core during orbit-drag.
+  - **SHP transparency toggle** — palette index 0 paints the alpha checkerboard instead of the literal palette color.
+  Applies to SHP/PCX/CPS/WSA/TMP and the VXL background.
+  - **Two search dialogs**:
+    - `Ctrl+F` — `CSearchInPaneDlg` searches the current MIX/folder, regex toggle, sortable Name / Size, multi-select.
+    - `Ctrl+Shift+F` — `CSearchFileDlg` searches recursively across both panes; results captured with `top_mix_path` so
+  extract still works after pane navigation. List view groups results by source MIX chain.
+  - **Per-pane forward/back navigation stack** — XButton1 mouse, the `..` row, and `File → Close` all route through the
+  same nav stack. Forward/back works as expected; `Browse...` and `..` rows are pinned to the top regardless of sort.
+  - **Numeric size sort** — listviews sort by raw bytes, not formatted size strings.
+  - **Batch extract** — flat (filenames sanitized) and preserve (under `<chosen>/<source_mix_name>/<file>`) variants.
+  **Parallel extract** option (`Configure → Parallel Extract`, default on) — two-phase serial-read / parallel-write that
+   wins on SSDs.
+  - **Window placement persistence** — restored-rect + maximized state both remembered across sessions.
+  - **One-pane / two-pane layout toggle** — `Theme → Pane Layout`, persisted. Hidden middle pane stays alive at zero
+  width; splitter no longer accidentally re-expands it on drag.
+  - **Listview gridlines** — theme-aware. Custom-drawn in dark mode (the system `LVS_EX_GRIDLINES` paints unthemable
+  light gray).
+  - **Folder-loaded palettes** — `CSelectPaletteDlg` "Load Folder..." reads palettes from disk recursively. `Ctrl+[` /
+  `Ctrl+]` cycle siblings of the current palette. **PAL Paths dialog** — user-managed list of folders / MIX archives
+  loaded at every start, with override-per-game toggle.
+  - **Customizable keybinds** — `Configure → Keybinds…` rebinds every accelerator and most context actions to keys +
+  mouse buttons (incl. chord shortcuts). Persisted to settings INI. Settings Directory submenu picks between
+  `%APPDATA%\XCC\Mixer\` and the EXE folder.
+  - **Directories dialog overhaul** — `View → Directories…` rows are editable comboboxes. Auto-detection walks: XCC's
+  saved key → Westwood retail registry → Steam libraries (parses `libraryfolders.vdf`, knows per-game appids and
+  installdir names for every classic C&C SKU on Steam). All detected sources offered as dropdown choices plus
+  `Custom...` folder browser.
+  - **Screenshot export** (VXL/SHP player) — `Screenshot` button or `Ctrl+Shift+S`. PNG (default), TGA, PCX. Real alpha
+  channel derived from the indexed buffer when BG = Alpha or BG = Pane, transparent pixels zeroed in RGB. PCX uses the
+  gamma-corrected color table so exports match BMP/PNG.
+  - **Embedded global mix database fallback** — the on-disk `data/global mix database.dat` is also compiled into the
+  Mixer EXE as `RCDATA GLOBAL_MIX_DATABASE`. If the on-disk dat is missing, the embedded copy is used; the title bar
+  shows `[DB: on-disk]` / `[DB: embedded]` / `[DB: missing]`. On-disk wins, so user/mod-shipped dats override the
+  embedded one.
+  - **Format-probe optimizations** — magic-byte short-circuit in `Ccc_file::get_file_type` for PNG / OGG / DDS / BINK /
+  VOC / JPEG / Renegade MIX1. `looks_like_ini` heuristic gates the heavy text/INI parser tail. `mix_cache` extended
+  record format (game + LMD locations + format-CRC sentinel) auto-invalidates stale caches and skips the per-entry LMD
+  scan on warm reopen. Container indexes (MIX entry table, BIG TOC) switched to hash tables with capacity pre-reserved.
+  - **RA1 / TD content fixes** — extension-driven MIX type classifier now runs for all archives (not just encrypted),
+  correctly identifying `.wsa`, `.fnt`, `.icn`, `.urb`, `.cps`, `.pkt`, `.eng`/`.fre`/`.ger`, `.tem`, `.vpl`, etc.
+  SHP/TMP variant respects game family (TD/RA → `shp (td)` / `tmp` / `tmp (ra)`, not the iso TS variant). RA1 `.vqa`
+  framerate detection no longer collapses to 1-2 fps due to multi-second audio prefetch before the first video chunk.
+  - **Video Viewer popup overhaul** — Play on SHP/WSA/VQA opens a dialog with FPS edit + spin (1-120, live timer
+  restart), real Play/Pause for everything, per-tick auto-advance (no 15-second idle wait), slider scrub works during
+  pause. VQA still drives video off audio progress so playback stays in sync regardless of the FPS knob.
+  - **OpenMP wait-policy fix** — Mixer self-relaunches once with `OMP_WAIT_POLICY=PASSIVE` so MSVC's `vcomp140` doesn't
+  busy-loop a CPU core between parallel regions during various operations
 
-See `CLAUDE.md` (kept locally, not committed) for the architectural notes.
+	
+
 
 ## Build
 
