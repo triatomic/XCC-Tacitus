@@ -1,6 +1,6 @@
 # XCC-Tacitus
 
-A fork of XCC Mixer focused on a Win11-style dark mode, an in-pane SHP/WSA/VXL player, improved search & navigation. And keybinds.
+A fork of XCC Mixer with a Win11-style dark mode, in-pane SHP/WSA/VXL player and recorder, customizable keybinds, and faster search & navigation.
 
 <img width="2559" height="1130" alt="image" src="https://github.com/user-attachments/assets/288f76ca-4ab1-4993-92e0-b30eaa0ae68f" />
 
