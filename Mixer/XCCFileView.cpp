@@ -5258,8 +5258,22 @@ void CXCCFileView::OnPlayerTurntable()
 	const int  hva_cf = hva_available ? m_player_cf : 0;
 	const int  ss = vxl ? std::max(1, static_cast<int>(theme::vxl_supersample())) : 1;
 
+	// SHP/WSA effective frame count: when Shadows is on, the second half of
+	// m_player_cf holds the per-frame shadow masks (frame N+cf/2 is the
+	// shadow for frame N), so the player only walks the first cf/2 frames.
+	// Recording past that index would capture pure shadow-mask frames as if
+	// they were main frames, which renders as garbage. Mirror the player's
+	// own range halving — same condition as player_set_frame at line 3453.
+	int shp_capture_cf = 0;
+	if (shp_animated)
+	{
+		shp_capture_cf = m_player_cf;
+		if (m_player_shadows_on && m_player_cf >= 2 && (m_player_cf % 2) == 0)
+			shp_capture_cf = m_player_cf / 2;
+	}
+
 	CTurntableDlg dlg(hva_available, hva_cf, ss, this,
-		shp_animated, shp_animated ? m_player_cf : 0);
+		shp_animated, shp_capture_cf);
 	if (dlg.DoModal() != IDOK)
 		return;
 
@@ -5452,18 +5466,45 @@ void CXCCFileView::OnPlayerTurntable()
 		// frame. cx must equal m_player_cx here (downscale is forced off for
 		// SHP), so the indexed buffer's size matches the BGRA's pixel count
 		// one-to-one. Palette index 0 in the SHP becomes the transparent
-		// index in the GIF / the alpha=0 pixel in the PNG. No flood-fill,
-		// no inside-vs-outside heuristic — palette 0 always means "no
-		// sprite here" in the original asset, including shadows (which the
-		// renderer paints as darkened BG over palette-0 positions; in pure
-		// sprite-only output those drop to transparent too, by design).
+		// index in the GIF / the alpha=0 pixel in the PNG.
+		//
+		// Shadow compositing (when m_player_shadows_on and cf is even, same
+		// condition the renderer uses): SHPs store the shadow as frame
+		// [main + cf/2]. Where the shadow frame has a non-zero pixel and
+		// the main frame's pixel is palette 0, the renderer paints a
+		// darkened-BG halo on screen. To preserve that halo in the
+		// transparent GIF/PNG output we composite into a scratch indexed
+		// buffer, writing palette index 255 at those positions. Slot 255
+		// in the GIF palette is overridden to a fixed dark RGB
+		// (kShadowR/G/B below) — on the rare SHP that uses idx 255 as a
+		// real sprite color, those pixels would render as the shadow
+		// color, but the C&C palette convention reserves the slot.
 		const byte* shp_indexed = nullptr;
+		std::vector<byte> shp_composite;
+		const int kShadowIdx = 255;
 		if (transparent_pal0
 			&& m_player_frame >= 0
 			&& m_player_frame < static_cast<int>(m_player_frames.size())
 			&& static_cast<int>(m_player_frames[m_player_frame].size()) >= cx * cy)
 		{
 			shp_indexed = m_player_frames[m_player_frame].data();
+			const bool shadow_on = m_player_shadows_on && m_player_cf >= 2
+				&& (m_player_cf % 2) == 0;
+			const int shadow_idx_frame = m_player_frame + m_player_cf / 2;
+			if (shadow_on
+				&& shadow_idx_frame >= 0
+				&& shadow_idx_frame < static_cast<int>(m_player_frames.size())
+				&& static_cast<int>(m_player_frames[shadow_idx_frame].size()) >= cx * cy)
+			{
+				const byte* shadow = m_player_frames[shadow_idx_frame].data();
+				shp_composite.assign(shp_indexed, shp_indexed + cx * cy);
+				for (int p = 0; p < cx * cy; p++)
+				{
+					if (shp_composite[p] == 0 && shadow[p] != 0)
+						shp_composite[p] = static_cast<byte>(kShadowIdx);
+				}
+				shp_indexed = shp_composite.data();
+			}
 		}
 
 		if (fmt == CTurntableDlg::fmt_gif && shp_indexed)
@@ -5497,13 +5538,19 @@ void CXCCFileView::OnPlayerTurntable()
 				fputc(0, f);    // bg color index = 0 (transparent index)
 				fputc(0, f);    // pixel aspect ratio
 				fputc(0, f); fputc(0, f); fputc(0, f); // global pal entry 0
-				for (int e = 1; e < 256; e++)
+				// Slots 1..254 from m_color_table; slot 255 reserved as the
+				// shadow color so the per-frame composite can reference it.
+				for (int e = 1; e < kShadowIdx; e++)
 				{
 					const DWORD d = m_color_table[e];
 					fputc(static_cast<int>((d >> 16) & 0xff), f); // R
 					fputc(static_cast<int>((d >>  8) & 0xff), f); // G
 					fputc(static_cast<int>( d        & 0xff), f); // B
 				}
+				// Shadow slot — fixed dark RGB. Tuned to match the on-screen
+				// shadow appearance (renderer uses 47% intensity which over
+				// the common BG colors lands around this range).
+				fputc(40, f); fputc(40, f); fputc(40, f);
 				if (delay_cs != 0)
 				{
 					fputc(0x21, f); fputc(0xff, f); fputc(11, f);
@@ -5514,8 +5561,15 @@ void CXCCFileView::OnPlayerTurntable()
 				}
 				pal_gif_open = true;
 			}
+			// Per-frame palette: copy m_color_table, override slot 255 with
+			// the same dark RGB the global palette uses for shadow pixels.
+			// Built per call (cheap — 256 DWORDs); could be hoisted out of
+			// the loop if profiling shows it matters.
+			DWORD pal_for_frame[256];
+			std::memcpy(pal_for_frame, m_color_table, sizeof(pal_for_frame));
+			pal_for_frame[kShadowIdx] = 0x00282828; // B=40 G=40 R=40
 			gif_write_paletted_frame(pal_gif_file, shp_indexed,
-				cx, cy, delay_cs, m_color_table, /*trans_idx=*/0,
+				cx, cy, delay_cs, pal_for_frame, /*trans_idx=*/0,
 				/*disposal=*/2);
 			succeeded++;
 		}

@@ -20,6 +20,11 @@ Credit for the underlying app and the bulk of the modern improvements goes to Ol
 
 ## Recent releases
 
+- **v10.01** (2026-05-15) — **Shadow catcher fix** for transparent SHP recordings. When the player's Shadows toggle
+  is on, the Record dialog now mirrors the `cf/2` range halving the player itself does, so captures no longer walk
+  into the second-half shadow-mask frames and record garbage. Transparent GIF + PNG output now composites the shadow
+  halo into each frame (palette index 255 reserved as the shadow color, RGB(40,40,40)) so unit shadows are preserved
+  in the output instead of dropping with the rest of palette 0.
 - **v10.0** (2026-05-15) — **Animated Recording**. New `Record` button on the player band captures animated voxel
   turntables (rotation / HVA / combined) and SHP/WSA frame animations as animated GIF or numbered PNG sequence. ESC
   cancels mid-capture. SS-aware downscale combobox so VXL recordings can land at native size with the supersampling
