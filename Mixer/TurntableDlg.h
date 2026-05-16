@@ -18,6 +18,11 @@ public:
 	// rebuilt per dialog open to match the current SS; entries that don't
 	// apply to the current SS are simply omitted (no greyed-out items).
 	enum { ds_native = 0, ds_half = 1, ds_full = 2 };
+	// SHP filter modes — picked from the same combobox slot used for VXL
+	// downscale (the slot is otherwise hidden for SHPs). Crisp = nearest +
+	// paletted GIF + transparency. Filtered = bilinear + RGB-quantized GIF
+	// (loses per-pixel transparency).
+	enum { shp_filter_crisp = 0, shp_filter_filtered = 1 };
 
 	// is_shp = true when the source is a SHP/WSA. Hides rotation +
 	// downscale rows; locks animation mode to "frames"; frames range
@@ -32,6 +37,7 @@ public:
 	int  m_delay_cs = 5;       // GIF frame delay in centiseconds (0.05 s = ~20 fps)
 	int  m_downscale = ds_native;  // default for SS>1; forced to ds_full when SS==1
 	bool m_transparent_pal0 = false;  // SHP/WSA only: emit palette index 0 as transparent
+	int  m_shp_filter = shp_filter_crisp;  // SHP/WSA only: capture-time interp
 
 protected:
 	bool m_hva_available;

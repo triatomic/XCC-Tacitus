@@ -5388,9 +5388,19 @@ void CXCCFileView::OnPlayerTurntable()
 	const int  anim_mode = dlg.m_anim;
 	const int  delay_cs  = dlg.m_delay_cs;
 	const int  ds_mode   = dlg.m_downscale;
+	// SHP filter: Crisp = nearest + paletted GIF (default), Filtered =
+	// bilinear + RGB-quantized GIF (loses transparent_pal0). Filtered
+	// route also forces transparent_pal0 off downstream so the encoder
+	// branches into the gif.h RGBA path rather than the paletted writer.
+	const int  shp_filter = dlg.m_shp_filter;
 	// SHP-only: emit palette index 0 as transparent. PNG gets real alpha=0;
 	// GIF uses gif.h's inter-frame transparency mechanism (oldImage trick).
-	const bool transparent_pal0 = dlg.m_transparent_pal0 && shp_animated;
+	// Filtered SHP capture can't go through the paletted GIF path: bilinear
+	// resampling produces off-palette colors that have nowhere to land in
+	// the 256-entry palette. Force transparent_pal0 off so the encoder
+	// branches into gif.h's quantizer.
+	const bool transparent_pal0 = dlg.m_transparent_pal0 && shp_animated
+		&& (!shp_animated || shp_filter == CTurntableDlg::shp_filter_crisp);
 
 	// Build default filename from asset basename, append turntable tag so the
 	// user can tell screenshots and turntables apart at a glance.
@@ -5636,10 +5646,11 @@ void CXCCFileView::OnPlayerTurntable()
 		// Zoom-aware capture: scale both BGRA and (if present) indexed buffers
 		// to the player's current effective zoom so the recorded output matches
 		// what the user sees. SHP/WSA only — VXL already supports ds_mode.
-		// BGRA uses the user's interp setting (nearest preserves pixel-art
-		// silhouettes; bilinear/bicubic/lanczos fall back to bilinear here).
-		// The indexed buffer (for transparent_pal0 paletted-GIF) must use
-		// nearest so palette indices and transparency masks stay intact.
+		// Filter chosen explicitly via the Record dialog (decoupled from
+		// theme::interp() which only affects on-screen preview): Crisp uses
+		// nearest on BGRA + paletted GIF; Filtered uses bilinear on BGRA +
+		// RGB-quantized GIF. The indexed buffer (paletted-GIF path) is
+		// nearest regardless because palette indices can't be blended.
 		std::vector<DWORD> shp_zoom_bgra;
 		std::vector<byte>  shp_zoom_indexed;
 		if (shp_animated)
@@ -5652,7 +5663,7 @@ void CXCCFileView::OnPlayerTurntable()
 				// BGRA resample.
 				shp_zoom_bgra.assign(static_cast<size_t>(out_w) * out_h, 0);
 				const bool nearest_bgra =
-					(theme::interp() == theme::interp_nearest);
+					(shp_filter == CTurntableDlg::shp_filter_crisp);
 				if (nearest_bgra)
 				{
 					// Sample-center nearest: pick src pixel under each dst

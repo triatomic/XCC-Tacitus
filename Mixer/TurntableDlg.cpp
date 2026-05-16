@@ -70,7 +70,12 @@ void CTurntableDlg::DoDataExchange(CDataExchange* pDX)
 		{
 			int sel = ds->GetCurSel();
 			if (sel >= 0)
-				m_downscale = static_cast<int>(ds->GetItemData(sel));
+			{
+				if (m_is_shp)
+					m_shp_filter = static_cast<int>(ds->GetItemData(sel));
+				else
+					m_downscale = static_cast<int>(ds->GetItemData(sel));
+			}
 		}
 		m_transparent_pal0 = IsDlgButtonChecked(IDC_TT_TRANSPARENT_PAL0) == BST_CHECKED;
 	}
@@ -91,10 +96,13 @@ BOOL CTurntableDlg::OnInitDialog()
 		const int hide_ids[] = {
 			IDC_TT_DIR_LABEL, IDC_TT_DIR_CW, IDC_TT_DIR_CCW,
 			IDC_TT_ANIM_LABEL, IDC_TT_ANIM_COMBO,
-			IDC_TT_DOWNSCALE_LABEL, IDC_TT_DOWNSCALE_COMBO,
 		};
 		for (int id : hide_ids)
 			if (CWnd* w = GetDlgItem(id)) w->ShowWindow(SW_HIDE);
+		// Downscale row is repurposed for SHPs as the Filter selector. Relabel
+		// the visible label so the combobox below it reads correctly.
+		if (CWnd* w = GetDlgItem(IDC_TT_DOWNSCALE_LABEL))
+			w->SetWindowText("Filter:");
 		// Initial state of the transparency checkbox.
 		CheckDlgButton(IDC_TT_TRANSPARENT_PAL0, m_transparent_pal0 ? BST_CHECKED : BST_UNCHECKED);
 		// Update the frames label so the new max range is obvious to the user.
@@ -160,7 +168,15 @@ BOOL CTurntableDlg::OnInitDialog()
 			int idx = ds->AddString(label);
 			if (idx >= 0) ds->SetItemData(idx, static_cast<DWORD_PTR>(mode));
 		};
-		if (m_ss <= 1)
+		if (m_is_shp)
+		{
+			// SHP repurposes the slot as a filter selector.
+			add("Crisp (nearest, paletted GIF + transparency)", shp_filter_crisp);
+			add("Filtered (bilinear, RGB GIF, no transparency)", shp_filter_filtered);
+			ds->SetCurSel(m_shp_filter == shp_filter_filtered ? 1 : 0);
+			ds->EnableWindow(TRUE);
+		}
+		else if (m_ss <= 1)
 		{
 			// Nothing to downscale. Keep the combobox visible (so the user
 			// sees what would be available with SS on) but with one entry.
