@@ -28,6 +28,7 @@ namespace theme
 		bool g_resolved_dark = false;
 		bool g_show_grid = true;
 		size_format g_size_fmt = size_auto;
+		clipboard_format g_clipboard_fmt = clipboard_indexed;
 		vxl_ss g_vxl_ss = vxl_ss_4;
 		bool g_vxl_shading = false;
 		vxl_normal_source g_vxl_normal_src = vxl_normals_computed;
@@ -194,6 +195,9 @@ namespace theme
 		int sf = AfxGetApp()->GetProfileInt("Theme", "size_format", size_auto);
 		if (sf != size_auto && sf != size_bytes) sf = size_auto;
 		g_size_fmt = static_cast<size_format>(sf);
+		int cf = AfxGetApp()->GetProfileInt("Theme", "clipboard_format", clipboard_indexed);
+		if (cf != clipboard_indexed && cf != clipboard_rgb) cf = clipboard_indexed;
+		g_clipboard_fmt = static_cast<clipboard_format>(cf);
 		int ss = AfxGetApp()->GetProfileInt("Theme", "vxl_supersample", vxl_ss_4);
 		if (ss != vxl_ss_off && ss != vxl_ss_2 && ss != vxl_ss_4 && ss != vxl_ss_8 && ss != vxl_ss_16)
 			ss = vxl_ss_4;
@@ -247,6 +251,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "sharpen_amount", g_sharpen_amount);
 		AfxGetApp()->WriteProfileInt("Theme", "fps_cap", g_fps_cap);
 		AfxGetApp()->WriteProfileInt("Theme", "size_format", static_cast<int>(g_size_fmt));
+		AfxGetApp()->WriteProfileInt("Theme", "clipboard_format", static_cast<int>(g_clipboard_fmt));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_supersample", static_cast<int>(g_vxl_ss));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_shading", g_vxl_shading ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_src", static_cast<int>(g_vxl_normal_src));
@@ -295,6 +300,16 @@ namespace theme
 		if (g_size_fmt == v)
 			return;
 		g_size_fmt = v;
+		save();
+	}
+
+	clipboard_format clipboard_fmt() { return g_clipboard_fmt; }
+
+	void set_clipboard_fmt(clipboard_format v)
+	{
+		if (g_clipboard_fmt == v)
+			return;
+		g_clipboard_fmt = v;
 		save();
 	}
 

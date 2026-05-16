@@ -184,6 +184,11 @@ BEGIN
             MENUITEM "&Alpha Color...",             ID_THEME_ALPHA_COLOR
             MENUITEM "&Use Checkerboard",           ID_THEME_USE_CHECKERBOARD
             MENUITEM "SHP &Transparency",           ID_THEME_SHP_TRANSPARENCY
+            POPUP "&Clipboard Format"
+            BEGIN
+                MENUITEM "&Indexed (8-bit paletted DIB)", ID_THEME_CLIPBOARD_INDEXED
+                MENUITEM "&RGB (32-bit BGRA DIB)",        ID_THEME_CLIPBOARD_RGB
+            END
         END
     END
     POPUP "&Graphics"
@@ -712,8 +717,11 @@ END
 
 STRINGTABLE
 BEGIN
-    ID_THEME_SHP_TRANSPARENCY 
+    ID_THEME_SHP_TRANSPARENCY
                             "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
+    ID_THEME_CLIPBOARD_INDEXED
+                            "Screenshot Copy puts an 8-bit paletted DIB on the clipboard (smallest, round-trips to Paste-as-SHP)"
+    ID_THEME_CLIPBOARD_RGB  "Screenshot Copy puts a 32-bit RGB DIB on the clipboard (WYSIWYG composite, broadest compatibility)"
     ID_THEME_USE_CHECKERBOARD 
                             "Show a checkerboard pattern over transparent pixels instead of a solid color"
     ID_THEME_USE_EXTERNAL_PROGRAMS 

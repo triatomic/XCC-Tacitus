@@ -1543,6 +1543,8 @@
 #define ID_THEME_SYSTEM                 41037
 #define ID_SETTINGS_DIR_APPDATA         41038
 #define ID_SETTINGS_DIR_EXE             41039
+#define ID_THEME_CLIPBOARD_INDEXED      41040
+#define ID_THEME_CLIPBOARD_RGB          41041
 
 // Next default values for new objects
 // 

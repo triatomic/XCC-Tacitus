@@ -355,6 +355,10 @@ protected:
 	afx_msg void OnThemeSizeFormatBytes();
 	afx_msg void OnUpdateThemeSizeFormatAuto(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeSizeFormatBytes(CCmdUI* pCmdUI);
+	afx_msg void OnThemeClipboardIndexed();
+	afx_msg void OnThemeClipboardRgb();
+	afx_msg void OnUpdateThemeClipboardIndexed(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeClipboardRgb(CCmdUI* pCmdUI);
 	void apply_vxl_ss(theme::vxl_ss v);
 	afx_msg void OnThemeVxlSsOff();
 	afx_msg void OnThemeVxlSs2();

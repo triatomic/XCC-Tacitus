@@ -87,6 +87,20 @@ namespace theme
 	// "no size" (returns empty string).
 	std::string format_size(long long bytes);
 
+	// Screenshot -> Copy to Clipboard payload format.
+	// Indexed = 8bpp paletted CF_DIB (m_color_table as palette, raw indexed
+	// pixels - smallest payload, round-trips into Mixer's own Paste-as-SHP).
+	// RGB = 32bpp BGRA CF_DIB built from the WYSIWYG composite (whatever the
+	// player shows is what lands on the clipboard, including BG=Color/Alpha/
+	// Pane bake-in - same as Record's wysiwyg path).
+	enum clipboard_format
+	{
+		clipboard_indexed = 0,
+		clipboard_rgb = 1,
+	};
+	clipboard_format clipboard_fmt();
+	void set_clipboard_fmt(clipboard_format v);
+
 	// VXL supersampling: render the voxel splat at NxN canvas resolution then
 	// let the chosen interpolation downscale it. Off = native 1x (cheapest,
 	// no real silhouette AA); 2/4/8 = progressively cleaner edges at higher

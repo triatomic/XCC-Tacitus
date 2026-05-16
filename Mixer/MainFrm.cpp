@@ -208,6 +208,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_SIZE_FORMAT_BYTES, OnThemeSizeFormatBytes)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_AUTO, OnUpdateThemeSizeFormatAuto)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_BYTES, OnUpdateThemeSizeFormatBytes)
+	ON_COMMAND(ID_THEME_CLIPBOARD_INDEXED, OnThemeClipboardIndexed)
+	ON_COMMAND(ID_THEME_CLIPBOARD_RGB, OnThemeClipboardRgb)
+	ON_UPDATE_COMMAND_UI(ID_THEME_CLIPBOARD_INDEXED, OnUpdateThemeClipboardIndexed)
+	ON_UPDATE_COMMAND_UI(ID_THEME_CLIPBOARD_RGB, OnUpdateThemeClipboardRgb)
 	ON_COMMAND(ID_THEME_VXL_SS_OFF, OnThemeVxlSsOff)
 	ON_COMMAND(ID_THEME_VXL_SS_2, OnThemeVxlSs2)
 	ON_COMMAND(ID_THEME_VXL_SS_4, OnThemeVxlSs4)
@@ -1435,7 +1439,15 @@ void CMainFrame::set_palette(int id)
 	if (m_palette_i == id)
 		return;
 	m_palette_i = id;
-	m_file_info_pane->Invalidate();
+	// Grid-mode paints reload the color table per format via OnDraw, so
+	// Invalidate() alone is enough for them. Player mode bypasses OnDraw
+	// and reads the prefilled m_color_table directly — the file view's
+	// notify_palette_changed() rebuilds it (bumping m_player_bgra_version
+	// so SHP/VXL BGRA caches miss) before issuing its own Invalidate().
+	if (m_file_info_pane)
+		m_file_info_pane->notify_palette_changed();
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->Invalidate();
 }
 
 // Walk a (possibly nested) Cmix_file and import every palette inside under
@@ -1987,6 +1999,11 @@ void CMainFrame::OnThemeSizeFormatBytes() { apply_size_format(theme::size_bytes)
 
 void CMainFrame::OnUpdateThemeSizeFormatAuto(CCmdUI* p)  { p->SetCheck(theme::size_fmt() == theme::size_auto); }
 void CMainFrame::OnUpdateThemeSizeFormatBytes(CCmdUI* p) { p->SetCheck(theme::size_fmt() == theme::size_bytes); }
+
+void CMainFrame::OnThemeClipboardIndexed() { theme::set_clipboard_fmt(theme::clipboard_indexed); }
+void CMainFrame::OnThemeClipboardRgb()     { theme::set_clipboard_fmt(theme::clipboard_rgb); }
+void CMainFrame::OnUpdateThemeClipboardIndexed(CCmdUI* p) { p->SetCheck(theme::clipboard_fmt() == theme::clipboard_indexed); }
+void CMainFrame::OnUpdateThemeClipboardRgb(CCmdUI* p)     { p->SetCheck(theme::clipboard_fmt() == theme::clipboard_rgb); }
 
 void CMainFrame::apply_vxl_ss(theme::vxl_ss v)
 {

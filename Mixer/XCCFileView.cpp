@@ -336,7 +336,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_player_reverse.GetSafeHwnd())  msg = "Reverse playback direction.";
 	else if (h == m_player_grid.GetSafeHwnd())     msg = "Show static grid of all frames instead of animation.";
 	else if (h == m_player_native.GetSafeHwnd())   msg = "Display at native resolution (no scaling).";
-	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Save the current frame as PNG / TGA / PCX (Ctrl+Shift+S). PNG/TGA carry alpha when BG = Alpha or Pane.";
+	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Screenshot: Save As... (PNG/TGA/PCX, Ctrl+Shift+S) or Copy to Clipboard (format: Theme > Image > Clipboard Format).";
 	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
 	else if (h == m_player_fps_edit.GetSafeHwnd()) msg = "Playback speed in frames per second.";
 	else if (h == m_player_fps_spin.GetSafeHwnd()) msg = "Playback speed in frames per second.";
@@ -3203,6 +3203,25 @@ void CXCCFileView::player_decode_frames()
 	}
 }
 
+void CXCCFileView::notify_palette_changed()
+{
+	if (!m_player_mode || !m_is_open)
+	{
+		// Grid mode: OnDraw -> per-format load_color_table picks up the
+		// new palette on the invalidate CMainFrame::set_palette already
+		// issued. Nothing to do here.
+		return;
+	}
+	// Player mode: rebuild the color table from the new default palette.
+	// load_color_table bumps m_player_bgra_version (so VXL BGRA cache
+	// misses) and, for SHP/WSA, re-prefills the per-frame BGRA cache.
+	// VXL keeps its splat cache (it's index-buffer + cam_normal data;
+	// the colorization happens during the BGRA composite which now sees
+	// the new color table on cache miss).
+	load_color_table(get_default_palette(), true);
+	Invalidate();
+}
+
 void CXCCFileView::player_enter()
 {
 	if (!is_playable_file())
@@ -3558,8 +3577,10 @@ void CXCCFileView::player_layout_controls()
 		const bool vxl_hva = m_hva_loaded && m_player_cf > 1;
 		if (!vxl_hva)
 		{
-			int gx = pad + 80 + pad + 60 + pad + 30 + pad + 50 + pad + 60 + pad;
-			m_player_iso_grid.MoveWindow(gx, y, 90, H * 8);
+			// Place the Game Grid combo just past where the transport row's
+			// running x left off (after Native). Hardcoded sums got stale
+			// when Native bumped to 96px (was 60px); use the live x instead.
+			m_player_iso_grid.MoveWindow(x, y, 90, H * 8);
 		}
 		// Upper row: BG toggle + 9 VXL side-color swatches + HVA button
 		// (+ iso-grid when HVA is loaded).
@@ -4373,6 +4394,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				vc.pane_c == pane_c &&
 				vc.cx_s == cx_s &&
 				vc.cy_s == cy_s &&
+				vc.bgra_version == m_player_bgra_version &&
 				static_cast<int>(vc.bgra.size()) == n)
 			{
 				memcpy(p_dib, vc.bgra.data(), static_cast<size_t>(n) * 4);
@@ -4517,6 +4539,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vc.pane_c = theme::bg();
 			vc.cx_s = cx_s;
 			vc.cy_s = cy_s;
+			vc.bgra_version = m_player_bgra_version;
 			vc.bgra.assign(p_dib, p_dib + n);
 		}
 	}
@@ -5175,7 +5198,183 @@ bool CXCCFileView::take_screenshot()
 
 void CXCCFileView::OnPlayerScreenshot()
 {
-	take_screenshot();
+	// Split-button menu: Save As... (file dialog) or Copy to Clipboard.
+	// Anchored below the Screenshot button so it looks like a dropdown.
+	enum { k_save_cmd = 1, k_copy_cmd };
+	int chosen = 0;
+	{
+		CMenu menu;
+		menu.CreatePopupMenu();
+		menu.AppendMenu(MF_STRING, k_save_cmd, "Save As...");
+		menu.AppendMenu(MF_STRING, k_copy_cmd, "Copy to Clipboard");
+		CRect br;
+		m_player_screenshot.GetWindowRect(&br);
+		chosen = menu.TrackPopupMenu(
+			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+			br.left, br.bottom, this);
+	}
+	if (chosen == k_save_cmd)
+		take_screenshot();
+	else if (chosen == k_copy_cmd)
+		copy_screenshot_to_clipboard();
+}
+
+bool CXCCFileView::copy_screenshot_to_clipboard()
+{
+	// Two payload modes, controlled by Theme > Image > Clipboard Format:
+	//   Indexed = 8bpp paletted CF_DIB (m_color_table as palette, raw indexed
+	//     pixels). Mirrors the PCX export path; round-trips to Paste-as-SHP.
+	//   RGB     = 32bpp BGRA CF_DIB from capture_current_frame(wysiwyg=true).
+	//     Whatever the player shows (BG=Color / Alpha / Pane bake-in) is what
+	//     lands on the clipboard, same as Record's wysiwyg path.
+	if (!m_player_mode || !m_is_open)
+	{
+		if (CMainFrame* mf = GetMainFrame())
+			mf->SetMessageText("Press P to enter player mode before copying a screenshot.");
+		return false;
+	}
+	UpdateWindow();
+
+	const theme::clipboard_format fmt = theme::clipboard_fmt();
+	const bool vxl = is_vxl_view();
+
+	int cx_s = 0, cy_s = 0;
+	HGLOBAL h_mem = NULL;
+
+	if (fmt == theme::clipboard_indexed)
+	{
+		cx_s = vxl ? m_vxl_splat.cx_s : m_player_cx;
+		cy_s = vxl ? m_vxl_splat.cy_s : m_player_cy;
+		if (cx_s <= 0 || cy_s <= 0)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Copy to clipboard: no rendered frame available.");
+			return false;
+		}
+		const byte* indexed = nullptr;
+		if (vxl)
+		{
+			if (m_vxl_splat.buf.size() != 0) indexed = m_vxl_splat.buf.data();
+		}
+		else if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
+			&& static_cast<int>(m_player_frames[m_player_frame].size()) >= cx_s * cy_s)
+		{
+			indexed = m_player_frames[m_player_frame].data();
+		}
+		if (!indexed)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Copy to clipboard: indexed pixel buffer unavailable.");
+			return false;
+		}
+
+		// CF_DIB layout: BITMAPINFOHEADER, 256 * RGBQUAD palette, rows
+		// bottom-up, each row padded to a DWORD boundary.
+		const int row_stride = (cx_s + 3) & ~3;
+		const size_t pixel_bytes = static_cast<size_t>(row_stride) * cy_s;
+		const size_t total = sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD) + pixel_bytes;
+		h_mem = GlobalAlloc(GMEM_MOVEABLE, total);
+		if (!h_mem)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Copy to clipboard: allocation failed.");
+			return false;
+		}
+		byte* mem = reinterpret_cast<byte*>(GlobalLock(h_mem));
+		if (!mem) { GlobalFree(h_mem); return false; }
+		BITMAPINFOHEADER* header = reinterpret_cast<BITMAPINFOHEADER*>(mem);
+		ZeroMemory(header, sizeof(BITMAPINFOHEADER));
+		header->biSize = sizeof(BITMAPINFOHEADER);
+		header->biWidth = cx_s;
+		header->biHeight = cy_s;
+		header->biPlanes = 1;
+		header->biBitCount = 8;
+		header->biCompression = BI_RGB;
+		header->biClrUsed = 256;
+		RGBQUAD* pal = reinterpret_cast<RGBQUAD*>(mem + sizeof(BITMAPINFOHEADER));
+		for (int i = 0; i < 256; i++)
+		{
+			DWORD bgra = m_color_table[i];
+			pal[i].rgbBlue     = static_cast<BYTE>(bgra & 0xff);
+			pal[i].rgbGreen    = static_cast<BYTE>((bgra >> 8) & 0xff);
+			pal[i].rgbRed      = static_cast<BYTE>((bgra >> 16) & 0xff);
+			pal[i].rgbReserved = 0;
+		}
+		byte* pixels = mem + sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD);
+		for (int y = 0; y < cy_s; y++)
+		{
+			const byte* src = indexed + static_cast<size_t>(cy_s - 1 - y) * cx_s;
+			byte* dst = pixels + static_cast<size_t>(y) * row_stride;
+			memcpy(dst, src, cx_s);
+			if (row_stride > cx_s)
+				memset(dst + cx_s, 0, row_stride - cx_s);
+		}
+		GlobalUnlock(h_mem);
+	}
+	else // clipboard_rgb
+	{
+		std::vector<DWORD> bgra;
+		if (!capture_current_frame(bgra, cx_s, cy_s, /*wysiwyg=*/true) || cx_s <= 0 || cy_s <= 0)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Copy to clipboard: rendered buffer unavailable.");
+			return false;
+		}
+		// 32bpp CF_DIB: BITMAPINFOHEADER + 4-byte-aligned rows of BGRA,
+		// bottom-up. Alpha byte is set to 0xFF (BI_RGB ignores it but many
+		// consumers carry it through, and zero alpha would render invisible).
+		const size_t pixel_bytes = static_cast<size_t>(cx_s) * cy_s * 4;
+		const size_t total = sizeof(BITMAPINFOHEADER) + pixel_bytes;
+		h_mem = GlobalAlloc(GMEM_MOVEABLE, total);
+		if (!h_mem)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				mf->SetMessageText("Copy to clipboard: allocation failed.");
+			return false;
+		}
+		byte* mem = reinterpret_cast<byte*>(GlobalLock(h_mem));
+		if (!mem) { GlobalFree(h_mem); return false; }
+		BITMAPINFOHEADER* header = reinterpret_cast<BITMAPINFOHEADER*>(mem);
+		ZeroMemory(header, sizeof(BITMAPINFOHEADER));
+		header->biSize = sizeof(BITMAPINFOHEADER);
+		header->biWidth = cx_s;
+		header->biHeight = cy_s;
+		header->biPlanes = 1;
+		header->biBitCount = 32;
+		header->biCompression = BI_RGB;
+		DWORD* pixels = reinterpret_cast<DWORD*>(mem + sizeof(BITMAPINFOHEADER));
+		for (int y = 0; y < cy_s; y++)
+		{
+			const DWORD* src = bgra.data() + static_cast<size_t>(cy_s - 1 - y) * cx_s;
+			DWORD* dst = pixels + static_cast<size_t>(y) * cx_s;
+			for (int x = 0; x < cx_s; x++)
+				dst[x] = src[x] | 0xFF000000;
+		}
+		GlobalUnlock(h_mem);
+	}
+
+	bool ok = false;
+	if (OpenClipboard())
+	{
+		EmptyClipboard();
+		if (SetClipboardData(CF_DIB, h_mem))
+		{
+			h_mem = NULL;	// clipboard owns it now
+			ok = true;
+		}
+		CloseClipboard();
+	}
+	if (h_mem)
+		GlobalFree(h_mem);
+
+	if (CMainFrame* mf = GetMainFrame())
+	{
+		const char* fmt_name = (fmt == theme::clipboard_indexed) ? "8-bit indexed" : "32-bit RGB";
+		CString msg;
+		msg.Format(ok ? "Screenshot copied to clipboard (%s)." : "Copy to clipboard failed (%s).", fmt_name);
+		mf->SetMessageText(msg);
+	}
+	return ok;
 }
 
 namespace {

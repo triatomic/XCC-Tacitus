@@ -25,6 +25,18 @@ public:
 	// forces a full repaint. Call from CMainFrame::apply_theme_to_children
 	// when the user toggles light <-> dark.
 	void reapply_player_theme();
+	// User changed the active palette via View > Palette while a player is
+	// open. Grid-mode OnDraw paths reload the color table per format on
+	// invalidate, so they pick up the new palette for free. Player mode
+	// reads the prefilled m_color_table directly and never goes through
+	// OnDraw, so the palette switch has to be applied here: rebuild the
+	// color table from the new default palette (which bumps
+	// m_player_bgra_version inside load_color_table), then invalidate so
+	// the next paint rebuilds the BGRA cache against the new colors. SHP
+	// also gets its frame cache re-prefilled by load_color_table; VXL's
+	// BGRA cache key includes m_player_bgra_version so the bump alone is
+	// enough.
+	void notify_palette_changed();
 	// Bump the player BGRA cache version so the next paint reconverts each
 	// frame. Called from MainFrm when theme settings that affect SHP/WSA
 	// rendering change (alpha color, checkerboard toggle, shp transparency).
@@ -160,6 +172,13 @@ public:
 	// or error. Used by both the player-band Screenshot button and the
 	// Ctrl+Shift+S accelerator routed via CMainFrame.
 	bool take_screenshot();
+	// Copy the current frame to the Windows clipboard as an 8bpp paletted
+	// CF_DIB. Palette comes from m_color_table (gamma-corrected RGB matching
+	// on-screen rendering); pixel data is the raw indexed buffer
+	// (m_vxl_splat.buf for VXL, m_player_frames[m_player_frame] for SHP/WSA).
+	// No BG-mode alpha handling — paletted CF_DIB has no alpha channel.
+	// Triggered by the Screenshot button's split-menu -> "Copy to Clipboard".
+	bool copy_screenshot_to_clipboard();
 	// Capture the currently-rendered frame into out_bgra (cx*cy DWORDs,
 	// `B|G<<8|R<<16|A<<24` with alpha already derived from BG mode per the
 	// v9.62 rule). Returns false if no rendered frame is available. Used by
@@ -509,6 +528,7 @@ private:
 		COLORREF pane_c = 0;
 		int cx_s = 0;
 		int cy_s = 0;
+		int bgra_version = -1;	// matches m_player_bgra_version; bumped by load_color_table on palette switch
 		std::vector<DWORD> bgra;
 	};
 	vxl_bgra_cache m_vxl_bgra;
