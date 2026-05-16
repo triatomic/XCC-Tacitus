@@ -20,34 +20,24 @@ Credit for the underlying app and the bulk of the modern improvements goes to Ol
 
 ## Recent releases
 
-- **v10.01** (2026-05-15) — **Shadow catcher fix** for transparent SHP recordings. When the player's Shadows toggle
-  is on, the Record dialog now mirrors the `cf/2` range halving the player itself does, so captures no longer walk
-  into the second-half shadow-mask frames and record garbage. Transparent GIF + PNG output now composites the shadow
-  halo into each frame (palette index 255 reserved as the shadow color, RGB(40,40,40)) so unit shadows are preserved
-  in the output instead of dropping with the rest of palette 0.
-- **v10.0** (2026-05-15) — **Animated Recording**. New `Record` button on the player band captures animated voxel
-  turntables (rotation / HVA / combined) and SHP/WSA frame animations as animated GIF or numbered PNG sequence. ESC
-  cancels mid-capture. SS-aware downscale combobox so VXL recordings can land at native size with the supersampling
-  cleanup baked in. SHP-only "Make palette index 0 transparent" checkbox emits real per-frame transparency in both
-  formats (the GIF path uses a custom paletted writer with disposal=2 so transparent regions reset cleanly between
-  frames). `Load HVA…` on the body now auto-pairs `<base>tur.hva` / `<base>barl.hva` for sub-VXL parts loaded by
-  Full Hierarchy. Non-transparent recordings are WYSIWYG across all three BG modes.
-- **v9.75** (2026-05-15) — RA1-quality batch. Extension-driven MIX type fallback now runs for non-encrypted MIXes
-  too, fixing `.wsa`, `.fnt`, `.icn`, `.urb`, `.cps`, `.pkt`, `.eng`/`.fre`/`.ger`, `.tem` showing as unknown or
-  wrong variant; SHP/TMP variant respects game family (TD/RA → `shp (td)` / `tmp` / `tmp (ra)`, not the iso TS
-  variant). VQA framerate fix: `Cvqa_file::frame_rate()` zeros the audio-sample counter at the first VQFR boundary
-  so multi-second RA1 audio prefetch before VQFR0 doesn't collapse reported fps to 1-2. Video Viewer dialog: FPS
-  edit + spin, real pause/resume, per-tick auto-advance (no 15s idle wait).
-- **v9.70** (2026-05-14) — MIX/BIG reopen-latency optimization batch. Extended `global mix cache.dat` record
-  format (`probe-v5-game`) so warm reopen skips game-detection and the per-entry LMD scan; container indexes
-  switched to hash tables with capacity pre-reserved.
-- **v9.63** (2026-05-14) — Suppress mouse-wheel scroll on player pane.
-- **v9.62** (2026-05-14) — Screenshot export overhaul: PNG default, BMP→TGA, real alpha channel derived from the
-  indexed buffer when player BG = Alpha or Pane.
-- **v9.61** (2026-05-14) — Specular slider + two-light VPL section selection ported from vxl-renderer; Diffuse /
-  Ambient reordered.
-- **v9.0**  (2026-05-13) — SHP playback CPU fix via OpenMP wait-policy self-relaunch shim, plus dark-mode
-  dropdown listbox theming.
+- **v10.3** (2026-05-17) — **Live palette switching in player mode** + Screenshot copy-to-clipboard.
+  `View > Palette` now retints SHP/WSA/VXL sprites on the fly while the player is open; previously the displayed
+  colors stayed pinned to whichever palette was active when you pressed P. The Screenshot button is now a
+  split-button menu (Save As… / Copy to Clipboard), with a new `Theme > Image > Clipboard Format` submenu picking
+  the payload — **Indexed** (8-bit paletted DIB, round-trips into Mixer's own Paste-as-SHP) or **RGB** (32-bit BGRA
+  WYSIWYG composite, broadest external-viewer compatibility). VXL non-HVA Game Grid combo placement fix (was
+  overlapping the Native button after v10.1 widened it for the live-zoom label).
+- **v10.2** (2026-05-16) — **Record Filter dropdown for SHP captures**: Crisp (nearest-neighbor BGRA resample,
+  paletted GIF writer, honors per-frame transparency on palette index 0) or Filtered (bilinear BGRA resample via
+  the existing `theme::bilinear_resample_bgra` helper, gif.h's RGB quantizer). Decoupled from
+  `Graphics > Image Interpolation` so the on-screen preview and the recording filter can differ — picking Bilinear
+  in the preview no longer silently produces a nearest-neighbor GIF.
+- **v10.1** (2026-05-16) — **Zoom-aware SHP recording** + **live zoom on the Native button**. Recordings now scale
+  each frame to the player's current effective zoom (Ctrl+wheel override, Native toggle, or auto-fit fallback)
+  instead of always emitting native pixel size, so a 250% preview records at 250%. The Native button label tracks
+  the live zoom (`Native 250%`, `Native 1600%`) and updates every paint, so you can read the current scale at a
+  glance during playback. Indexed pixel buffers stay on nearest with sample-center math to preserve
+  transparent_pal0 + shadow-sentinel masks.
 
 For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/tags).
 
