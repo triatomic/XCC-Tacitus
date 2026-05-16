@@ -340,7 +340,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
 	else if (h == m_player_fps_edit.GetSafeHwnd()) msg = "Playback speed in frames per second.";
 	else if (h == m_player_fps_spin.GetSafeHwnd()) msg = "Playback speed in frames per second.";
-	else if (h == m_player_shadows.GetSafeHwnd())  msg = "Composite frame[i + cf/2] as shadow over frame[i]. Halves the timeline.";
+	else if (h == m_player_shadows.GetSafeHwnd())  msg = "Cycle: Off / Shadows RA2-TS (palette idx 0 = transparent) / Shadows TD-RA1 (palette idx 4 = transparent). Composites frame[i + cf/2] as shadow; halves the timeline.";
 	else if (h == m_player_bg.GetSafeHwnd())       msg = "Cycle background for transparent pixels: palette color 0 / alpha checker / pane color.";
 	else if (h == m_player_side_custom.GetSafeHwnd()) msg = "Custom side color: opens picker. Click again to clear.";
 	else if (h == m_player_iso_grid.GetSafeHwnd()) msg = "Overlay isometric tile grid (TS 48px / RA2 60px). Drawn before scaling.";
@@ -512,6 +512,27 @@ void CXCCFileView::do_zoom_step(int sign)
 			Invalidate();
 		}
 	}
+}
+
+int CXCCFileView::player_effective_zoom_pct() const
+{
+	if (!m_player_mode || m_player_cx <= 0 || m_player_cy <= 0)
+		return 100;
+	if (m_player_zoom_pct > 0)
+		return m_player_zoom_pct;
+	if (m_player_native_size)
+		return 100;
+	CRect rc; const_cast<CXCCFileView*>(this)->GetClientRect(&rc);
+	int avail_w = rc.Width();
+	int avail_h = rc.Height() - player_band_h();
+	if (avail_w < 1 || avail_h < 1)
+		return 100;
+	int sx = avail_w * 100 / m_player_cx;
+	int sy = avail_h * 100 / m_player_cy;
+	int s_pct = std::min(sx, sy);
+	if (s_pct < 1) s_pct = 1;
+	if (s_pct > 1600) s_pct = 1600;
+	return s_pct;
 }
 
 BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
@@ -3344,11 +3365,30 @@ void CXCCFileView::player_enter()
 	m_player_fps_spin.ShowWindow(playback_show);
 	// Shadow/BG/SideColor controls are SHP-family only (not VXL).
 	const int shp_show = vxl ? SW_HIDE : SW_SHOW;
-	const bool can_shadows = !vxl && m_player_cf >= 2 && (m_player_cf % 2) == 0;
+	// Pair-frame mode (state 1) needs even cf; RA1 mode (state 2) works on
+	// any SHP (the 0xFF magic-marker pixels live inside the body frame).
+	const bool can_pair_shadows = !vxl && m_player_cf >= 2 && (m_player_cf % 2) == 0;
 	m_player_shadows.ShowWindow(shp_show);
-	m_player_shadows.EnableWindow(can_shadows ? TRUE : FALSE);
-	if (!can_shadows) m_player_shadows_on = false;
-	m_player_shadows.SetCheck(m_player_shadows_on ? BST_CHECKED : BST_UNCHECKED);
+	m_player_shadows.EnableWindow(!vxl ? TRUE : FALSE);
+	if (vxl)
+	{
+		m_player_shadows_on = false;
+		m_player_shadows_ra1 = false;
+		m_player_shadows_state = 0;
+		m_player_bg_idx = 0;
+	}
+	else if (m_player_shadows_state == 1 && !can_pair_shadows)
+	{
+		// User had pair-mode on but switched to a SHP that doesn't support
+		// it. Drop to off rather than leaving stale state.
+		m_player_shadows_on = false;
+		m_player_shadows_state = 0;
+	}
+	m_player_shadows.SetCheck((m_player_shadows_state >= 1) ? BST_CHECKED : BST_UNCHECKED);
+	m_player_shadows.SetWindowText(
+		m_player_shadows_state == 0 ? "Shadows" :
+		m_player_shadows_state == 1 ? "Shadows RA2/TS" :
+		                              "Shadows RA1");
 	// BG toggle applies to both SHP and VXL — palette index 0 = "no voxel" /
 	// "transparent" pixel in either case, so the show-bg-vs-checker switch is
 	// meaningful for both.
@@ -3491,7 +3531,7 @@ void CXCCFileView::player_layout_controls()
 	m_player_play.MoveWindow(x, y, 60, H);            x += 60 + pad;
 	m_player_reverse.MoveWindow(x, y, 30, H);         x += 30 + pad;
 	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
-	m_player_native.MoveWindow(x, y, 60, H);          x += 60 + pad;
+	m_player_native.MoveWindow(x, y, 96, H);          x += 96 + pad;
 	// SHP/WSA Record button slot — only consumes layout space when this is
 	// SHP territory. VXL Record lives on the upper VXL row and is sized
 	// inside the vxl branch below.
@@ -3550,7 +3590,10 @@ void CXCCFileView::player_layout_controls()
 	// Upper row (SHP family only): Shadows, BG, 8 side-color swatches.
 	int y2 = y - H - pad;
 	int x2 = pad;
-	m_player_shadows.MoveWindow(x2, y2, 64, H);       x2 += 64 + pad;
+	// Width = 110 to fit the longest cycle-state label ("Shadows TD/RA1")
+	// without truncation. Shorter states leave a bit of empty space; that's
+	// the trade-off for the longer name being readable.
+	m_player_shadows.MoveWindow(x2, y2, 110, H);      x2 += 110 + pad;
 	m_player_bg.MoveWindow(x2, y2, 70, H);            x2 += 70 + pad;
 	const int swatch = H;
 	for (int i = 0; i < 8; i++)
@@ -3616,14 +3659,57 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 		if (shadow_idx >= 0 && shadow_idx < static_cast<int>(m_player_frames.size()))
 			sshad = m_player_frames[shadow_idx].data();
 	}
+	// Capture bg_idx outside the loop to avoid a member-read per pixel.
+	const byte bg_idx = static_cast<byte>(m_player_bg_idx);
+	// RA1 mode (state 2): in RA1 SHP files, shadow pixels are stored as
+	// palette index LTGREEN (=4) per WWSTD.H. The runtime engine routes
+	// them through a per-unit ColorTable (UnitShadow, built by
+	// Conquer_Build_Translucent_Table in JSHELL.CPP:409-433) that maps
+	// palette[LTGREEN] -> the post-table sentinel SHADOW_COL (0xFF, from
+	// SHAPE.INC:84); DS_DS.ASM:269-276 then darkens the destination
+	// pixel through ShadowingTable. Authority: UShadowCols =
+	// {LTGREEN, BLACK, 130, 0} in DISPLAY.CPP:357-365.
+	// We collapse this to a direct raw-index test on the source pixel
+	// (idx == 4) and darken the would-be background BGRA toward black
+	// by 130/256 — same ratio UShadowCols produces. Mutually exclusive
+	// with shadow_on (pair-frame).
+	const bool ra1_shadow = m_player_shadows_ra1;
+	const byte ra1_shadow_idx = 4; // LTGREEN
 	for (int i = 0; i < n; i++)
 	{
 		byte idx = s[i];
 		DWORD bgra;
-		if (idx == 0)
+		if (ra1_shadow && idx == ra1_shadow_idx)
+		{
+			// Resolve the background BGRA the same way the bg_idx branch
+			// below does, then darken it.
+			DWORD bg_bgra;
+			if (bg_mode == 0)
+				bg_bgra = m_color_table[bg_idx];
+			else if (bg_mode == 2)
+				bg_bgra = pane_d;
+			else
+			{
+				int x = i % cx_s, y = i / cx_s;
+				bg_bgra = (((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d;
+			}
+			const float fa = 200.0f / 256.0f;
+			float rr = static_cast<float>((bg_bgra >> 16) & 0xff) * (1.0f - fa);
+			float gg = static_cast<float>((bg_bgra >>  8) & 0xff) * (1.0f - fa);
+			float bb = static_cast<float>( bg_bgra        & 0xff) * (1.0f - fa);
+			int irr = static_cast<int>(rr + 0.5f);
+			int igg = static_cast<int>(gg + 0.5f);
+			int ibb = static_cast<int>(bb + 0.5f);
+			if (irr > 255) irr = 255; if (igg > 255) igg = 255; if (ibb > 255) ibb = 255;
+			dst[i] = static_cast<DWORD>(ibb)
+			       | (static_cast<DWORD>(igg) <<  8)
+			       | (static_cast<DWORD>(irr) << 16);
+			continue;
+		}
+		if (idx == bg_idx)
 		{
 			if (bg_mode == 0)
-				bgra = m_color_table[0];
+				bgra = m_color_table[bg_idx];
 			else if (bg_mode == 2)
 				bgra = pane_d;
 			else
@@ -3648,7 +3734,7 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 				bgra = static_cast<DWORD>(bb) | (static_cast<DWORD>(gg) << 8) | (static_cast<DWORD>(rr) << 16);
 			}
 		}
-		if (sshad && sshad[i] != 0)
+		if (sshad && sshad[i] != bg_idx)
 		{
 			float fa = 120.0f / 255.0f;
 			float r = static_cast<float>((bgra >> 16) & 0xff) * (1.0f - fa);
@@ -3674,7 +3760,9 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 			for (int px = 0; px < cx_s; px++)
 			{
 				int i = px + cx_s * py;
-				if (s[i] != 0) continue;
+				// Grid lines paint over BG pixels only (s[i] equals the
+				// configured background index); sprite pixels stay intact.
+				if (s[i] != bg_idx) continue;
 				int dx = px - gcx;
 				int dy = py - gcy;
 				int u = dx + 2 * dy;
@@ -4113,6 +4201,20 @@ void CXCCFileView::player_draw(CDC* pDC)
 		s_pct = std::min(sx, sy);
 		if (s_pct < 1) s_pct = 1;
 		if (s_pct > 1600) s_pct = 1600;
+	}
+	// Reflect the live zoom in the Native button text so the user always sees
+	// what the recorder will capture. Only refresh on change to avoid flicker
+	// (SetWindowText is a no-op on identical text, but skipping the call also
+	// skips the GDI churn). Native_size cases still show 100% because they
+	// pin s_pct to 100 above.
+	if (m_player_native.GetSafeHwnd())
+	{
+		char buf[32];
+		_snprintf_s(buf, _TRUNCATE, "Native %d%%", s_pct);
+		char cur[32] = {};
+		m_player_native.GetWindowText(cur, sizeof(cur));
+		if (strcmp(cur, buf) != 0)
+			m_player_native.SetWindowText(buf);
 	}
 	int cx_d = cx_logical * s_pct / 100;
 	int cy_d = cy_logical * s_pct / 100;
@@ -4875,10 +4977,13 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 	out_bgra.assign(n_pixels, 0);
 	if (indexed)
 	{
+		// VXL always uses idx 0 as "no voxel"; SHP/WSA respects the
+		// player's configurable BG idx (0 for RA2/TS, 4 for TD/RA1).
+		const byte bg = vxl ? byte(0) : static_cast<byte>(m_player_bg_idx);
 		for (int i = 0; i < n_pixels; i++)
 		{
-			const DWORD a = indexed[i] == 0 ? 0u : 0xFF000000u;
-			out_bgra[i] = indexed[i] == 0 ? 0u : (src_dwords[i] | a);
+			const DWORD a = indexed[i] == bg ? 0u : 0xFF000000u;
+			out_bgra[i] = indexed[i] == bg ? 0u : (src_dwords[i] | a);
 		}
 	}
 	else
@@ -5482,6 +5587,11 @@ void CXCCFileView::OnPlayerTurntable()
 		const byte* shp_indexed = nullptr;
 		std::vector<byte> shp_composite;
 		const int kShadowIdx = 255;
+		// "Background" palette index: 0 for RA2/TS (the default), 4 for the
+		// TD/RA1 cycle state. Routes through to both the transparency mask
+		// (which idx becomes alpha=0 / GIF transparent) and the shadow
+		// composite (which idx counts as "no sprite here, paint shadow").
+		const byte bg_idx = static_cast<byte>(m_player_bg_idx);
 		if (transparent_pal0
 			&& m_player_frame >= 0
 			&& m_player_frame < static_cast<int>(m_player_frames.size())
@@ -5491,7 +5601,23 @@ void CXCCFileView::OnPlayerTurntable()
 			const bool shadow_on = m_player_shadows_on && m_player_cf >= 2
 				&& (m_player_cf % 2) == 0;
 			const int shadow_idx_frame = m_player_frame + m_player_cf / 2;
-			if (shadow_on
+			// RA1 mode (state 2): idx 4 (LTGREEN) in the body frame is the
+			// raw shadow value. Remap to kShadowIdx (255) so the GIF picks
+			// up the same dark-gray slot the RA2 pair-frame path uses and
+			// the PNG semi-transparency loop catches it. Mutually exclusive
+			// with shadow_on (state 1).
+			if (m_player_shadows_ra1)
+			{
+				shp_composite.assign(shp_indexed, shp_indexed + cx * cy);
+				const byte ra1_shadow_idx = 4;
+				for (int p = 0; p < cx * cy; p++)
+				{
+					if (shp_composite[p] == ra1_shadow_idx)
+						shp_composite[p] = static_cast<byte>(kShadowIdx);
+				}
+				shp_indexed = shp_composite.data();
+			}
+			else if (shadow_on
 				&& shadow_idx_frame >= 0
 				&& shadow_idx_frame < static_cast<int>(m_player_frames.size())
 				&& static_cast<int>(m_player_frames[shadow_idx_frame].size()) >= cx * cy)
@@ -5500,10 +5626,75 @@ void CXCCFileView::OnPlayerTurntable()
 				shp_composite.assign(shp_indexed, shp_indexed + cx * cy);
 				for (int p = 0; p < cx * cy; p++)
 				{
-					if (shp_composite[p] == 0 && shadow[p] != 0)
+					if (shp_composite[p] == bg_idx && shadow[p] != bg_idx)
 						shp_composite[p] = static_cast<byte>(kShadowIdx);
 				}
 				shp_indexed = shp_composite.data();
+			}
+		}
+
+		// Zoom-aware capture: scale both BGRA and (if present) indexed buffers
+		// to the player's current effective zoom so the recorded output matches
+		// what the user sees. SHP/WSA only — VXL already supports ds_mode.
+		// BGRA uses the user's interp setting (nearest preserves pixel-art
+		// silhouettes; bilinear/bicubic/lanczos fall back to bilinear here).
+		// The indexed buffer (for transparent_pal0 paletted-GIF) must use
+		// nearest so palette indices and transparency masks stay intact.
+		std::vector<DWORD> shp_zoom_bgra;
+		std::vector<byte>  shp_zoom_indexed;
+		if (shp_animated)
+		{
+			const int z_pct = player_effective_zoom_pct();
+			if (z_pct != 100 && cx > 0 && cy > 0)
+			{
+				const int out_w = std::max(1, cx * z_pct / 100);
+				const int out_h = std::max(1, cy * z_pct / 100);
+				// BGRA resample.
+				shp_zoom_bgra.assign(static_cast<size_t>(out_w) * out_h, 0);
+				const bool nearest_bgra =
+					(theme::interp() == theme::interp_nearest);
+				if (nearest_bgra)
+				{
+					// Sample-center nearest: pick src pixel under each dst
+					// center for stable integer-ratio pixel doubling.
+					for (int y = 0; y < out_h; y++)
+					{
+						const int sy = std::min(cy - 1, (y * 2 + 1) * cy / (out_h * 2));
+						const DWORD* srow = bgra.data() + static_cast<size_t>(sy) * cx;
+						DWORD* drow = shp_zoom_bgra.data() + static_cast<size_t>(y) * out_w;
+						for (int x = 0; x < out_w; x++)
+						{
+							const int sx = std::min(cx - 1, (x * 2 + 1) * cx / (out_w * 2));
+							drow[x] = srow[sx];
+						}
+					}
+				}
+				else
+				{
+					theme::bilinear_resample_bgra(bgra.data(), cx, cy,
+						shp_zoom_bgra.data(), out_w, out_h);
+				}
+				bgra.swap(shp_zoom_bgra);
+				// Indexed resample (nearest only — palette indices can't be
+				// blended).
+				if (shp_indexed)
+				{
+					shp_zoom_indexed.assign(static_cast<size_t>(out_w) * out_h, 0);
+					for (int y = 0; y < out_h; y++)
+					{
+						const int sy = std::min(cy - 1, (y * 2 + 1) * cy / (out_h * 2));
+						const byte* srow = shp_indexed + static_cast<size_t>(sy) * cx;
+						byte* drow = shp_zoom_indexed.data() + static_cast<size_t>(y) * out_w;
+						for (int x = 0; x < out_w; x++)
+						{
+							const int sx = std::min(cx - 1, (x * 2 + 1) * cx / (out_w * 2));
+							drow[x] = srow[sx];
+						}
+					}
+					shp_indexed = shp_zoom_indexed.data();
+				}
+				cx = out_w;
+				cy = out_h;
 			}
 		}
 
@@ -5535,22 +5726,26 @@ void CXCCFileView::OnPlayerTurntable()
 				fputc(cx & 0xff, f); fputc((cx >> 8) & 0xff, f);
 				fputc(cy & 0xff, f); fputc((cy >> 8) & 0xff, f);
 				fputc(0xf7, f); // global color table present, 256 entries
-				fputc(0, f);    // bg color index = 0 (transparent index)
+				fputc(bg_idx, f); // bg color index = transparent index
 				fputc(0, f);    // pixel aspect ratio
-				fputc(0, f); fputc(0, f); fputc(0, f); // global pal entry 0
-				// Slots 1..254 from m_color_table; slot 255 reserved as the
-				// shadow color so the per-frame composite can reference it.
-				for (int e = 1; e < kShadowIdx; e++)
+				// Full 256 entries from m_color_table. Slot 255 overwritten
+				// with a fixed dark RGB so the per-frame shadow composite
+				// can reference it as the "shadow" color regardless of what
+				// m_color_table[255] holds.
+				for (int e = 0; e < 256; e++)
 				{
-					const DWORD d = m_color_table[e];
-					fputc(static_cast<int>((d >> 16) & 0xff), f); // R
-					fputc(static_cast<int>((d >>  8) & 0xff), f); // G
-					fputc(static_cast<int>( d        & 0xff), f); // B
+					if (e == kShadowIdx)
+					{
+						fputc(16, f); fputc(16, f); fputc(16, f);
+					}
+					else
+					{
+						const DWORD d = m_color_table[e];
+						fputc(static_cast<int>((d >> 16) & 0xff), f); // R
+						fputc(static_cast<int>((d >>  8) & 0xff), f); // G
+						fputc(static_cast<int>( d        & 0xff), f); // B
+					}
 				}
-				// Shadow slot — fixed dark RGB. Tuned to match the on-screen
-				// shadow appearance (renderer uses 47% intensity which over
-				// the common BG colors lands around this range).
-				fputc(40, f); fputc(40, f); fputc(40, f);
 				if (delay_cs != 0)
 				{
 					fputc(0x21, f); fputc(0xff, f); fputc(11, f);
@@ -5567,9 +5762,9 @@ void CXCCFileView::OnPlayerTurntable()
 			// the loop if profiling shows it matters.
 			DWORD pal_for_frame[256];
 			std::memcpy(pal_for_frame, m_color_table, sizeof(pal_for_frame));
-			pal_for_frame[kShadowIdx] = 0x00282828; // B=40 G=40 R=40
+			pal_for_frame[kShadowIdx] = 0x00101010; // B=16 G=16 R=16
 			gif_write_paletted_frame(pal_gif_file, shp_indexed,
-				cx, cy, delay_cs, pal_for_frame, /*trans_idx=*/0,
+				cx, cy, delay_cs, pal_for_frame, /*trans_idx=*/bg_idx,
 				/*disposal=*/2);
 			succeeded++;
 		}
@@ -5633,14 +5828,23 @@ void CXCCFileView::OnPlayerTurntable()
 			// Palette-0 transparency for PNG: clear alpha + zero RGB on pixels
 			// where the source palette index is 0. Mutates bgra in place; the
 			// per-frame buffer is throwaway, no aliasing risk. Pure
-			// sprite-only output — shadows (which the renderer paints as
-			// darkened BG over palette-0 positions) drop to transparent
-			// along with the rest of the BG, by design.
+			// sprite-only output — RA2 pair-frame shadows (which the renderer
+			// paints as darkened BG over palette-0 positions) drop to
+			// transparent along with the rest of the BG, by design.
+			// RA1 mode: idx 4 was remapped to kShadowIdx (255) by the
+			// composite step above; emit it as a semi-transparent dark pixel
+			// (RGB 40,40,40 at alpha 128) so the shadow halo survives into
+			// the PNG over any background.
 			if (shp_indexed)
 			{
 				for (int p = 0; p < cx * cy; p++)
-					if (shp_indexed[p] == 0)
+				{
+					const byte ix = shp_indexed[p];
+					if (ix == bg_idx)
 						bgra[p] = 0;
+					else if (m_player_shadows_ra1 && ix == kShadowIdx)
+						bgra[p] = 0xC0000000; // ARGB: A=192 over pure black
+				}
 			}
 			Gdiplus::Bitmap bmp(cx, cy, cx * 4, PixelFormat32bppARGB,
 				const_cast<BYTE*>(reinterpret_cast<const BYTE*>(bgra.data())));
@@ -5845,7 +6049,26 @@ void CXCCFileView::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT dis)
 void CXCCFileView::OnPlayerShadows()
 {
 	if (!m_player_controls_created) return;
-	m_player_shadows_on = m_player_shadows.GetCheck() == BST_CHECKED;
+	// 3-state cycle: Off -> Shadows RA2/TS -> Shadows RA1 -> Off ...
+	// Pushlike checkbox style fires BN_CLICKED; we ignore the auto-toggle
+	// and drive state ourselves. SetCheck below reflects "shadow-on" (any
+	// state >= 1) so the button stays "pressed" in states 1/2.
+	m_player_shadows_state = (m_player_shadows_state + 1) % 3;
+	// State 1 (RA2/TS) = pair-frame composite from frame[i+cf/2]; needs even cf.
+	// State 2 (RA1) = inline 0xFF magic-marker shadow, faithful to the RA1
+	// engine (SHAPE.INC SHADOW_COL, DS_DS.ASM ShadowingTable lookup). No cf
+	// halving — RA1 SHPs are not pair-frame.
+	const bool can_pair = m_player_cf >= 2 && (m_player_cf % 2) == 0;
+	if (m_player_shadows_state == 1 && !can_pair)
+		m_player_shadows_state = 2;
+	m_player_shadows_on  = (m_player_shadows_state == 1);
+	m_player_shadows_ra1 = (m_player_shadows_state == 2);
+	m_player_bg_idx = 0;
+	m_player_shadows.SetCheck((m_player_shadows_state >= 1) ? BST_CHECKED : BST_UNCHECKED);
+	m_player_shadows.SetWindowText(
+		m_player_shadows_state == 0 ? "Shadows" :
+		m_player_shadows_state == 1 ? "Shadows RA2/TS" :
+		                              "Shadows RA1");
 	m_player_bgra_version++;
 	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
 	// Pair-mode reduces navigable range to cf/2; clamp current frame.

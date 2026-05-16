@@ -249,6 +249,22 @@ protected:
 	CButton m_player_side_custom;   // 9th swatch — opens color picker
 	CComboBox m_player_iso_grid;    // Game Grid: None / TS / RA2
 	bool m_player_shadows_on = false;
+	// Shadow button is a 3-state cycle:
+	//   0 = Off
+	//   1 = Shadows RA2/TS  (pair-frame composite: frame[i+cf/2] darkens frame[i])
+	//   2 = Shadows RA1     (inline magic: palette idx 0xFF in body frame is the
+	//                        SHADOW_COL sentinel; rendered as a darken-toward-black
+	//                        over the background, matching RA1's runtime shadow LUT.
+	//                        Authority: RA1SourceCode\CnC_Red_Alert\WWFLAT32\SHAPE\
+	//                        SHAPE.INC:84 and DS_DS.ASM:269-276.)
+	// States 1 and 2 follow entirely separate render paths and are mutually
+	// exclusive. Pair-frame halves cf and the slider range; RA1 mode does
+	// neither (RA1 SHPs don't duplicate frames). bg_idx stays 0 in all
+	// states — RA1 shadow pixels are detected by their own sentinel (0xFF),
+	// not by being "background".
+	int m_player_shadows_state = 0;
+	bool m_player_shadows_ra1 = false; // true only in state 2
+	int m_player_bg_idx = 0;
 	// BG cycle: 0 = palette color 0, 1 = alpha checker, 2 = pane bg (theme).
 	// Default 0 = show palette background (matches ASE).
 	int m_player_bg_mode = 0;
@@ -278,6 +294,11 @@ protected:
 	bool is_vxl_view() const { return m_player_mode && m_ft == ft_vxl; }
 	int player_band_h() const { return 64; }
 	void do_zoom_step(int sign);
+	// Effective on-screen scale percentage for the current SHP/WSA/VXL view.
+	// Mirrors the s_pct math in OnDraw / player_draw so Record can reproduce
+	// the displayed zoom in the captured output. Returns 100 if the viewport
+	// is too small to query or the player isn't open.
+	int player_effective_zoom_pct() const;
 
 	// HVA (Hierarchical Voxel Animation) overlay for the current VXL. When
 	// loaded, m_hva_data holds the parsed .hva file and the player band shows
