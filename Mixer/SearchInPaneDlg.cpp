@@ -62,6 +62,8 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 	m_list.InsertColumn(1, "Size");
 	m_list.set_size(0);
 	theme::apply_dialog(GetSafeHwnd());
+	theme::apply_column_headers(m_list.GetSafeHwnd());
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
 	return true;
 }
 
@@ -109,6 +111,7 @@ void CSearchInPaneDlg::OnFind()
 	};
 	fit_column(0);
 	fit_column(1);
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
 }
 
 void CSearchInPaneDlg::apply_sort()

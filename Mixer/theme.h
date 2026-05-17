@@ -73,6 +73,9 @@ namespace theme
 	bool show_grid();
 	void set_show_grid(bool v);
 
+	bool show_column_headers();
+	void set_show_column_headers(bool v);
+
 	// Size column format: Auto = "1.5 MB" via totalSize(); Bytes = grouped
 	// raw byte count "1,572,864". Applies to the listview panes and to the
 	// right-pane MIX/PAK/BIG/RG-MIX content listings.
@@ -263,6 +266,29 @@ namespace theme
 	void set_shp_transparency(bool v);
 	// Apply the grid setting to a listview's extended style.
 	void apply_grid(HWND h_listview);
+	// Apply the column-headers setting to a listview by flipping
+	// LVS_NOCOLUMNHEADER. Hides/shows the SysHeader32 band; rows
+	// reflow on the next layout cycle.
+	void apply_column_headers(HWND h_listview);
+
+	// Enable the Explorer-style right-click-on-header → checkable popup
+	// of column names. Each click toggles a column's visibility by
+	// setting its width to 0 (hide) or its saved last-visible width
+	// (show). Per-listview state persists under
+	// "Theme\\col_<lv_id>" keys. `lv_id` must be a short stable string
+	// (e.g. "main_pane_left", "search_file"). Call after the listview's
+	// columns have been inserted and the theme has been applied.
+	// Idempotent. Also restores any previously hidden columns from
+	// persisted state.
+	void enable_column_visibility_menu(HWND h_listview, const char* lv_id);
+
+	// Install a WM_PAINT subclass on a listview that has
+	// EnableGroupView(TRUE). In dark mode, overlays each group header
+	// title bar with the theme background + white text after the system
+	// paints it (Win10/11 ignore CDDS_GROUP clrText/clrTextBk overrides,
+	// leaving the dim default-light group bar unreadable on a dark
+	// background). No-op in light mode. Idempotent across theme switches.
+	void apply_listview_groups(HWND h_listview);
 
 	// Checkerboard for transparent-image previews. One square is the user-chosen
 	// "alpha color" (default green), the other is black. 8x8 squares.

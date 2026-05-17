@@ -163,6 +163,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_SETTINGS_DIR_APPDATA, OnUpdateSettingsDirAppData)
 	ON_UPDATE_COMMAND_UI(ID_SETTINGS_DIR_EXE, OnUpdateSettingsDirExe)
 	ON_COMMAND(ID_THEME_SHOW_GRID, OnThemeShowGrid)
+	ON_COMMAND(ID_THEME_SHOW_COLUMN_HEADERS, OnThemeShowColumnHeaders)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_COLUMN_HEADERS, OnUpdateThemeShowColumnHeaders)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
 	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHP_TRANSPARENCY, OnUpdateThemeShpTransparency)
@@ -1858,6 +1860,20 @@ void CMainFrame::OnThemeShowGrid()
 void CMainFrame::OnUpdateThemeShowGrid(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::show_grid() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeShowColumnHeaders()
+{
+	theme::set_show_column_headers(!theme::show_column_headers());
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		theme::apply_column_headers(m_left_mix_pane->GetSafeHwnd());
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		theme::apply_column_headers(m_right_mix_pane->GetSafeHwnd());
+}
+
+void CMainFrame::OnUpdateThemeShowColumnHeaders(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::show_column_headers() ? 1 : 0);
 }
 
 void CMainFrame::OnThemeAlphaColor()

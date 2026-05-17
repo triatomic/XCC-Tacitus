@@ -319,6 +319,7 @@ protected:
 	afx_msg void OnUpdateSettingsDirAppData(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateSettingsDirExe(CCmdUI* pCmdUI);
 	afx_msg void OnThemeShowGrid();
+	afx_msg void OnThemeShowColumnHeaders();
 	afx_msg void OnThemeAlphaColor();
 	afx_msg void OnThemeShpTransparency();
 	afx_msg void OnUpdateThemeShpTransparency(CCmdUI* pCmdUI);
@@ -329,6 +330,7 @@ protected:
 	afx_msg void OnUpdateThemeLight(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeDark(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeShowGrid(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeShowColumnHeaders(CCmdUI* pCmdUI);
 	afx_msg void OnThemeInterpNearest();
 	afx_msg void OnThemeInterpBilinear();
 	afx_msg void OnThemeInterpBicubic();

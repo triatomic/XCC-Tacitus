@@ -185,6 +185,7 @@ BEGIN
             MENUITEM "&Bytes",                      ID_THEME_SIZE_FORMAT_BYTES
         END
         MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
+        MENUITEM "Show Column &Headers",        ID_THEME_SHOW_COLUMN_HEADERS
         MENUITEM SEPARATOR
         POPUP "&Image"
         BEGIN
@@ -418,6 +419,7 @@ BEGIN
     CONTROL         "Preserve folder structure",IDC_PRESERVE_STRUCTURE,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,184,100,10
     CONTROL         "Include game MIXes",IDC_INCLUDE_GAME_MIXES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,197,100,10
+    LTEXT           "",IDC_SEARCH_PROGRESS,113,199,2,10,SS_LEFTNOWORDWRAP
     DEFPUSHBUTTON   "Search",IDOK,109,196,50,14
     PUSHBUTTON      "Extract...",IDC_EXTRACT,166,196,50,14
     PUSHBUTTON      "Close",IDCANCEL,223,196,50,14
@@ -694,6 +696,7 @@ BEGIN
     ID_THEME_LIGHT          "Use light mode colors"
     ID_THEME_DARK           "Use dark mode colors"
     ID_THEME_SHOW_GRID      "Toggle grid lines between list-view rows"
+    ID_THEME_SHOW_COLUMN_HEADERS "Toggle the Name/Type/Size/Description column header bar on list views"
     ID_THEME_ALPHA_COLOR    "Pick the color used to mark transparent pixels"
     ID_THEME_INTERP_NEAREST "Sharp pixel scaling (no smoothing). Best for sprites."
     ID_THEME_INTERP_BILINEAR 

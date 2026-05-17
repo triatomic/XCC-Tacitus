@@ -4,6 +4,8 @@
 #include "string_conversion.h"
 #include "theme.h"
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <cc_file.h>
 #include <fname.h>
 #include <id_log.h>
@@ -11,6 +13,42 @@
 // Mirror of CXCCMixerView's free helper; redeclared here so we don't have to
 // expose it in a public header.
 extern string totalSize(size_t i);
+
+// Worker-thread <-> dialog message ids. WM_APP (0x8000) is the private app
+// range; doesn't collide with Mixer's WM_USER+0x101..+0x103 usages.
+#define WM_SEARCH_PROGRESS  (WM_APP + 1)
+#define WM_SEARCH_DONE      (WM_APP + 2)
+
+// One-shot timer that clears the "N results." progress text shortly after
+// a successful search completes so it stops nagging once the user has the
+// data. Cancel/error states keep their message until the next search.
+#define TIMER_CLEAR_PROGRESS 1
+#define PROGRESS_CLEAR_MS    850
+
+// Heap-passed context for the search worker. The dialog snapshots its inputs
+// before kicking the thread so the worker never touches MFC state that could
+// mutate (e.g. user navigating panes mid-search). out_map is allocated on the
+// UI thread, filled by the worker, and ownership transferred back via
+// WM_SEARCH_DONE's lParam (deleted by the handler).
+namespace
+{
+	struct search_ctx
+	{
+		CSearchFileDlg* dlg;       // raw — dialog outlives the worker; OnDestroy
+		                            // sets cancel + bumps seq before destruction.
+		HWND dlg_hwnd;
+		UINT seq;
+		std::atomic<bool>* cancel; // points into the dialog's m_cancel
+		// Snapshots — the worker owns these:
+		std::map<int, t_index_entry> left_index;
+		std::string left_dir;
+		std::map<int, t_index_entry> right_index;
+		std::string right_dir;
+		bool include_game_mixes;
+		t_mix_map_list mix_map;    // copy of MainFrame::mix_map_list()
+		int sepindex;              // m_map.size() after left walk
+	};
+}
 
 CSearchFileDlg::CSearchFileDlg(CWnd* pParent /*=NULL*/)
 	: ETSLayoutDialog(CSearchFileDlg::IDD, pParent, "find_file_dlg")
@@ -41,6 +79,9 @@ BEGIN_MESSAGE_MAP(CSearchFileDlg, ETSLayoutDialog)
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_LIST, OnGetdispinfoList)
 	ON_WM_CTLCOLOR()
 	//}}AFX_MSG_MAP
+	ON_MESSAGE(WM_SEARCH_PROGRESS, &CSearchFileDlg::OnSearchProgress)
+	ON_MESSAGE(WM_SEARCH_DONE, &CSearchFileDlg::OnSearchDone)
+	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 HBRUSH CSearchFileDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -69,7 +110,7 @@ BOOL CSearchFileDlg::OnInitDialog()
 				<< item(IDC_PRESERVE_STRUCTURE, NORESIZE)
 				<< item(IDC_INCLUDE_GAME_MIXES, NORESIZE)
 				)
-			<< itemGrowing(HORIZONTAL)
+			<< item(IDC_SEARCH_PROGRESS, GREEDY)
 			<< item(IDOK, NORESIZE)
 			<< item(IDC_EXTRACT, NORESIZE)
 			<< item(IDCANCEL, NORESIZE)
@@ -90,14 +131,26 @@ BOOL CSearchFileDlg::OnInitDialog()
 	m_list.InsertColumn(2, "Path");
 	m_list.set_size(0);
 	m_list.EnableGroupView(TRUE);
+	// Bind the progress static so we can update its text from the
+	// PROGRESS / DONE handlers. The control is empty until a search runs.
+	m_progress.SubclassDlgItem(IDC_SEARCH_PROGRESS, this);
 	theme::apply_dialog(GetSafeHwnd());
+	theme::apply_column_headers(m_list.GetSafeHwnd());
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_file");
+	// Overlay-paint group header bars in dark mode (system's default bar
+	// renders dim red/purple text against the dark theme; CDDS_GROUP
+	// clrText/clrTextBk is a no-op on Win10/11). Idempotent + no-op in
+	// light mode.
+	theme::apply_listview_groups(m_list.GetSafeHwnd());
 	return true;
 }
 
-void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id, const string& top_mix_path, bool predefined)
+void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id, const string& top_mix_path, bool predefined, std::atomic<bool>* cancel, const t_mix_map_list* mix_map)
 {
 	for (int i = 0; i < f.get_c_files(); i++)
 	{
+		if (cancel && cancel->load(std::memory_order_relaxed))
+			return;
 		const int id = f.get_id(i);
 		string name = f.get_name(id);
 		const long long sz = f.get_size(id);
@@ -114,17 +167,20 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 			Cmix_file fg;
 			if (!fg.open(id, f))
 			{
-				find(fg, file_name, mix_name + " - " + name, mix_id, i, top_mix_path, predefined);
+				find(fg, file_name, mix_name + " - " + name, mix_id, i, top_mix_path, predefined, cancel, mix_map);
 			}
 		}
 	}
-	for (auto& i : m_main_frame->mix_map_list())
+	const t_mix_map_list& mm = mix_map ? *mix_map : m_main_frame->mix_map_list();
+	for (auto& i : mm)
 	{
+		if (cancel && cancel->load(std::memory_order_relaxed))
+			return;
 		if (i.second.parent != mix_id)
 			continue;
 		Cmix_file g;
 		if (!g.open(i.second.id, f))
-			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, -1, top_mix_path, predefined);
+			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, -1, top_mix_path, predefined, cancel, mix_map);
 	}
 }
 
@@ -136,38 +192,43 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 // is propagated so add() tags the rows; OnDblclkList then routes them
 // through the iterator-based open_location_mix overload (which walks
 // parents back to the on-disk fname) instead of the pane t_index_list path.
-void CSearchFileDlg::find_predefined()
+void CSearchFileDlg::find_predefined(std::atomic<bool>* cancel, const t_mix_map_list* mix_map)
 {
-	for (auto& i : m_main_frame->mix_map_list())
+	const t_mix_map_list& mm = mix_map ? *mix_map : m_main_frame->mix_map_list();
+	for (auto& i : mm)
 	{
+		if (cancel && cancel->load(std::memory_order_relaxed))
+			return;
 		if (i.second.fname.empty())
 			continue;
 		Cmix_file f;
 		if (f.open(i.second.fname))
 			continue;
-		const auto& parent = find_ref(m_main_frame->mix_map_list(), i.second.parent);
-		find(f, get_filename(), parent.name + " - " + i.second.name, i.first, -1, i.second.fname, true);
+		const auto& parent = find_ref(mm, i.second.parent);
+		find(f, get_filename(), parent.name + " - " + i.second.name, i.first, -1, i.second.fname, true, cancel, mix_map);
 	}
 }
 
-void CSearchFileDlg::find(const map<int, t_index_entry>& t_map, const string& post, const string& dir)
+void CSearchFileDlg::find(const map<int, t_index_entry>& t_map, const string& post, const string& dir, std::atomic<bool>* cancel, const t_mix_map_list* mix_map)
 {
 	for (auto& i : t_map)
 	{
+		if (cancel && cancel->load(std::memory_order_relaxed))
+			return;
 		if (i.second.name.empty())
 			continue;
 		string fname = dir.rfind('\\') == string::npos ? (dir + '\\' + i.second.name) : (dir + i.second.name);
 		Cmix_file f;
 		if (!f.open(fname))
 		{
-			find(f, get_filename(), i.second.name + post, i.first, -1, fname);
+			find(f, get_filename(), i.second.name + post, i.first, -1, fname, false, cancel, mix_map);
 		}
 		else if (i.second.ft == ft_mix)
 		{
 			Cmix_file_rd f_rd;
 			if (!f_rd.open(fname))
 			{
-				find(f_rd, get_filename(), i.second.name + post, i.first, -1, fname);
+				find(f_rd, get_filename(), i.second.name + post, i.first, -1, fname, false, cancel, mix_map);
 			}
 		}
 	}
@@ -185,76 +246,216 @@ static std::string file_part(const std::string& full)
 	return (sep == std::string::npos) ? full : full.substr(sep + 3);
 }
 
+// Search button: either start a new background search or cancel a running
+// one. The walk runs on a CWinThread worker so the dialog stays drag/
+// resize/close-able. UI thread only touches m_map / m_list in start_search()
+// (clears) and finish_search() (populates).
 void CSearchFileDlg::OnFind()
 {
-	if (UpdateData(true))
+	if (m_searching)
 	{
-		CWaitCursor wait;
-		m_list.DeleteAllItems();
-		m_map.clear();
-		// "" suffix: when Source was a column, " (1)" / " (2)" disambiguated
-		// which pane the row came from. With group headers + a Path column
-		// that's redundant noise. m_sepindex still partitions left vs right
-		// by m_map insertion order so open_mix() routes correctly.
-		m_include_game_mixes = IsDlgButtonChecked(IDC_INCLUDE_GAME_MIXES) == BST_CHECKED;
-		find(m_main_frame->left_mix_pane()->t_index_list(), "", m_main_frame->left_mix_pane()->current_dir());
-		m_sepindex = m_map.size();
-		find(m_main_frame->right_mix_pane()->t_index_list(), "", m_main_frame->right_mix_pane()->current_dir());
-		if (m_include_game_mixes)
-			find_predefined();
-
-		// Assign one LVGROUP per unique source chain. Group ids are
-		// first-seen-first so group ordering matches search-encounter order.
-		m_list.RemoveAllGroups();
-		std::map<std::string, int> chain_to_gid;
-		int next_gid = 0;
-		for (auto& i : m_map)
-		{
-			t_map_entry& e = i.second;
-			std::string chain = source_part(e.name);
-			auto it = chain_to_gid.find(chain);
-			if (it == chain_to_gid.end())
-			{
-				int gid = next_gid++;
-				chain_to_gid.emplace(chain, gid);
-				e.group_id = gid;
-				LVGROUP g = {};
-				g.cbSize = sizeof(g);
-				g.mask = LVGF_HEADER | LVGF_GROUPID | LVGF_STATE;
-				g.iGroupId = gid;
-				g.state = LVGS_COLLAPSIBLE | LVGS_NORMAL;
-				g.stateMask = LVGS_COLLAPSIBLE | LVGS_NORMAL | LVGS_COLLAPSED;
-				std::wstring whdr(chain.begin(), chain.end());
-				g.pszHeader = const_cast<LPWSTR>(whdr.c_str());
-				g.cchHeader = static_cast<int>(whdr.size());
-				m_list.InsertGroup(-1, &g);
-			}
-			else
-			{
-				e.group_id = it->second;
-			}
-		}
-
-		m_order.clear();
-		m_order.reserve(m_map.size());
-		for (auto& i : m_map)
-			m_order.push_back(i.first);
-		apply_sort();
-		repopulate_list();
-		// Size each column to max(content, header). When the list is empty
-		// LVSCW_AUTOSIZE collapses to 0, so we always fall through to
-		// AUTOSIZE_USEHEADER as the floor.
-		auto fit_column = [&](int col) {
-			m_list.SetColumnWidth(col, LVSCW_AUTOSIZE);
-			int content_w = m_list.GetColumnWidth(col);
-			m_list.SetColumnWidth(col, LVSCW_AUTOSIZE_USEHEADER);
-			int header_w = m_list.GetColumnWidth(col);
-			m_list.SetColumnWidth(col, max(content_w, header_w));
-		};
-		fit_column(0);
-		fit_column(1);
-		fit_column(2);
+		// Second click during a running search = cancel. Worker checks the
+		// flag at the top of every iteration and returns early.
+		m_cancel.store(true, std::memory_order_relaxed);
+		m_progress.SetWindowText("Cancelling...");
+		return;
 	}
+	if (!UpdateData(true))
+		return;
+	start_search();
+}
+
+void CSearchFileDlg::start_search()
+{
+	// Kill any pending auto-clear from a previous search — the new search
+	// will set its own progress text and arm a fresh timer on completion.
+	KillTimer(TIMER_CLEAR_PROGRESS);
+	m_include_game_mixes = IsDlgButtonChecked(IDC_INCLUDE_GAME_MIXES) == BST_CHECKED;
+	m_list.DeleteAllItems();
+	m_map.clear();
+	m_order.clear();
+	// Bump sequence so any late PROGRESS / DONE post from a prior worker
+	// is dropped by the handler. Then allocate a fresh context owned by
+	// the worker.
+	++m_search_seq;
+	m_cancel.store(false, std::memory_order_relaxed);
+	auto ctx = std::make_unique<search_ctx>();
+	ctx->dlg = this;
+	ctx->dlg_hwnd = GetSafeHwnd();
+	ctx->seq = m_search_seq;
+	ctx->cancel = &m_cancel;
+	ctx->left_index = m_main_frame->left_mix_pane()->t_index_list();
+	ctx->left_dir = m_main_frame->left_mix_pane()->current_dir();
+	ctx->right_index = m_main_frame->right_mix_pane()->t_index_list();
+	ctx->right_dir = m_main_frame->right_mix_pane()->current_dir();
+	ctx->include_game_mixes = m_include_game_mixes;
+	ctx->mix_map = m_main_frame->mix_map_list();
+	ctx->sepindex = 0;
+	m_searching = true;
+	m_progress.SetWindowText("Searching...");
+	SetDlgItemText(IDOK, "Cancel");
+	// CWinThread is auto-deleted when the worker returns. Pass raw ptr;
+	// worker takes ownership.
+	m_worker = AfxBeginThread(&CSearchFileDlg::search_thread_proc, ctx.release());
+}
+
+UINT AFX_CDECL CSearchFileDlg::search_thread_proc(LPVOID p)
+{
+	std::unique_ptr<search_ctx> ctx(static_cast<search_ctx*>(p));
+	// The dialog pointer is stable for the lifetime of the worker — the
+	// dialog is modal, OnDestroy sets cancel + bumps seq before MFC tears
+	// down the C++ object, and the worker checks cancel at every iteration
+	// boundary. We write directly into dlg->m_map via the existing
+	// add() API rather than through a swapped heap map; the UI thread
+	// doesn't read m_map between start_search() (which clears it) and
+	// OnSearchDone (which reads it after our DONE post).
+	CSearchFileDlg* dlg = ctx->dlg;
+
+	auto post_progress = [&](size_t n) {
+		::PostMessage(ctx->dlg_hwnd, WM_SEARCH_PROGRESS,
+			static_cast<WPARAM>(ctx->seq), static_cast<LPARAM>(n));
+	};
+
+	// Left pane walk. mix_map snapshot is passed so the worker never reads
+	// MainFrame's live container (which the UI thread can mutate).
+	dlg->find(ctx->left_index, "", ctx->left_dir, ctx->cancel, &ctx->mix_map);
+	post_progress(dlg->m_map.size());
+	ctx->sepindex = static_cast<int>(dlg->m_map.size());
+
+	if (!ctx->cancel->load(std::memory_order_relaxed))
+	{
+		dlg->find(ctx->right_index, "", ctx->right_dir, ctx->cancel, &ctx->mix_map);
+		post_progress(dlg->m_map.size());
+	}
+
+	if (ctx->include_game_mixes && !ctx->cancel->load(std::memory_order_relaxed))
+	{
+		dlg->find_predefined(ctx->cancel, &ctx->mix_map);
+		post_progress(dlg->m_map.size());
+	}
+
+	// DONE lParam carries sepindex; OnSearchDone reads m_map directly.
+	::PostMessage(ctx->dlg_hwnd, WM_SEARCH_DONE,
+		static_cast<WPARAM>(ctx->seq), static_cast<LPARAM>(ctx->sepindex));
+	return 0;
+}
+
+LRESULT CSearchFileDlg::OnSearchProgress(WPARAM wp, LPARAM lp)
+{
+	if (static_cast<UINT>(wp) != m_search_seq)
+		return 0; // stale post from a cancelled run
+	char buf[64];
+	_snprintf_s(buf, sizeof(buf), _TRUNCATE,
+		m_cancel.load(std::memory_order_relaxed) ? "Cancelling... (%zu found)" : "Found %zu - searching...",
+		static_cast<size_t>(lp));
+	m_progress.SetWindowText(buf);
+	return 0;
+}
+
+LRESULT CSearchFileDlg::OnSearchDone(WPARAM wp, LPARAM lp)
+{
+	if (static_cast<UINT>(wp) != m_search_seq)
+		return 0; // late post from a cancelled or stale run
+	const bool was_cancelled = m_cancel.load(std::memory_order_relaxed);
+	if (!was_cancelled)
+	{
+		// Worker has written results directly into m_map via add().
+		m_sepindex = static_cast<int>(lp);
+		finish_search();
+	}
+	else
+	{
+		// Cancelled — discard any partial results, leave the list empty.
+		m_map.clear();
+		m_sepindex = 0;
+		m_order.clear();
+		m_list.DeleteAllItems();
+		m_list.RemoveAllGroups();
+	}
+	m_searching = false;
+	m_cancel.store(false, std::memory_order_relaxed);
+	m_worker = nullptr;
+	SetDlgItemText(IDOK, "Search");
+	if (was_cancelled)
+		m_progress.SetWindowText("Cancelled.");
+	else
+	{
+		char buf[64];
+		_snprintf_s(buf, sizeof(buf), _TRUNCATE, "%zu result%s.",
+			m_map.size(), m_map.size() == 1 ? "" : "s");
+		m_progress.SetWindowText(buf);
+		// Auto-clear the "N results." text after a brief moment so the
+		// label stops competing with the results for attention. Cancel
+		// keeps its message indefinitely (more informative on re-entry).
+		SetTimer(TIMER_CLEAR_PROGRESS, PROGRESS_CLEAR_MS, NULL);
+	}
+	return 0;
+}
+
+void CSearchFileDlg::OnTimer(UINT_PTR id)
+{
+	if (id == TIMER_CLEAR_PROGRESS)
+	{
+		KillTimer(TIMER_CLEAR_PROGRESS);
+		m_progress.SetWindowText("");
+		return;
+	}
+	ETSLayoutDialog::OnTimer(id);
+}
+
+void CSearchFileDlg::finish_search()
+{
+	// Assign one LVGROUP per unique source chain. Group ids are
+	// first-seen-first so group ordering matches search-encounter order.
+	m_list.RemoveAllGroups();
+	std::map<std::string, int> chain_to_gid;
+	int next_gid = 0;
+	for (auto& i : m_map)
+	{
+		t_map_entry& e = i.second;
+		std::string chain = source_part(e.name);
+		auto it = chain_to_gid.find(chain);
+		if (it == chain_to_gid.end())
+		{
+			int gid = next_gid++;
+			chain_to_gid.emplace(chain, gid);
+			e.group_id = gid;
+			LVGROUP g = {};
+			g.cbSize = sizeof(g);
+			g.mask = LVGF_HEADER | LVGF_GROUPID | LVGF_STATE;
+			g.iGroupId = gid;
+			g.state = LVGS_COLLAPSIBLE | LVGS_NORMAL;
+			g.stateMask = LVGS_COLLAPSIBLE | LVGS_NORMAL | LVGS_COLLAPSED;
+			std::wstring whdr(chain.begin(), chain.end());
+			g.pszHeader = const_cast<LPWSTR>(whdr.c_str());
+			g.cchHeader = static_cast<int>(whdr.size());
+			m_list.InsertGroup(-1, &g);
+		}
+		else
+		{
+			e.group_id = it->second;
+		}
+	}
+
+	m_order.clear();
+	m_order.reserve(m_map.size());
+	for (auto& i : m_map)
+		m_order.push_back(i.first);
+	apply_sort();
+	repopulate_list();
+	// Column autosize: always header-width, regardless of result count.
+	// Per-content fit (LVSCW_AUTOSIZE) walks every row's dispinfo callback
+	// per column = O(N x cols x 2) and is the visible "clunkiness" the
+	// user reported. Header-width is instant, readable, sortable, and
+	// columns are user-resizable + hidable via the right-click header
+	// menu if a row's content is wider than its header. Trade-off
+	// accepted across all result-set sizes for predictable behavior.
+	m_list.SetColumnWidth(0, LVSCW_AUTOSIZE_USEHEADER);
+	m_list.SetColumnWidth(1, LVSCW_AUTOSIZE_USEHEADER);
+	m_list.SetColumnWidth(2, LVSCW_AUTOSIZE_USEHEADER);
+	// Wire right-click-header column-visibility menu after columns have
+	// real widths to remember. Idempotent across re-searches.
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_file");
 }
 
 void CSearchFileDlg::apply_sort()
@@ -512,6 +713,13 @@ void CSearchFileDlg::OnExtract()
 
 void CSearchFileDlg::OnDestroy()
 {
+	// Tell the worker to bail at the next iteration boundary, and bump the
+	// sequence so any DONE/PROGRESS post that arrives at our queue after
+	// this point is dropped by the handler. The CWinThread auto-deletes
+	// when its proc returns; we don't need to join.
+	m_cancel.store(true, std::memory_order_relaxed);
+	++m_search_seq;
+	KillTimer(TIMER_CLEAR_PROGRESS);
 	ETSLayoutDialog::OnDestroy();
 	AfxGetApp()->WriteProfileString(m_reg_key, "file_name", m_filename);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "include_game_mixes", m_include_game_mixes ? 1 : 0);

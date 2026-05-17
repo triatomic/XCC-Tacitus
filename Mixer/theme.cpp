@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <commctrl.h>
+#include <windowsx.h>
 #include <dwmapi.h>
 #include <gdiplus.h>
 #include <uxtheme.h>
@@ -27,6 +28,7 @@ namespace theme
 		// keep it up-to-date.
 		bool g_resolved_dark = false;
 		bool g_show_grid = true;
+		bool g_show_column_headers = true;
 		size_format g_size_fmt = size_auto;
 		clipboard_format g_clipboard_fmt = clipboard_indexed;
 		vxl_ss g_vxl_ss = vxl_ss_4;
@@ -178,6 +180,7 @@ namespace theme
 		g_mode = static_cast<mode>(mv);
 		g_resolved_dark = resolve_dark(g_mode);
 		g_show_grid = AfxGetApp()->GetProfileInt("Theme", "show_grid", 1) != 0;
+		g_show_column_headers = AfxGetApp()->GetProfileInt("Theme", "show_column_headers", 1) != 0;
 		g_shp_transparency = AfxGetApp()->GetProfileInt("Theme", "shp_transparency", 0) != 0;
 		g_alpha_color = static_cast<COLORREF>(AfxGetApp()->GetProfileInt("Theme", "alpha_color", RGB(0, 255, 0)));
 		g_use_checkerboard = AfxGetApp()->GetProfileInt("Theme", "use_checkerboard", 1) != 0;
@@ -243,6 +246,7 @@ namespace theme
 	{
 		AfxGetApp()->WriteProfileInt("Theme", "mode", g_mode);
 		AfxGetApp()->WriteProfileInt("Theme", "show_grid", g_show_grid ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "show_column_headers", g_show_column_headers ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "shp_transparency", g_shp_transparency ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "alpha_color", static_cast<int>(g_alpha_color));
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
@@ -290,6 +294,16 @@ namespace theme
 		if (g_show_grid == v)
 			return;
 		g_show_grid = v;
+		save();
+	}
+
+	bool show_column_headers() { return g_show_column_headers; }
+
+	void set_show_column_headers(bool v)
+	{
+		if (g_show_column_headers == v)
+			return;
+		g_show_column_headers = v;
 		save();
 	}
 
@@ -551,6 +565,84 @@ namespace theme
 		else
 			ex &= ~LVS_EX_GRIDLINES;
 		::SendMessage(h_listview, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, ex);
+		::InvalidateRect(h_listview, NULL, TRUE);
+	}
+
+	// Forward declarations for file-scope helpers defined further down.
+	// enable_column_visibility_menu + apply_listview_groups (just below)
+	// need them.
+	static void install_dark_header_subclass(HWND h_header);
+	static std::string col_key(const char* lv_id, int col, const char* suffix);
+	static LRESULT CALLBACK dark_listview_groups_proc(HWND, UINT, WPARAM, LPARAM);
+
+	void apply_column_headers(HWND h_listview)
+	{
+		if (!h_listview)
+			return;
+		LONG s = ::GetWindowLong(h_listview, GWL_STYLE);
+		LONG ns = g_show_column_headers ? (s & ~LVS_NOCOLUMNHEADER) : (s | LVS_NOCOLUMNHEADER);
+		if (ns == s)
+			return;
+		::SetWindowLong(h_listview, GWL_STYLE, ns);
+		// SWP_FRAMECHANGED forces the listview to recalc its client rect so
+		// the header band visually appears/disappears immediately.
+		::SetWindowPos(h_listview, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		::InvalidateRect(h_listview, NULL, TRUE);
+	}
+
+	void enable_column_visibility_menu(HWND h_listview, const char* lv_id)
+	{
+		if (!h_listview || !lv_id || !*lv_id)
+			return;
+		HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h_listview, LVM_GETHEADER, 0, 0));
+		if (!h_header)
+			return;
+		// Ensure the header is subclassed (installs dark_header_proc the
+		// first time). install_dark_header_subclass is the dark-mode entry
+		// point but the subclass also owns context-menu interception now —
+		// safe to call regardless of theme.
+		install_dark_header_subclass(h_header);
+		// The lv_id string must outlive the prop; callers pass string
+		// literals (static lifetime), so storing the pointer directly is
+		// safe. If a future caller passes dynamic memory, switch to
+		// strdup + RemoveProp cleanup on WM_NCDESTROY.
+		::SetPropW(h_header, L"xcc.col_menu_lv_id",
+			reinterpret_cast<HANDLE>(const_cast<char*>(lv_id)));
+		// Restore previously hidden columns from persisted state.
+		const int n = static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0));
+		for (int i = 0; i < n; i++)
+		{
+			const int hidden = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "h").c_str(), 0);
+			if (!hidden)
+				continue;
+			const int cur_w = static_cast<int>(::SendMessageW(h_listview, LVM_GETCOLUMNWIDTH, i, 0));
+			if (cur_w > 0)
+			{
+				// First time we're restoring after a fresh InsertColumn —
+				// the caller's current width IS the last-visible width.
+				// Only save if we don't already have one (defensive).
+				const int saved = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "w").c_str(), 0);
+				if (saved <= 0)
+					AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, i, "w").c_str(), cur_w);
+				::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, i, 0);
+			}
+		}
+	}
+
+	void apply_listview_groups(HWND h_listview)
+	{
+		if (!h_listview)
+			return;
+		static const wchar_t* k_subclassed = L"xcc.dark_lv_groups_subclass";
+		static const wchar_t* k_orig_proc = L"xcc.dark_lv_groups_orig_proc";
+		if (::GetPropW(h_listview, k_subclassed))
+			return; // already installed
+		LONG_PTR orig = ::GetWindowLongPtrW(h_listview, GWLP_WNDPROC);
+		::SetPropW(h_listview, k_orig_proc, reinterpret_cast<HANDLE>(orig));
+		::SetWindowLongPtrW(h_listview, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(dark_listview_groups_proc));
+		::SetPropW(h_listview, k_subclassed, reinterpret_cast<HANDLE>(1));
+		// Trigger a paint so the overlay shows immediately on theme switch.
 		::InvalidateRect(h_listview, NULL, TRUE);
 	}
 
@@ -1189,24 +1281,261 @@ namespace theme
 		::EndPaint(h, &ps);
 	}
 
+	static void show_column_menu(HWND h_header, HWND h_listview, const char* lv_id, POINT screen_pt);
+
 	static LRESULT CALLBACK dark_header_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 	{
 		static const wchar_t* k_orig_proc = L"xcc.dark_header_orig_proc";
+		static const wchar_t* k_lv_id_prop = L"xcc.col_menu_lv_id";
 		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
 		if (msg == WM_PAINT && is_dark())
 		{
 			paint_dark_header(h);
 			return 0;
 		}
+		// Explorer-style per-column hide/show: right-click on the header
+		// pops a checkable menu of column names. Only fires for headers
+		// that opted in via enable_column_visibility_menu (lv_id prop set).
+		if ((msg == WM_CONTEXTMENU || msg == WM_RBUTTONUP) && ::GetPropW(h, k_lv_id_prop))
+		{
+			const char* lv_id = reinterpret_cast<const char*>(::GetPropW(h, k_lv_id_prop));
+			HWND h_lv = ::GetParent(h);
+			POINT pt;
+			if (msg == WM_CONTEXTMENU)
+			{
+				pt.x = GET_X_LPARAM(lp);
+				pt.y = GET_Y_LPARAM(lp);
+				if (pt.x == -1 && pt.y == -1)
+				{
+					RECT rc; ::GetWindowRect(h, &rc);
+					pt.x = (rc.left + rc.right) / 2;
+					pt.y = (rc.top + rc.bottom) / 2;
+				}
+			}
+			else
+			{
+				pt.x = GET_X_LPARAM(lp);
+				pt.y = GET_Y_LPARAM(lp);
+				::ClientToScreen(h, &pt);
+			}
+			show_column_menu(h, h_lv, lv_id, pt);
+			return 0;
+		}
 		if (msg == WM_NCDESTROY)
 		{
 			::RemovePropW(h, L"xcc.dark_header_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::RemovePropW(h, k_lv_id_prop);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return orig
+			? ::CallWindowProcW(orig, h, msg, wp, lp)
+			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	// Listview-group dark-mode overlay: Win10/11 ignore CDDS_GROUP
+	// clrText/clrTextBk so the only way to fix the dim default group bar is
+	// to repaint it over the system's output. Subclass the listview's
+	// WM_PAINT; after the default proc has rendered the system group bar,
+	// walk visible groups via LVM_GETGROUPRECT(LVGGR_HEADER) and FillRect +
+	// DrawTextW the title strip in theme colors. Chevron + collapse arrow
+	// are deliberately left to the system (we clip our paint a few pixels
+	// shy of the right edge).
+	static void paint_dark_group_overlay(HWND h_listview)
+	{
+		const int n = static_cast<int>(::SendMessageW(h_listview, LVM_GETGROUPCOUNT, 0, 0));
+		if (n <= 0)
+			return;
+		HDC hdc = ::GetDC(h_listview);
+		if (!hdc)
+			return;
+		RECT client;
+		::GetClientRect(h_listview, &client);
+		HBRUSH bk = bg_alt_brush();
+		HFONT hf = reinterpret_cast<HFONT>(::SendMessageW(h_listview, WM_GETFONT, 0, 0));
+		HGDIOBJ old_font = hf ? ::SelectObject(hdc, hf) : NULL;
+		::SetTextColor(hdc, text());
+		::SetBkMode(hdc, TRANSPARENT);
+		HPEN pen = ::CreatePen(PS_SOLID, 1, border());
+		HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+		// Open the TREEVIEW theme once for the chevron glyph. TVP_GLYPH
+		// part 2 with GLPS_OPENED / GLPS_CLOSED is the OS-native triangle
+		// used by Explorer's tree control — adapts to light/dark theme
+		// automatically (we use DarkMode_Explorer per uxtheme app-mode
+		// elsewhere). Falls back to a hand-drawn triangle if theme open
+		// fails (classic theme / theming disabled).
+		HTHEME h_tv = ::OpenThemeData(h_listview, L"TREEVIEW");
+		SIZE glyph_sz = { 16, 16 };
+		if (h_tv)
+			::GetThemePartSize(h_tv, hdc, TVP_GLYPH, GLPS_OPENED, NULL, TS_DRAW, &glyph_sz);
+		// Group ids are 0..n-1 by finish_search's assignment order. If a
+		// group is scrolled out of view, LVM_GETGROUPRECT returns 0/empty
+		// rect and we skip it.
+		for (int gid = 0; gid < n; gid++)
+		{
+			RECT rc = {};
+			rc.top = LVGGR_HEADER; // input field doubles as request type
+			if (!::SendMessageW(h_listview, LVM_GETGROUPRECT, gid, reinterpret_cast<LPARAM>(&rc)))
+				continue;
+			// Clip to visible client area; skip wholly off-screen bars.
+			if (rc.bottom <= client.top || rc.top >= client.bottom)
+				continue;
+			LVGROUP gi = {};
+			gi.cbSize = sizeof(gi);
+			gi.mask = LVGF_HEADER | LVGF_STATE;
+			gi.stateMask = LVGS_COLLAPSED;
+			wchar_t buf[256] = {};
+			gi.pszHeader = buf;
+			gi.cchHeader = _countof(buf);
+			::SendMessageW(h_listview, LVM_GETGROUPINFO, gid, reinterpret_cast<LPARAM>(&gi));
+			const bool collapsed = (gi.state & LVGS_COLLAPSED) != 0;
+			::FillRect(hdc, &rc, bk);
+			// Title text — left of the chevron area. 28 px reserved on the
+			// right covers the 16-px theme glyph + 6 px margin + 6 px gap.
+			RECT tr = rc;
+			tr.left += 8;
+			tr.right -= 28;
+			if (tr.right > tr.left)
+				::DrawTextW(hdc, buf, -1, &tr,
+					DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			// Draw the chevron using the OS TREEVIEW theme glyph (white in
+			// dark mode, black in light — matches Explorer's tree
+			// chevrons). Falls back to a hand-drawn triangle if theme
+			// part is unavailable.
+			RECT gr;
+			gr.right = rc.right - 6;
+			gr.left = gr.right - glyph_sz.cx;
+			gr.top = (rc.top + rc.bottom - glyph_sz.cy) / 2;
+			gr.bottom = gr.top + glyph_sz.cy;
+			const int state = collapsed ? GLPS_CLOSED : GLPS_OPENED;
+			if (h_tv)
+			{
+				::DrawThemeBackground(h_tv, hdc, TVP_GLYPH, state, &gr, NULL);
+			}
+			else
+			{
+				const int cx = (gr.left + gr.right) / 2;
+				const int cy = (gr.top + gr.bottom) / 2;
+				HBRUSH text_br = ::CreateSolidBrush(text());
+				HGDIOBJ old_br = ::SelectObject(hdc, text_br);
+				HPEN text_pen = ::CreatePen(PS_SOLID, 1, text());
+				HGDIOBJ old_pen2 = ::SelectObject(hdc, text_pen);
+				POINT tri[3];
+				if (collapsed)
+				{
+					tri[0] = { cx - 3, cy - 4 };
+					tri[1] = { cx - 3, cy + 4 };
+					tri[2] = { cx + 3, cy };
+				}
+				else
+				{
+					tri[0] = { cx - 4, cy - 2 };
+					tri[1] = { cx + 4, cy - 2 };
+					tri[2] = { cx, cy + 3 };
+				}
+				::Polygon(hdc, tri, 3);
+				::SelectObject(hdc, old_pen2);
+				::DeleteObject(text_pen);
+				::SelectObject(hdc, old_br);
+				::DeleteObject(text_br);
+			}
+			// Thin separator at the bottom edge so the bar reads as a strip.
+			::MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+			::LineTo(hdc, rc.right, rc.bottom - 1);
+		}
+		if (h_tv)
+			::CloseThemeData(h_tv);
+		::SelectObject(hdc, old_pen);
+		::DeleteObject(pen);
+		if (old_font)
+			::SelectObject(hdc, old_font);
+		::ReleaseDC(h_listview, hdc);
+	}
+
+	static LRESULT CALLBACK dark_listview_groups_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.dark_lv_groups_orig_proc";
+		static const wchar_t* k_subclassed = L"xcc.dark_lv_groups_subclass";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		if (msg == WM_PAINT && is_dark())
+		{
+			// Let the default proc paint everything first (rows, scrollbars,
+			// system group bars, chevrons) then overlay our themed bars on
+			// top. LVS_EX_DOUBLEBUFFER (set by apply_listview) keeps this
+			// flicker-free: the system's paint composes to an off-screen
+			// buffer and blits once; our GetDC overlay paints on the final
+			// surface.
+			LRESULT r = orig ? ::CallWindowProcW(orig, h, msg, wp, lp) : 0;
+			paint_dark_group_overlay(h);
+			return r;
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			::RemovePropW(h, k_subclassed);
 			::RemovePropW(h, k_orig_proc);
 			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
 		}
 		return orig
 			? ::CallWindowProcW(orig, h, msg, wp, lp)
 			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	// Per-listview column-visibility persistence. Two registry values per
+	// column under section "Theme": "col_<lv_id>_<i>_w" (last-visible
+	// width) and "col_<lv_id>_<i>_h" (0 = visible, 1 = hidden).
+	static std::string col_key(const char* lv_id, int col, const char* suffix)
+	{
+		std::string k = "col_";
+		k += lv_id;
+		k += "_";
+		k += std::to_string(col);
+		k += "_";
+		k += suffix;
+		return k;
+	}
+
+	static void show_column_menu(HWND h_header, HWND h_listview, const char* lv_id, POINT screen_pt)
+	{
+		const int n = static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0));
+		if (n <= 0)
+			return;
+		HMENU hm = ::CreatePopupMenu();
+		if (!hm)
+			return;
+		for (int i = 0; i < n; i++)
+		{
+			wchar_t buf[256] = {};
+			HDITEMW hdi = {};
+			hdi.mask = HDI_TEXT;
+			hdi.pszText = buf;
+			hdi.cchTextMax = _countof(buf);
+			::SendMessageW(h_header, HDM_GETITEMW, i, reinterpret_cast<LPARAM>(&hdi));
+			const int cur_w = static_cast<int>(::SendMessageW(h_listview, LVM_GETCOLUMNWIDTH, i, 0));
+			UINT flags = MF_STRING | (cur_w > 0 ? MF_CHECKED : MF_UNCHECKED);
+			::AppendMenuW(hm, flags, static_cast<UINT_PTR>(1000 + i), buf[0] ? buf : L"(unnamed)");
+		}
+		const UINT cmd = static_cast<UINT>(::TrackPopupMenu(hm,
+			TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+			screen_pt.x, screen_pt.y, 0, h_header, NULL));
+		::DestroyMenu(hm);
+		if (cmd < 1000 || cmd >= 1000u + static_cast<UINT>(n))
+			return;
+		const int col = static_cast<int>(cmd - 1000);
+		const int cur_w = static_cast<int>(::SendMessageW(h_listview, LVM_GETCOLUMNWIDTH, col, 0));
+		if (cur_w > 0)
+		{
+			// Hide: remember the current width then collapse.
+			AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, col, "w").c_str(), cur_w);
+			AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, col, "h").c_str(), 1);
+			::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, col, 0);
+		}
+		else
+		{
+			// Show: restore saved width (fallback 80 if never saved).
+			const int w = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, col, "w").c_str(), 80);
+			AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, col, "h").c_str(), 0);
+			::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, col, w > 0 ? w : 80);
+		}
 	}
 
 	// Group-box BUTTONs (BS_GROUPBOX) paint their own border + caption via

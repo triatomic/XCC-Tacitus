@@ -422,6 +422,7 @@ void CXCCMixerView::OnInitialUpdate()
 	GetListCtrl().InsertColumn(1, "Type", LVCFMT_LEFT);
 	GetListCtrl().InsertColumn(2, "Size", LVCFMT_RIGHT);
 	GetListCtrl().InsertColumn(3, "Description", LVCFMT_LEFT);
+	theme::apply_column_headers(GetListCtrl().GetSafeHwnd());
 	update_list();
 }
 
@@ -829,6 +830,17 @@ void CXCCMixerView::autosize_colums()
 	for (int i = 0; i < GetListCtrl().GetHeaderCtrl()->GetItemCount(); i++)
 		GetListCtrl().SetColumnWidth(i, LVSCW_AUTOSIZE_USEHEADER);
 	SetRedraw(true);
+	// Wire the right-click-header column-visibility menu and re-apply
+	// persisted hidden state. Idempotent — header subclass install is
+	// guarded, and the hidden-state restore is a no-op for columns whose
+	// width is already 0. Called from here (not OnInitialUpdate) because
+	// the autosize above is what gives columns their real "last visible"
+	// widths to remember.
+	const char* lv_id =
+		(m_reg_key == "left_mix_pane") ? "main_pane_left" :
+		(m_reg_key == "right_mix_pane") ? "main_pane_right" : NULL;
+	if (lv_id)
+		theme::enable_column_visibility_menu(GetListCtrl().GetSafeHwnd(), lv_id);
 }
 
 void CXCCMixerView::OnGetdispinfo(NMHDR* pNMHDR, LRESULT* pResult)

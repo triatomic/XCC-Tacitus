@@ -210,6 +210,7 @@
 #define IDC_TT_DOWNSCALE_LABEL          1204
 #define IDC_TT_DOWNSCALE_COMBO          1205
 #define IDC_TT_TRANSPARENT_PAL0         1206
+#define IDC_SEARCH_PROGRESS             1207
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781
@@ -1525,6 +1526,7 @@
 #define ID_THEME_VXL_SS_4               41018
 #define ID_THEME_VXL_SS_8               41019
 #define ID_THEME_VXL_SS_16              41020
+#define ID_THEME_SHOW_COLUMN_HEADERS    41021
 #define ID_THEME_VXL_SHADING            41022
 #define ID_THEME_PARALLEL_EXTRACT       41023
 #define ID_THEME_LIMIT_VXL_CPU          41024
