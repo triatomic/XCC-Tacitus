@@ -146,6 +146,121 @@ int Cvirtual_image::set_clipboard() const
 	return error;
 }
 
+int Cvirtual_image::set_clipboard_png() const
+{
+	// Caller contract: cb_pixel() == 4, pixels are RGBA (R,G,B,A per pixel) so
+	// png_file_write's PNG_FORMAT_RGBA path can consume the buffer directly.
+	if (cb_pixel() != 4)
+		return 0x200;
+	int error = 0;
+
+	// 1) Encode RGBA buffer to PNG bytes via the existing Cvirtual_file overload
+	//    (uses a temp file internally; acceptable for a one-shot clipboard write).
+	Cvirtual_file png_vf;
+	if (png_file_write(png_vf, image(), NULL, cx(), cy(), 4))
+		return 0x201;
+	int png_size = png_vf.size();
+	const byte* png_bytes = png_vf.data();
+	if (png_size <= 0 || !png_bytes)
+		return 0x202;
+
+	static UINT cf_png = 0;
+	if (!cf_png)
+		cf_png = RegisterClipboardFormatA("PNG");
+	if (!cf_png)
+		return 0x203;
+
+	// 2) Build CF_DIB 24bpp fallback: flatten RGBA over mid-gray so legacy
+	//    paste targets see a visible image (not pure black on alpha=0).
+	int cx_ = cx();
+	int cy_ = cy();
+	const int cb_line_24_unaligned = cx_ * 3;
+	const int cb_line_24 = cb_line_24_unaligned + 3 & ~3;
+	HGLOBAL h_png = GlobalAlloc(GMEM_MOVEABLE, png_size);
+	HGLOBAL h_dib = GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPINFOHEADER) + cb_line_24 * cy_);
+	if (!h_png || !h_dib)
+		error = 0x100;
+	else
+	{
+		// --- CF_PNG ---
+		byte* mem_png = reinterpret_cast<byte*>(GlobalLock(h_png));
+		if (!mem_png)
+			error = 0x101;
+		else
+		{
+			memcpy(mem_png, png_bytes, png_size);
+			GlobalUnlock(h_png);
+		}
+
+		// --- CF_DIB 24bpp fallback ---
+		byte* mem_dib = error ? nullptr : reinterpret_cast<byte*>(GlobalLock(h_dib));
+		if (!error && !mem_dib)
+			error = 0x102;
+		else if (!error)
+		{
+			BITMAPINFOHEADER* hd = reinterpret_cast<BITMAPINFOHEADER*>(mem_dib);
+			ZeroMemory(hd, sizeof(BITMAPINFOHEADER));
+			hd->biSize = sizeof(BITMAPINFOHEADER);
+			hd->biWidth = cx_;
+			hd->biHeight = cy_;
+			hd->biPlanes = 1;
+			hd->biBitCount = 24;
+			hd->biCompression = BI_RGB;
+			const int bg = 0x80;
+			byte* w = mem_dib + sizeof(BITMAPINFOHEADER);
+			const int cb_line_rgba = cx_ * 4;
+			const byte* r = image() + cb_line_rgba * cy_;
+			for (int y = 0; y < cy_; y++)
+			{
+				r -= cb_line_rgba;
+				for (int x = 0; x < cx_; x++)
+				{
+					int sr = r[x * 4 + 0];
+					int sg = r[x * 4 + 1];
+					int sb = r[x * 4 + 2];
+					int sa = r[x * 4 + 3];
+					// DIB rows are BGR; composite over mid-gray
+					w[x * 3 + 0] = (sb * sa + bg * (0xff - sa) + 0x7f) / 0xff;
+					w[x * 3 + 1] = (sg * sa + bg * (0xff - sa) + 0x7f) / 0xff;
+					w[x * 3 + 2] = (sr * sa + bg * (0xff - sa) + 0x7f) / 0xff;
+				}
+				for (int p = cb_line_24_unaligned; p < cb_line_24; p++)
+					w[p] = 0;
+				w += cb_line_24;
+			}
+			GlobalUnlock(h_dib);
+		}
+
+		if (!error)
+		{
+			if (!OpenClipboard(NULL))
+				error = 0x103;
+			else
+			{
+				if (!EmptyClipboard())
+					error = 0x104;
+				else
+				{
+					if (SetClipboardData(cf_png, h_png))
+						h_png = NULL;
+					else
+						error = 0x105;
+					if (!error && SetClipboardData(CF_DIB, h_dib))
+						h_dib = NULL;
+					else if (!error)
+						error = 0x106;
+				}
+				CloseClipboard();
+			}
+		}
+	}
+	if (h_png)
+		GlobalFree(h_png);
+	if (h_dib)
+		GlobalFree(h_dib);
+	return error;
+}
+
 int Cvirtual_image::load()
 {
 	const char* load_filter = "Image files (*.jpeg;*.jpg;*.pcx;*.png)|*.jpeg;*.jpg;*.pcx;*.png|JPEG files (*.jpeg;*.jpg)|*.jpeg;*.jpg|PCX files (*.pcx)|*.pcx|PNG files (*.png)|*.png|";

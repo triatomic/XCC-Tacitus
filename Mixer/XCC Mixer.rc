@@ -104,6 +104,13 @@ BEGIN
         MENUITEM "Fix Shadows",                 ID_CONVERSION_FIX_SHADOWS
         MENUITEM "Split Shadows",               ID_CONVERSION_SPLIT_SHADOWS
     END
+    POPUP "&Shadow"
+    BEGIN
+        MENUITEM "&Darken Background",          ID_SHADOW_DARKEN
+        MENUITEM "&Transparent",                ID_SHADOW_TRANSPARENT
+        MENUITEM "Transparent Shadow",          ID_SHADOW_TRANSPARENT_32
+        MENUITEM "Transparent (PNG, real alpha)", ID_SHADOW_TRANSPARENT_PNG
+    END
     POPUP "&View"
     BEGIN
         POPUP "&Game"
@@ -722,6 +729,19 @@ BEGIN
     ID_THEME_CLIPBOARD_INDEXED
                             "Screenshot Copy puts an 8-bit paletted DIB on the clipboard (smallest, round-trips to Paste-as-SHP)"
     ID_THEME_CLIPBOARD_RGB  "Screenshot Copy puts a 32-bit RGB DIB on the clipboard (WYSIWYG composite, broadest compatibility)"
+    ID_CONVERSION_COMBINE_SHADOWS
+                            "RA2/TS SHP: merge each per-frame shadow mask into its body frame on Copy as PCX / Ctrl+C"
+    ID_CONVERSION_ENABLE_COMPRESSION
+                            "RA2/TS SHP: compress frames with RLE when saving / Paste-as-SHP (smaller files)"
+    ID_CONVERSION_FIX_SHADOWS
+                            "RA2/TS SHP save / Resize: pad odd frame counts so pair-mode shadow rendering works"
+    ID_CONVERSION_SPLIT_SHADOWS
+                            "RA2/TS SHP Paste / save: split a tall combined image into separate body + shadow frames"
+    ID_SHADOW_DARKEN        "Combine Shadows style (RA2/TS SHP): halo = 50% darkened underlying pixel"
+    ID_SHADOW_TRANSPARENT   "Combine Shadows style (RA2/TS SHP): halo = palette index 0 (transparent)"
+    ID_SHADOW_TRANSPARENT_32 "Combine Shadows style (RA2/TS SHP): halo = 75% darkened underlying pixel (lighter)"
+    ID_SHADOW_TRANSPARENT_PNG
+                            "Combine Shadows style (RA2/TS SHP Ctrl+C): paste as PNG with real alpha (transparent bg + semi-transparent halo)"
     ID_THEME_USE_CHECKERBOARD 
                             "Show a checkerboard pattern over transparent pixels instead of a solid color"
     ID_THEME_USE_EXTERNAL_PROGRAMS 

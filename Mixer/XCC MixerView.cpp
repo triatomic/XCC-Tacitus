@@ -1092,7 +1092,7 @@ Cvirtual_image CXCCMixerView::get_vimage_id(int id) const
 		{
 			Cshp_ts_file f;
 			f.load(get_vdata_id(id));
-			d = f.extract_as_pcx_single(get_default_palette(), GetMainFrame()->combine_shadows());
+			d = f.extract_as_pcx_single(get_default_palette(), GetMainFrame()->combine_shadows(), static_cast<Cshp_ts_file::shadow_style>(GetMainFrame()->shadow_style()));
 		}
 		break;
 	case ft_tmp_ra:
@@ -1923,7 +1923,7 @@ int CXCCMixerView::copy_as_pcx(int i, Cfname fname, t_file_type ft) const
 			}
 			Cshp_ts_file f;
 			f.load(get_vdata(i));
-			return f.extract_as_pcx(fname, ft, get_default_palette(), GetMainFrame()->combine_shadows());
+			return f.extract_as_pcx(fname, ft, get_default_palette(), GetMainFrame()->combine_shadows(), static_cast<Cshp_ts_file::shadow_style>(GetMainFrame()->shadow_style()));
 		}
 	case ft_vqa:
 		{
@@ -3215,7 +3215,14 @@ void CXCCMixerView::OnUpdatePopupResize(CCmdUI* pCmdUI)
 
 void CXCCMixerView::OnPopupClipboardCopy()
 {
-	get_vimage(get_current_index()).set_clipboard();
+	Cvirtual_image vi = get_vimage(get_current_index());
+	// 4bpp RGBA vimage means the source path produced an alpha-bearing image
+	// (currently only the SHP_TS shadow_style_transparent_png branch). Route
+	// to CF_PNG so alpha survives; alpha-blind apps get the CF_DIB fallback.
+	if (vi.cb_pixel() == 4)
+		vi.set_clipboard_png();
+	else
+		vi.set_clipboard();
 }
 
 void CXCCMixerView::OnPopupCopyName()

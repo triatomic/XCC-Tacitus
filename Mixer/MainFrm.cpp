@@ -120,6 +120,14 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_LAUNCH_XTW_RA2, OnUpdateLaunchXTW_RA2)
 	ON_COMMAND(ID_CONVERSION_COMBINE_SHADOWS, OnConversionCombineShadows)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_COMBINE_SHADOWS, OnUpdateConversionCombineShadows)
+	ON_COMMAND(ID_SHADOW_DARKEN, OnShadowDarken)
+	ON_UPDATE_COMMAND_UI(ID_SHADOW_DARKEN, OnUpdateShadowDarken)
+	ON_COMMAND(ID_SHADOW_TRANSPARENT, OnShadowTransparent)
+	ON_UPDATE_COMMAND_UI(ID_SHADOW_TRANSPARENT, OnUpdateShadowTransparent)
+	ON_COMMAND(ID_SHADOW_TRANSPARENT_32, OnShadowTransparent32)
+	ON_UPDATE_COMMAND_UI(ID_SHADOW_TRANSPARENT_32, OnUpdateShadowTransparent32)
+	ON_COMMAND(ID_SHADOW_TRANSPARENT_PNG, OnShadowTransparentPng)
+	ON_UPDATE_COMMAND_UI(ID_SHADOW_TRANSPARENT_PNG, OnUpdateShadowTransparentPng)
 	ON_COMMAND(ID_VIEW_REPORT, OnViewReport)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_REPORT, OnUpdateViewReport)
 	ON_COMMAND(ID_LAUNCH_XSTE_RA2, OnLaunchXSTE_RA2)
@@ -246,6 +254,9 @@ CMainFrame::CMainFrame()
 	m_lists_initialized = GetAsyncKeyState(VK_SHIFT) < 0;
 
 	m_combine_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "combine_shadows", false);
+	m_shadow_style = AfxGetApp()->GetProfileInt(m_reg_key, "shadow_style", 0);
+	if (m_shadow_style < 0 || m_shadow_style > 3)
+		m_shadow_style = 0;
 	m_enable_compression = AfxGetApp()->GetProfileInt(m_reg_key, "enable_compression", true);
 	m_palette_i = AfxGetApp()->GetProfileInt(m_reg_key, "palette_i", -1);
 	m_split_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "split_shadows", false);
@@ -949,9 +960,49 @@ void CMainFrame::OnConversionCombineShadows()
 	m_combine_shadows = !m_combine_shadows;	
 }
 
-void CMainFrame::OnUpdateConversionCombineShadows(CCmdUI* pCmdUI) 
+void CMainFrame::OnUpdateConversionCombineShadows(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(m_combine_shadows);
+}
+
+void CMainFrame::OnShadowDarken()
+{
+	m_shadow_style = 0;
+}
+
+void CMainFrame::OnUpdateShadowDarken(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_shadow_style == 0);
+}
+
+void CMainFrame::OnShadowTransparent()
+{
+	m_shadow_style = 1;
+}
+
+void CMainFrame::OnUpdateShadowTransparent(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_shadow_style == 1);
+}
+
+void CMainFrame::OnShadowTransparent32()
+{
+	m_shadow_style = 2;
+}
+
+void CMainFrame::OnUpdateShadowTransparent32(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_shadow_style == 2);
+}
+
+void CMainFrame::OnShadowTransparentPng()
+{
+	m_shadow_style = 3;
+}
+
+void CMainFrame::OnUpdateShadowTransparentPng(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_shadow_style == 3);
 }
 
 void CMainFrame::OnConversionFixShadows() 
@@ -1181,6 +1232,7 @@ void CMainFrame::OnLaunchXSE_Open()
 void CMainFrame::OnDestroy()
 {
 	AfxGetApp()->WriteProfileInt(m_reg_key, "combine_shadows", m_combine_shadows);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "shadow_style", m_shadow_style);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "enable_compression", m_enable_compression);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "palette_i", m_palette_i);	//i don't care about keeping them wrong for older compatibility
 	AfxGetApp()->WriteProfileInt(m_reg_key, "split_shadows", m_split_shadows);

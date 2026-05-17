@@ -146,6 +146,19 @@ public:
 		return m_split_shadows;
 	}
 
+	// Style for combined-shadow output. 0 = darken background, 1 = transparent.
+	// Stored as plain int to avoid pulling shp_ts_file.h into MainFrm.h;
+	// the two callers in XCC MixerView.cpp cast to Cshp_ts_file::shadow_style.
+	int shadow_style() const
+	{
+		return m_shadow_style;
+	}
+
+	void set_shadow_style(int v)
+	{
+		m_shadow_style = v;
+	}
+
 	bool use_palette_for_conversion() const
 	{
 		return m_use_palette_for_conversion;
@@ -172,6 +185,7 @@ protected:
 	bool m_fix_shadows = false;
 	bool m_remap_team_colors = false;
 	bool m_split_shadows = false;
+	int m_shadow_style = 0;
 	bool m_use_palette_for_conversion = false;
 	CXCCMixerView* m_left_mix_pane;
 	CXCCMixerView* m_right_mix_pane;
@@ -260,6 +274,14 @@ protected:
 	afx_msg void OnUpdateLaunchXTW_RA2(CCmdUI* pCmdUI);
 	afx_msg void OnConversionCombineShadows();
 	afx_msg void OnUpdateConversionCombineShadows(CCmdUI* pCmdUI);
+	afx_msg void OnShadowDarken();
+	afx_msg void OnUpdateShadowDarken(CCmdUI* pCmdUI);
+	afx_msg void OnShadowTransparent();
+	afx_msg void OnUpdateShadowTransparent(CCmdUI* pCmdUI);
+	afx_msg void OnShadowTransparent32();
+	afx_msg void OnUpdateShadowTransparent32(CCmdUI* pCmdUI);
+	afx_msg void OnShadowTransparentPng();
+	afx_msg void OnUpdateShadowTransparentPng(CCmdUI* pCmdUI);
 	afx_msg void OnViewReport();
 	afx_msg void OnUpdateViewReport(CCmdUI* pCmdUI);
 	afx_msg void OnLaunchXSTE_RA2();

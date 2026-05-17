@@ -17,6 +17,11 @@ public:
 	void flip();
 	int get_clipboard();
 	int set_clipboard() const;
+	// For cb_pixel()==4 (RGBA) images. Encodes as PNG in memory, writes
+	// CF_PNG (registered format, read by Paint.NET/GIMP/Photoshop/Krita/
+	// browsers/Discord) + CF_DIB 24bpp flattened over mid-gray as a fallback
+	// for legacy paste targets.
+	int set_clipboard_png() const;
 	int load();
 	int save() const;
 	void load(const Cvirtual_binary& image, int cx, int cy, int cb_pixel, const t_palette_entry* palette, bool inflate = false);

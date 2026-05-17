@@ -2,6 +2,7 @@
 #include "shp_ts_file.h"
 
 #include "image_file.h"
+#include "palette.h"
 #include "shp_decode.h"
 #include "string_conversion.h"
 #include "xcc_log.h"
@@ -123,7 +124,7 @@ int get_ofs(int x, int y, int cx, int cy)
 	return x + cx * y;
 }
 
-int Cshp_ts_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette, bool combine_shadows) const
+int Cshp_ts_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_palette _palette, bool combine_shadows, shadow_style style) const
 {
 	t_palette palette;
 	convert_palette_18_to_24(_palette, palette);
@@ -168,7 +169,32 @@ int Cshp_ts_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_pal
 					for (int x = 0; x < cx; x++)
 					{
 						if (*r++)
-							w[x] = 4;
+						{
+							if (style == shadow_style_transparent)
+								w[x] = 0;
+							else
+							{
+								// Darken the body pixel under this shadow position;
+								// idx 0 (no body) darkens pure black so the halo
+								// around the sprite outline stays visible.
+								// transparent_32 = lighter darken (75% instead of 50%).
+								byte bg_idx = w[x];
+								int br, bg, bb;
+								if (style == shadow_style_transparent_32)
+								{
+									br = bg_idx ? palette[bg_idx].r * 3 / 4 : 0x40;
+									bg = bg_idx ? palette[bg_idx].g * 3 / 4 : 0x40;
+									bb = bg_idx ? palette[bg_idx].b * 3 / 4 : 0x40;
+								}
+								else
+								{
+									br = bg_idx ? palette[bg_idx].r >> 1 : 0;
+									bg = bg_idx ? palette[bg_idx].g >> 1 : 0;
+									bb = bg_idx ? palette[bg_idx].b >> 1 : 0;
+								}
+								w[x] = find_color(br, bg, bb, palette);
+							}
+						}
 					}
 				}
 				else
@@ -228,7 +254,7 @@ int Cshp_ts_file::extract_as_pcx(const Cfname& name, t_file_type ft, const t_pal
 	return error;
 }
 
-Cvirtual_image Cshp_ts_file::extract_as_pcx_single(const t_palette _palette, bool combine_shadows) const
+Cvirtual_image Cshp_ts_file::extract_as_pcx_single(const t_palette _palette, bool combine_shadows, shadow_style style) const
 {
 	t_palette palette;
 	convert_palette_18_to_24(_palette, palette);
@@ -272,7 +298,37 @@ Cvirtual_image Cshp_ts_file::extract_as_pcx_single(const t_palette _palette, boo
 					for (int x = 0; x < cx; x++)
 					{
 						if (*r++)
-							w[x] = 4;
+						{
+							if (style == shadow_style_transparent)
+								w[x] = 0;
+							else if (style == shadow_style_transparent_png)
+							{
+								// Halo sentinel for the PNG/CF_PNG path. Picked
+								// up by the 32bpp RGBA conversion below. C&C
+								// convention reserves idx 255 for engine use.
+								w[x] = 255;
+							}
+							else
+							{
+								// Darken intensity: 50% (>>1) for full darken,
+								// 75% (lighter darken) for transparent_32 mode.
+								byte bg_idx = w[x];
+								int br, bg, bb;
+								if (style == shadow_style_transparent_32)
+								{
+									br = bg_idx ? palette[bg_idx].r * 3 / 4 : 0x40;
+									bg = bg_idx ? palette[bg_idx].g * 3 / 4 : 0x40;
+									bb = bg_idx ? palette[bg_idx].b * 3 / 4 : 0x40;
+								}
+								else
+								{
+									br = bg_idx ? palette[bg_idx].r >> 1 : 0;
+									bg = bg_idx ? palette[bg_idx].g >> 1 : 0;
+									bb = bg_idx ? palette[bg_idx].b >> 1 : 0;
+								}
+								w[x] = find_color(br, bg, bb, palette);
+							}
+						}
 					}
 				}
 				else
@@ -306,6 +362,39 @@ Cvirtual_image Cshp_ts_file::extract_as_pcx_single(const t_palette _palette, boo
 				w += cx_s;
 			}
 		}
+	}
+	if (style == shadow_style_transparent_png && combine_shadows)
+	{
+		// Promote to 32-bit RGBA for PNG encoding (png_file_write expects RGBA,
+		// not BGRA). Three cases per pixel:
+		//   idx 0   -> alpha=0 (natural transparency)
+		//   idx 255 -> halo sentinel: semi-transparent dark gray (alpha ~ 0xc0)
+		//   else    -> opaque RGBA from palette
+		Cvirtual_binary rgba;
+		const int n = cx_s * cy_s;
+		byte* w = rgba.write_start(n * 4);
+		const byte* r = s.data();
+		for (int i = 0; i < n; i++)
+		{
+			byte idx = r[i];
+			if (idx == 0)
+			{
+				w[0] = 0; w[1] = 0; w[2] = 0; w[3] = 0;
+			}
+			else if (idx == 255)
+			{
+				w[0] = 0; w[1] = 0; w[2] = 0; w[3] = 0xc0;
+			}
+			else
+			{
+				w[0] = palette[idx].r;
+				w[1] = palette[idx].g;
+				w[2] = palette[idx].b;
+				w[3] = 0xff;
+			}
+			w += 4;
+		}
+		return Cvirtual_image(rgba, cx_s, cy_s, 4);
 	}
 	return Cvirtual_image(s, cx_s, cy_s, 1, palette);
 }

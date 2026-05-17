@@ -3465,6 +3465,7 @@ void CXCCFileView::player_exit()
 		m_player_grid.ShowWindow(SW_HIDE);
 		m_player_native.ShowWindow(SW_HIDE);
 		m_player_screenshot.ShowWindow(SW_HIDE);
+		m_player_turntable.ShowWindow(SW_HIDE);
 		m_player_slider.ShowWindow(SW_HIDE);
 		m_player_label.ShowWindow(SW_HIDE);
 		m_player_fps_label.ShowWindow(SW_HIDE);

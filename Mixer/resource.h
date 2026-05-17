@@ -1545,6 +1545,10 @@
 #define ID_SETTINGS_DIR_EXE             41039
 #define ID_THEME_CLIPBOARD_INDEXED      41040
 #define ID_THEME_CLIPBOARD_RGB          41041
+#define ID_SHADOW_DARKEN                41042
+#define ID_SHADOW_TRANSPARENT           41043
+#define ID_SHADOW_TRANSPARENT_32        41044
+#define ID_SHADOW_TRANSPARENT_PNG       41045
 
 // Next default values for new objects
 // 
