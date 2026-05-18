@@ -16,6 +16,7 @@ namespace keybinds
 			{ "edit_copy",                "Copy",                    scope_accel, ID_EDIT_COPY,                 'C',         FCONTROL,           mb_none, 0 },
 			{ "file_search_in_mix",       "Find here...",            scope_accel, ID_FILE_SEARCH_IN_MIX,        'F',         FCONTROL,           mb_none, 0 },
 			{ "file_search",              "Find everywhere...",      scope_accel, ID_FILE_SEARCH,               'F',         FCONTROL | FSHIFT,  mb_none, 0 },
+			{ "file_search_on_disk",      "Find on disk...",         scope_accel, ID_FILE_SEARCH_ON_DISK,       'F',         FCONTROL | FALT,    mb_none, 0 },
 			{ "file_new",                 "New Archive...",          scope_accel, ID_FILE_NEW,                  'N',         FCONTROL,           mb_none, 0 },
 			{ "file_open",                "Open...",                 scope_accel, ID_FILE_OPEN,                 'O',         FCONTROL,           mb_none, 0 },
 			{ "palette_select",           "Palette: Select...",      scope_accel, ID_VIEW_PALETTE_SELECT,       'R',         FCONTROL,           mb_none, 0 },

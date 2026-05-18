@@ -93,7 +93,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
-      <AdditionalIncludeDirectories>..\vcpkg_installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\vcpkg_installed\x86-windows-static\include;..\..\Everything-SDK\ipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <OpenMPSupport>true</OpenMPSupport>
@@ -139,6 +139,7 @@
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>..\..\Everything-SDK\ipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -192,6 +193,8 @@
     <ClCompile Include="SearchFileDlg.cpp">
     </ClCompile>
     <ClCompile Include="SearchInPaneDlg.cpp">
+    </ClCompile>
+    <ClCompile Include="SearchOnDiskDlg.cpp">
     </ClCompile>
     <ClCompile Include="SearchStringDlg.cpp">
     </ClCompile>
@@ -258,6 +261,7 @@
     <ClInclude Include="Resource.h" />
     <ClInclude Include="SearchFileDlg.h" />
     <ClInclude Include="SearchInPaneDlg.h" />
+    <ClInclude Include="SearchOnDiskDlg.h" />
     <ClInclude Include="SearchStringDlg.h" />
     <ClInclude Include="PalPathsDlg.h" />
     <ClInclude Include="AudioPlayerDlg.h" />

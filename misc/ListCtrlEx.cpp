@@ -151,7 +151,7 @@ void CListCtrlEx::OnSize(UINT nType, int cx, int cy)
 void CListCtrlEx::PreSubclassWindow()
 {
 	CListCtrl::PreSubclassWindow();
-	SetExtendedStyle(GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
+	SetExtendedStyle(GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_HEADERDRAGDROP);
 }
 
 BOOL CListCtrlEx::PreTranslateMessage(MSG* pMsg)

@@ -27,6 +27,7 @@
 #define IDD_KEY_CAPTURE                 146
 #define IDD_FPS_CUSTOM                  147
 #define IDD_VXL_TURNTABLE               148
+#define IDD_SEARCH_ON_DISK              149
 #define IDC_DUNE2                       1000
 #define IDC_TD_PRIMARY                  1001
 #define IDC_CY                          1001
@@ -211,6 +212,8 @@
 #define IDC_TT_DOWNSCALE_COMBO          1205
 #define IDC_TT_TRANSPARENT_PAL0         1206
 #define IDC_SEARCH_PROGRESS             1207
+#define IDC_DISK_SEARCH_PROGRESS        1208
+#define IDC_EXT_FILTER                  1209
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781
@@ -506,6 +509,7 @@
 #define ID_POPUP_BATCH_EXTRACT_PRESERVE 33137
 #define ID_POPUP_OPEN_WITH              33138
 #define ID_KEYBINDS_CONFIGURE           33139
+#define ID_FILE_SEARCH_ON_DISK          33140
 #define ID_VIEW_PALETTE_PAL000          40000
 #define ID_VIEW_PALETTE_PAL001          40001
 #define ID_VIEW_PALETTE_PAL002          40002
@@ -1557,9 +1561,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        149
-#define _APS_NEXT_COMMAND_VALUE         33140
-#define _APS_NEXT_CONTROL_VALUE         1210
+#define _APS_NEXT_RESOURCE_VALUE        151
+#define _APS_NEXT_COMMAND_VALUE         33141
+#define _APS_NEXT_CONTROL_VALUE         1212
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif

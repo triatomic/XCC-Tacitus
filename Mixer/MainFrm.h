@@ -264,6 +264,7 @@ protected:
 	afx_msg void OnUpdateLaunchXccThemeWriter(CCmdUI* pCmdUI);
 	afx_msg void OnFileSearch();
 	afx_msg void OnFileSearchInMix();
+	afx_msg void OnFileSearchOnDisk();
 	afx_msg void OnFileScreenshot();
 	afx_msg void OnConversionEnableCompression();
 	afx_msg void OnUpdateConversionEnableCompression(CCmdUI* pCmdUI);

@@ -574,6 +574,9 @@ namespace theme
 	static void install_dark_header_subclass(HWND h_header);
 	static std::string col_key(const char* lv_id, int col, const char* suffix);
 	static LRESULT CALLBACK dark_listview_groups_proc(HWND, UINT, WPARAM, LPARAM);
+	static void install_column_state_subclass(HWND h_listview);
+	static void apply_persisted_column_order(HWND h_listview, const char* lv_id);
+	static void apply_persisted_column_widths(HWND h_listview, const char* lv_id);
 
 	void apply_column_headers(HWND h_listview)
 	{
@@ -609,8 +612,12 @@ namespace theme
 		// strdup + RemoveProp cleanup on WM_NCDESTROY.
 		::SetPropW(h_header, L"xcc.col_menu_lv_id",
 			reinterpret_cast<HANDLE>(const_cast<char*>(lv_id)));
-		// Restore previously hidden columns from persisted state.
+		// Restore previously hidden columns from persisted state. Walk
+		// every column once: prefer the explicit saved width (set by the
+		// hide menu OR by user-resize via the column-state subclass) over
+		// the initial post-InsertColumn width.
 		const int n = static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0));
+		apply_persisted_column_widths(h_listview, lv_id);
 		for (int i = 0; i < n; i++)
 		{
 			const int hidden = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "h").c_str(), 0);
@@ -619,15 +626,20 @@ namespace theme
 			const int cur_w = static_cast<int>(::SendMessageW(h_listview, LVM_GETCOLUMNWIDTH, i, 0));
 			if (cur_w > 0)
 			{
-				// First time we're restoring after a fresh InsertColumn —
-				// the caller's current width IS the last-visible width.
-				// Only save if we don't already have one (defensive).
+				// First time restoring after fresh InsertColumn — current
+				// width IS the last-visible width. Only save if we don't
+				// already have one.
 				const int saved = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "w").c_str(), 0);
 				if (saved <= 0)
 					AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, i, "w").c_str(), cur_w);
 				::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, i, 0);
 			}
 		}
+		// Restore column display order (drag-to-reorder result).
+		apply_persisted_column_order(h_listview, lv_id);
+		// Hook HDN_ENDDRAG (order) + HDN_ENDTRACK (resize) to persist user
+		// edits. Idempotent.
+		install_column_state_subclass(h_listview);
 	}
 
 	void apply_listview_groups(HWND h_listview)
@@ -1536,6 +1548,196 @@ namespace theme
 			AfxGetApp()->WriteProfileInt("Theme", col_key(lv_id, col, "h").c_str(), 0);
 			::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, col, w > 0 ? w : 80);
 		}
+	}
+
+	// Column display order persistence. Stored as a single comma-separated
+	// string under "Theme\col_<lv_id>_order" (e.g. "0,2,1,3,4"). Restored on
+	// dialog init after columns are inserted; rewritten on HDN_ENDDRAG.
+	static void apply_persisted_column_order(HWND h_listview, const char* lv_id)
+	{
+		HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h_listview, LVM_GETHEADER, 0, 0));
+		const int n = h_header
+			? static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0))
+			: 0;
+		if (n <= 0)
+			return;
+		std::string key = "col_";
+		key += lv_id;
+		key += "_order";
+		CString s = AfxGetApp()->GetProfileString("Theme", key.c_str(), "");
+		if (s.IsEmpty())
+			return;
+		std::vector<int> order;
+		order.reserve(n);
+		int v = 0;
+		bool have_digit = false;
+		for (int i = 0; i <= s.GetLength(); i++)
+		{
+			char c = (i < s.GetLength()) ? static_cast<char>(s[i]) : ',';
+			if (c >= '0' && c <= '9')
+			{
+				v = v * 10 + (c - '0');
+				have_digit = true;
+			}
+			else if (c == ',' && have_digit)
+			{
+				order.push_back(v);
+				v = 0;
+				have_digit = false;
+			}
+		}
+		// Validate: size matches, all indices in [0,n), no duplicates.
+		if (static_cast<int>(order.size()) != n)
+			return;
+		std::vector<char> seen(n, 0);
+		for (int idx : order)
+		{
+			if (idx < 0 || idx >= n || seen[idx])
+				return;
+			seen[idx] = 1;
+		}
+		::SendMessageW(h_listview, LVM_SETCOLUMNORDERARRAY,
+			static_cast<WPARAM>(n), reinterpret_cast<LPARAM>(order.data()));
+	}
+
+	static void save_column_order(HWND h_listview, const char* lv_id)
+	{
+		HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h_listview, LVM_GETHEADER, 0, 0));
+		const int n = h_header
+			? static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0))
+			: 0;
+		if (n <= 0)
+			return;
+		std::vector<int> order(n, 0);
+		if (!::SendMessageW(h_listview, LVM_GETCOLUMNORDERARRAY,
+				static_cast<WPARAM>(n), reinterpret_cast<LPARAM>(order.data())))
+			return;
+		CString out;
+		for (int i = 0; i < n; i++)
+		{
+			if (i)
+				out += ',';
+			CString tmp;
+			tmp.Format("%d", order[i]);
+			out += tmp;
+		}
+		std::string key = "col_";
+		key += lv_id;
+		key += "_order";
+		AfxGetApp()->WriteProfileString("Theme", key.c_str(), out);
+	}
+
+	// Restore per-column widths previously saved by the user (either via
+	// the hide menu's stash or via the column-state subclass on
+	// HDN_ENDTRACK). Skips columns with no saved value so the
+	// InsertColumn-default width is preserved.
+	static void apply_persisted_column_widths(HWND h_listview, const char* lv_id)
+	{
+		HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h_listview, LVM_GETHEADER, 0, 0));
+		const int n = h_header
+			? static_cast<int>(::SendMessageW(h_header, HDM_GETITEMCOUNT, 0, 0))
+			: 0;
+		for (int i = 0; i < n; i++)
+		{
+			// Hidden columns keep width 0 — handled by the hide-restore
+			// loop in enable_column_visibility_menu, so skip here.
+			const int hidden = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "h").c_str(), 0);
+			if (hidden)
+				continue;
+			const int saved = AfxGetApp()->GetProfileInt("Theme", col_key(lv_id, i, "w").c_str(), 0);
+			if (saved > 0)
+				::SendMessageW(h_listview, LVM_SETCOLUMNWIDTH, i,
+					static_cast<LPARAM>(saved));
+		}
+	}
+
+	// Listview subclass that watches the header's HDN_ENDDRAG (order
+	// change) and HDN_ENDTRACK (resize complete) reflected through
+	// WM_NOTIFY. Persists changes to the same "Theme\col_<lv_id>_*" keys
+	// the hide menu uses. lv_id pointer comes from the header's
+	// xcc.col_menu_lv_id prop (set by enable_column_visibility_menu).
+	static LRESULT CALLBACK column_state_lv_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.col_state_orig_proc";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		auto call_orig = [&](UINT m, WPARAM w, LPARAM l) -> LRESULT {
+			return orig
+				? ::CallWindowProcW(orig, h, m, w, l)
+				: ::DefWindowProcW(h, m, w, l);
+		};
+		if (msg == WM_NOTIFY)
+		{
+			NMHDR* nh = reinterpret_cast<NMHDR*>(lp);
+			HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h, LVM_GETHEADER, 0, 0));
+			if (nh && nh->hwndFrom == h_header)
+			{
+				if (nh->code == HDN_ENDDRAG)
+				{
+					// Let the default proc commit the reorder first, then
+					// snapshot the new order. HDN_ENDDRAG fires before the
+					// header's internal order array updates, so we have to
+					// post a self-message and read on the next pump.
+					LRESULT r = call_orig(msg, wp, lp);
+					const char* lv_id = reinterpret_cast<const char*>(
+						::GetPropW(h_header, L"xcc.col_menu_lv_id"));
+					if (lv_id)
+					{
+						// PostMessage so we read the order AFTER the
+						// default handler's commit completes.
+						::PostMessageW(h, WM_APP + 0x40, 0, 0);
+					}
+					return r;
+				}
+				if (nh->code == HDN_ENDTRACK)
+				{
+					LRESULT r = call_orig(msg, wp, lp);
+					NMHEADERW* hdr = reinterpret_cast<NMHEADERW*>(lp);
+					const char* lv_id = reinterpret_cast<const char*>(
+						::GetPropW(h_header, L"xcc.col_menu_lv_id"));
+					if (lv_id && hdr && hdr->iItem >= 0)
+					{
+						const int w = static_cast<int>(
+							::SendMessageW(h, LVM_GETCOLUMNWIDTH, hdr->iItem, 0));
+						if (w > 0)
+							AfxGetApp()->WriteProfileInt("Theme",
+								col_key(lv_id, hdr->iItem, "w").c_str(), w);
+					}
+					return r;
+				}
+			}
+		}
+		if (msg == WM_APP + 0x40)
+		{
+			HWND h_header = reinterpret_cast<HWND>(::SendMessageW(h, LVM_GETHEADER, 0, 0));
+			const char* lv_id = h_header
+				? reinterpret_cast<const char*>(::GetPropW(h_header, L"xcc.col_menu_lv_id"))
+				: nullptr;
+			if (lv_id)
+				save_column_order(h, lv_id);
+			return 0;
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			::RemovePropW(h, L"xcc.col_state_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return call_orig(msg, wp, lp);
+	}
+
+	static void install_column_state_subclass(HWND h_listview)
+	{
+		if (!h_listview)
+			return;
+		static const wchar_t* k_subclassed = L"xcc.col_state_subclass";
+		if (::GetPropW(h_listview, k_subclassed))
+			return;
+		LONG_PTR orig = ::GetWindowLongPtrW(h_listview, GWLP_WNDPROC);
+		::SetPropW(h_listview, L"xcc.col_state_orig_proc",
+			reinterpret_cast<HANDLE>(orig));
+		::SetWindowLongPtrW(h_listview, GWLP_WNDPROC,
+			reinterpret_cast<LONG_PTR>(column_state_lv_proc));
+		::SetPropW(h_listview, k_subclassed, reinterpret_cast<HANDLE>(1));
 	}
 
 	// Group-box BUTTONs (BS_GROUPBOX) paint their own border + caption via

@@ -90,6 +90,7 @@ BEGIN
         MENUITEM "Close\tBackspace",            ID_FILE_CLOSE
         MENUITEM "Find here...\tCtrl+F",        ID_FILE_SEARCH_IN_MIX
         MENUITEM "Find everywhere...\tCtrl+Shift+F", ID_FILE_SEARCH
+        MENUITEM "Find on disk...\tCtrl+Alt+F", ID_FILE_SEARCH_ON_DISK
         POPUP "&Found"
         BEGIN
             MENUITEM "Update",                      ID_FILE_FOUND_UPDATE
@@ -195,7 +196,7 @@ BEGIN
             POPUP "&Clipboard Format"
             BEGIN
                 MENUITEM "&Indexed (8-bit paletted DIB)", ID_THEME_CLIPBOARD_INDEXED
-                MENUITEM "&RGB (32-bit BGRA DIB)",        ID_THEME_CLIPBOARD_RGB
+                MENUITEM "&RGB (32-bit BGRA DIB)",      ID_THEME_CLIPBOARD_RGB
             END
         END
     END
@@ -324,6 +325,7 @@ BEGIN
     "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
     "F",            ID_FILE_SEARCH_IN_MIX,  VIRTKEY, CONTROL, NOINVERT
     "F",            ID_FILE_SEARCH,         VIRTKEY, SHIFT, CONTROL, NOINVERT
+    "F",            ID_FILE_SEARCH_ON_DISK, VIRTKEY, CONTROL, ALT, NOINVERT
     "N",            ID_FILE_NEW,            VIRTKEY, CONTROL, NOINVERT
     "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
     "R",            ID_VIEW_PALETTE_SELECT, VIRTKEY, CONTROL, NOINVERT
@@ -419,10 +421,24 @@ BEGIN
     CONTROL         "Preserve folder structure",IDC_PRESERVE_STRUCTURE,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,184,100,10
     CONTROL         "Include game MIXes",IDC_INCLUDE_GAME_MIXES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,197,100,10
-    LTEXT           "",IDC_SEARCH_PROGRESS,113,199,2,10,SS_LEFTNOWORDWRAP
+    CONTROL         "",IDC_SEARCH_PROGRESS,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,113,199,2,10
     DEFPUSHBUTTON   "Search",IDOK,109,196,50,14
     PUSHBUTTON      "Extract...",IDC_EXTRACT,166,196,50,14
     PUSHBUTTON      "Close",IDCANCEL,223,196,50,14
+END
+
+IDD_SEARCH_ON_DISK DIALOGEX 0, 0, 320, 232
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Find on disk (Everything)"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
+BEGIN
+    LTEXT           "Filter:",IDC_FILENAME_STATIC,7,9,32,8
+    EDITTEXT        IDC_FILENAME,42,7,180,14,ES_AUTOHSCROLL
+    COMBOBOX        IDC_EXT_FILTER,226,7,90,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,24,306,181
+    CONTROL         "",IDC_DISK_SEARCH_PROGRESS,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,7,216,199,10
+    DEFPUSHBUTTON   "Search",IDOK,210,213,50,14
+    PUSHBUTTON      "Close",IDCANCEL,263,213,50,14
 END
 
 IDD_SEARCH_IN_PANE DIALOGEX 0, 0, 200, 160
@@ -570,6 +586,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_SEARCH_ON_DISK, DIALOG
+    BEGIN
+    END
+
     IDD_SEARCH_IN_PANE, DIALOG
     BEGIN
     END
@@ -675,6 +695,11 @@ BEGIN
     0
 END
 
+IDD_SEARCH_ON_DISK AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -696,13 +721,36 @@ BEGIN
     ID_THEME_LIGHT          "Use light mode colors"
     ID_THEME_DARK           "Use dark mode colors"
     ID_THEME_SHOW_GRID      "Toggle grid lines between list-view rows"
-    ID_THEME_SHOW_COLUMN_HEADERS "Toggle the Name/Type/Size/Description column header bar on list views"
     ID_THEME_ALPHA_COLOR    "Pick the color used to mark transparent pixels"
     ID_THEME_INTERP_NEAREST "Sharp pixel scaling (no smoothing). Best for sprites."
     ID_THEME_INTERP_BILINEAR 
                             "Bilinear scaling. Smooth, slight blur on upscale."
     ID_THEME_INTERP_BICUBIC "Bicubic scaling. Sharper edges than bilinear, slower."
     ID_THEME_INTERP_LANCZOS "Lanczos-2 scaling. Sharpest smooth filter, more aliasing on diagonals."
+END
+
+STRINGTABLE
+BEGIN
+    ID_THEME_SHP_TRANSPARENCY 
+                            "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
+    ID_THEME_USE_CHECKERBOARD 
+                            "Show a checkerboard pattern over transparent pixels instead of a solid color"
+    ID_THEME_USE_EXTERNAL_PROGRAMS 
+                            "Open files in registered external programs when launched from XCC"
+    ID_THEME_PANES_ONE      "Hide the middle MIX pane (file-info takes the slack)"
+    ID_THEME_PANES_TWO      "Show both MIX panes side-by-side"
+    ID_THEME_SIZE_FORMAT_AUTO "Display file sizes scaled (e.g. 1.5 MB)"
+    ID_THEME_SIZE_FORMAT_BYTES "Display file sizes as raw byte counts"
+    ID_THEME_VXL_SS_OFF     "No supersampling (1x). Fastest, aliased edges."
+    ID_THEME_VXL_SS_2       "2x supersampling. Slight edge smoothing."
+    ID_THEME_VXL_SS_4       "4x supersampling. Default. Good balance of quality and speed."
+    ID_THEME_VXL_SS_8       "8x supersampling. Smoother edges, more CPU."
+    ID_THEME_VXL_SS_16      "16x supersampling. Highest quality, heaviest CPU cost."
+    ID_THEME_SHOW_COLUMN_HEADERS 
+                            "Toggle the Name/Type/Size/Description column header bar on list views"
+    ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
+    ID_THEME_PARALLEL_EXTRACT 
+                            "Extract batch selections in parallel (faster on SSDs)"
 END
 
 STRINGTABLE
@@ -727,40 +775,35 @@ END
 
 STRINGTABLE
 BEGIN
-    ID_THEME_SHP_TRANSPARENCY
-                            "Render palette index 0 as transparent in SHP/PCX/CPS/WSA/TMP previews"
-    ID_THEME_CLIPBOARD_INDEXED
+    ID_THEME_CLIPBOARD_INDEXED 
                             "Screenshot Copy puts an 8-bit paletted DIB on the clipboard (smallest, round-trips to Paste-as-SHP)"
     ID_THEME_CLIPBOARD_RGB  "Screenshot Copy puts a 32-bit RGB DIB on the clipboard (WYSIWYG composite, broadest compatibility)"
-    ID_CONVERSION_COMBINE_SHADOWS
-                            "RA2/TS SHP: merge each per-frame shadow mask into its body frame on Copy as PCX / Ctrl+C"
-    ID_CONVERSION_ENABLE_COMPRESSION
-                            "RA2/TS SHP: compress frames with RLE when saving / Paste-as-SHP (smaller files)"
-    ID_CONVERSION_FIX_SHADOWS
-                            "RA2/TS SHP save / Resize: pad odd frame counts so pair-mode shadow rendering works"
-    ID_CONVERSION_SPLIT_SHADOWS
-                            "RA2/TS SHP Paste / save: split a tall combined image into separate body + shadow frames"
     ID_SHADOW_DARKEN        "Combine Shadows style (RA2/TS SHP): halo = 50% darkened underlying pixel"
     ID_SHADOW_TRANSPARENT   "Combine Shadows style (RA2/TS SHP): halo = palette index 0 (transparent)"
-    ID_SHADOW_TRANSPARENT_32 "Combine Shadows style (RA2/TS SHP): halo = 75% darkened underlying pixel (lighter)"
-    ID_SHADOW_TRANSPARENT_PNG
+    ID_SHADOW_TRANSPARENT_32 
+                            "Combine Shadows style (RA2/TS SHP): halo = 75% darkened underlying pixel (lighter)"
+    ID_SHADOW_TRANSPARENT_PNG 
                             "Combine Shadows style (RA2/TS SHP Ctrl+C): paste as PNG with real alpha (transparent bg + semi-transparent halo)"
-    ID_THEME_USE_CHECKERBOARD 
-                            "Show a checkerboard pattern over transparent pixels instead of a solid color"
-    ID_THEME_USE_EXTERNAL_PROGRAMS 
-                            "Open files in registered external programs when launched from XCC"
-    ID_THEME_PANES_ONE      "Hide the middle MIX pane (file-info takes the slack)"
-    ID_THEME_PANES_TWO      "Show both MIX panes side-by-side"
-    ID_THEME_SIZE_FORMAT_AUTO "Display file sizes scaled (e.g. 1.5 MB)"
-    ID_THEME_SIZE_FORMAT_BYTES "Display file sizes as raw byte counts"
-    ID_THEME_VXL_SS_OFF     "No supersampling (1x). Fastest, aliased edges."
-    ID_THEME_VXL_SS_2       "2x supersampling. Slight edge smoothing."
-    ID_THEME_VXL_SS_4       "4x supersampling. Default. Good balance of quality and speed."
-    ID_THEME_VXL_SS_8       "8x supersampling. Smoother edges, more CPU."
-    ID_THEME_VXL_SS_16      "16x supersampling. Highest quality, heaviest CPU cost."
-    ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
-    ID_THEME_PARALLEL_EXTRACT 
-                            "Extract batch selections in parallel (faster on SSDs)"
+END
+
+STRINGTABLE
+BEGIN
+    ID_CONVERSION_ENABLE_COMPRESSION 
+                            "RA2/TS SHP: compress frames with RLE when saving / Paste-as-SHP (smaller files)"
+    ID_CONVERSION_COMBINE_SHADOWS 
+                            "RA2/TS SHP: merge each per-frame shadow mask into its body frame on Copy as PCX / Ctrl+C"
+END
+
+STRINGTABLE
+BEGIN
+    ID_CONVERSION_FIX_SHADOWS 
+                            "RA2/TS SHP save / Resize: pad odd frame counts so pair-mode shadow rendering works"
+END
+
+STRINGTABLE
+BEGIN
+    ID_CONVERSION_SPLIT_SHADOWS 
+                            "RA2/TS SHP Paste / save: split a tall combined image into separate body + shadow frames"
 END
 
 STRINGTABLE
@@ -866,7 +909,7 @@ CAPTION "Capture Turntable"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     LTEXT           "Frames (4-360):",IDC_TT_FRAMES_LABEL,10,12,80,10
-    EDITTEXT        IDC_TT_FRAMES_EDIT,95,10,50,14,ES_AUTOHSCROLL | ES_NUMBER | ES_RIGHT
+    EDITTEXT        IDC_TT_FRAMES_EDIT,95,10,50,14,ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER
     CONTROL         "",IDC_TT_FRAMES_SPIN,"msctls_updown32",UDS_SETBUDDYINT | UDS_ARROWKEYS,148,10,11,14
     LTEXT           "Format:",IDC_TT_FORMAT_LABEL,10,32,80,10
     COMBOBOX        IDC_TT_FORMAT_COMBO,95,30,135,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
@@ -876,11 +919,12 @@ BEGIN
     LTEXT           "Animation:",IDC_TT_ANIM_LABEL,10,72,80,10
     COMBOBOX        IDC_TT_ANIM_COMBO,95,70,135,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "GIF delay (cs):",IDC_TT_DELAY_LABEL,10,92,80,10
-    EDITTEXT        IDC_TT_DELAY_EDIT,95,90,50,14,ES_AUTOHSCROLL | ES_NUMBER | ES_RIGHT
+    EDITTEXT        IDC_TT_DELAY_EDIT,95,90,50,14,ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER
     CONTROL         "",IDC_TT_DELAY_SPIN,"msctls_updown32",UDS_SETBUDDYINT | UDS_ARROWKEYS,148,90,11,14
     LTEXT           "Downscale:",IDC_TT_DOWNSCALE_LABEL,10,112,80,10
     COMBOBOX        IDC_TT_DOWNSCALE_COMBO,95,110,135,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Make palette index 0 transparent",IDC_TT_TRANSPARENT_PAL0,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,95,130,135,10
+    CONTROL         "Make palette index 0 transparent",IDC_TT_TRANSPARENT_PAL0,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,95,130,135,10
     LTEXT           "Captures the current view (SS, lighting, VPL, shading all honored).",IDC_TT_HINT,10,148,220,18
     DEFPUSHBUTTON   "Capture...",IDOK,124,182,55,14
     PUSHBUTTON      "Cancel",IDCANCEL,182,182,50,14

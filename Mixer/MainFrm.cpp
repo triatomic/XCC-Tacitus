@@ -10,6 +10,7 @@
 #include "fname.h"
 #include "searchfiledlg.h"
 #include "SearchInPaneDlg.h"
+#include "SearchOnDiskDlg.h"
 #include "PalPathsDlg.h"
 #include "KeybindsDlg.h"
 #include "keybinds.h"
@@ -110,6 +111,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_VIEW_DIRECTORIES, OnViewDirectories)
 	ON_COMMAND(ID_FILE_SEARCH, OnFileSearch)
 	ON_COMMAND(ID_FILE_SEARCH_IN_MIX, OnFileSearchInMix)
+	ON_COMMAND(ID_FILE_SEARCH_ON_DISK, OnFileSearchOnDisk)
 	ON_COMMAND(ID_FILE_SCREENSHOT, OnFileScreenshot)
 	ON_COMMAND(ID_CONVERSION_ENABLE_COMPRESSION, OnConversionEnableCompression)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_ENABLE_COMPRESSION, OnUpdateConversionEnableCompression)
@@ -1110,6 +1112,22 @@ void CMainFrame::OnFileScreenshot()
 	// with a status-bar message so this dispatcher stays trivial.
 	if (m_file_info_pane)
 		m_file_info_pane->take_screenshot();
+}
+
+void CMainFrame::OnFileSearchOnDisk()
+{
+	// Same focus-detection convention as OnFileSearch: if the right pane has
+	// focus, route the opened MIX there; otherwise default to left.
+	bool prefer_right = false;
+	if (CWnd* focus = GetFocus())
+	{
+		HWND h = focus->GetSafeHwnd();
+		if (m_right_mix_pane && (h == m_right_mix_pane->GetSafeHwnd() || ::IsChild(m_right_mix_pane->GetSafeHwnd(), h)))
+			prefer_right = true;
+	}
+	CSearchOnDiskDlg dlg;
+	dlg.set(this, prefer_right);
+	dlg.DoModal();
 }
 
 void CMainFrame::OnFileSearchInMix()

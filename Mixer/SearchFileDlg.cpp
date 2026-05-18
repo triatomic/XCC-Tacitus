@@ -58,6 +58,10 @@ CSearchFileDlg::CSearchFileDlg(CWnd* pParent /*=NULL*/)
 	//}}AFX_DATA_INIT
 	m_filename = AfxGetApp()->GetProfileString(m_reg_key, "file_name");
 	m_include_game_mixes = AfxGetApp()->GetProfileInt(m_reg_key, "include_game_mixes", 1) != 0;
+	m_sort_column = AfxGetApp()->GetProfileInt(m_reg_key, "sort_col", 0);
+	if (m_sort_column < 0 || m_sort_column > 2)
+		m_sort_column = 0;
+	m_sort_descending = AfxGetApp()->GetProfileInt(m_reg_key, "sort_desc", 0) != 0;
 }
 
 void CSearchFileDlg::DoDataExchange(CDataExchange* pDX)
@@ -723,6 +727,8 @@ void CSearchFileDlg::OnDestroy()
 	ETSLayoutDialog::OnDestroy();
 	AfxGetApp()->WriteProfileString(m_reg_key, "file_name", m_filename);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "include_game_mixes", m_include_game_mixes ? 1 : 0);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "sort_col", m_sort_column);
+	AfxGetApp()->WriteProfileInt(m_reg_key, "sort_desc", m_sort_descending ? 1 : 0);
 }
 
 void CSearchFileDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult) 
