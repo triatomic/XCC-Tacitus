@@ -45,6 +45,9 @@ protected:
 	afx_msg void OnAmbientEditKillFocus();
 	afx_msg void OnDiffuseEditKillFocus();
 	afx_msg void OnSpecularEditKillFocus();
+	afx_msg void OnAoEnabledToggle();
+	afx_msg void OnAoStrengthEditKillFocus();
+	afx_msg void OnAoQualityChanged();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -61,6 +64,10 @@ private:
 	CSliderCtrl m_ambient;
 	CSliderCtrl m_diffuse;
 	CSliderCtrl m_specular;
+	CSliderCtrl m_ao_strength;
+	CButton     m_ao_enabled;
+	CEdit       m_ao_strength_value;
+	CComboBox   m_ao_quality;
 	CEdit m_az_value;
 	CEdit m_el_value;
 	CEdit m_ambient_value;
@@ -87,4 +94,7 @@ private:
 	void commit_ambient_edit();
 	void commit_diffuse_edit();
 	void commit_specular_edit();
+	void commit_ao_strength_edit();
+	// Gray out the AO strength slider/edit when "Enable AO" is unchecked.
+	void update_ao_strength_enable();
 };

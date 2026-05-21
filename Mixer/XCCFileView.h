@@ -301,7 +301,7 @@ protected:
 
 	// VXL interactive 3D viewer state. When the file is a .vxl, player mode
 	// becomes a 3dsmax-style orbit viewer instead of an animation player.
-	struct t_vxl_voxel { double x, y, z; unsigned char color; unsigned char normal_idx; float nx, ny, nz; };
+	struct t_vxl_voxel { double x, y, z; unsigned char color; unsigned char normal_idx; float nx, ny, nz; unsigned char ao; };
 	vector<t_vxl_voxel> m_vxl_cloud;
 	int m_vxl_half = 0;
 	double m_vxl_yaw = 0.0;
@@ -495,6 +495,11 @@ private:
 		// splat. Empty when shading is off. Layout: 3 bytes per pixel
 		// (nx, ny, nz), row-major matching `buf`.
 		std::vector<signed char> cam_normal;
+		// Per-pixel baked AO term (0..255). Splatted alongside color/cam_normal
+		// and consumed by the shading pass when theme::vxl_ao_enabled() is on.
+		// Always written when the cloud has AO baked; the multiply itself is
+		// gated at shade time so toggling AO doesn't invalidate the splat.
+		std::vector<unsigned char> ao;
 		// Lighting version stamp the current `shade` was built from. Compared
 		// against theme::vxl_lighting_version() at paint time to decide
 		// whether the cheap shading pass needs to re-run. -1 = unbuilt.

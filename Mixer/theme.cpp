@@ -36,6 +36,12 @@ namespace theme
 		vxl_normal_source g_vxl_normal_src = vxl_normals_computed;
 		vxl_normal_method g_vxl_normal_method = vxl_method_basic;
 		vxl_normal_kernel g_vxl_normal_kernel = vxl_kernel_3;
+		// Ambient occlusion: view-independent, baked per-voxel at file load.
+		// `g_vxl_ao_enabled` gates the multiply in the shade pass; the bake
+		// runs unconditionally so toggling is instant.
+		bool g_vxl_ao_enabled = true;
+		int g_vxl_ao_strength = 60;	// 0..100
+		vxl_ao_quality g_vxl_ao_quality = ao_q_high;
 		// Defaults below match the original hand-tuned constants in
 		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
 		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
@@ -215,6 +221,17 @@ namespace theme
 		int nk = AfxGetApp()->GetProfileInt("Theme", "vxl_normal_kernel", vxl_kernel_3);
 		if (nk != vxl_kernel_3 && nk != vxl_kernel_5) nk = vxl_kernel_3;
 		g_vxl_normal_kernel = static_cast<vxl_normal_kernel>(nk);
+		g_vxl_ao_enabled = AfxGetApp()->GetProfileInt("Theme", "vxl_ao_enabled", 1) != 0;
+		{
+			int aos = AfxGetApp()->GetProfileInt("Theme", "vxl_ao_strength", 60);
+			if (aos < 0) aos = 0; else if (aos > 100) aos = 100;
+			g_vxl_ao_strength = aos;
+		}
+		{
+			int aoq = AfxGetApp()->GetProfileInt("Theme", "vxl_ao_quality", ao_q_high);
+			if (aoq < ao_q_low || aoq > ao_q_ultra) aoq = ao_q_high;
+			g_vxl_ao_quality = static_cast<vxl_ao_quality>(aoq);
+		}
 		// Lighting parameters: stored as int * 1000 to preserve precision via
 		// the int-only WriteProfileInt API. Out-of-range values fall back to
 		// defaults so corrupted/manually-edited registry entries don't render
@@ -261,6 +278,9 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_src", static_cast<int>(g_vxl_normal_src));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_method", static_cast<int>(g_vxl_normal_method));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_normal_kernel", static_cast<int>(g_vxl_normal_kernel));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_enabled", g_vxl_ao_enabled ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_strength", g_vxl_ao_strength);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_quality", static_cast<int>(g_vxl_ao_quality));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_az", static_cast<int>(g_vxl_light_az * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
@@ -374,6 +394,40 @@ namespace theme
 	{
 		if (g_vxl_normal_kernel == v) return;
 		g_vxl_normal_kernel = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	bool vxl_ao_enabled() { return g_vxl_ao_enabled; }
+	void set_vxl_ao_enabled(bool v)
+	{
+		if (g_vxl_ao_enabled == v) return;
+		g_vxl_ao_enabled = v;
+		g_vxl_lighting_version++;
+		save();
+	}
+	int vxl_ao_strength() { return g_vxl_ao_strength; }
+	void set_vxl_ao_strength(int v)
+	{
+		if (v < 0) v = 0; else if (v > 100) v = 100;
+		if (g_vxl_ao_strength == v) return;
+		g_vxl_ao_strength = v;
+		g_vxl_lighting_version++;
+		// Defer save like the other lighting sliders. VxlLightingDlg
+		// flushes on slider release via flush_lighting_save().
+		g_vxl_lighting_save_pending = true;
+	}
+
+	vxl_ao_quality vxl_ao_quality_v() { return g_vxl_ao_quality; }
+	void set_vxl_ao_quality(vxl_ao_quality v)
+	{
+		if (g_vxl_ao_quality == v) return;
+		g_vxl_ao_quality = v;
+		// Quality change requires the cloud to rebake — the caller (dialog)
+		// triggers that via invalidate_vxl_cloud_in_file_view. We still bump
+		// the lighting version so any post-rebake splat key check invalidates
+		// cleanly. Quality is a discrete combobox change, not a drag, so
+		// save() immediately (no flush deferral).
 		g_vxl_lighting_version++;
 		save();
 	}

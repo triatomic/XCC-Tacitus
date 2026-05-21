@@ -214,6 +214,13 @@
 #define IDC_SEARCH_PROGRESS             1207
 #define IDC_DISK_SEARCH_PROGRESS        1208
 #define IDC_EXT_FILTER                  1209
+#define IDC_VXL_AO_GROUP                1210
+#define IDC_VXL_AO_ENABLED              1211
+#define IDC_VXL_AO_STRENGTH_LABEL       1212
+#define IDC_VXL_AO_STRENGTH_SLIDER      1213
+#define IDC_VXL_AO_STRENGTH_VALUE       1214
+#define IDC_VXL_AO_QUALITY_LABEL        1215
+#define IDC_VXL_AO_QUALITY              1216
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781

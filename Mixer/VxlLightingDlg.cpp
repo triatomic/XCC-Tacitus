@@ -50,6 +50,10 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_LIGHT_SPECULAR_VALUE, m_specular_value);
 	DDX_Control(pDX, IDC_VXL_NORMAL_METHOD, m_method);
 	DDX_Control(pDX, IDC_VXL_NORMAL_KERNEL, m_kernel);
+	DDX_Control(pDX, IDC_VXL_AO_ENABLED, m_ao_enabled);
+	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_SLIDER, m_ao_strength);
+	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_VALUE, m_ao_strength_value);
+	DDX_Control(pDX, IDC_VXL_AO_QUALITY, m_ao_quality);
 }
 
 BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
@@ -72,6 +76,9 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE,  OnAmbientEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_DIFFUSE_VALUE,  OnDiffuseEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_SPECULAR_VALUE, OnSpecularEditKillFocus)
+	ON_BN_CLICKED(IDC_VXL_AO_ENABLED, OnAoEnabledToggle)
+	ON_EN_KILLFOCUS(IDC_VXL_AO_STRENGTH_VALUE, OnAoStrengthEditKillFocus)
+	ON_CBN_SELCHANGE(IDC_VXL_AO_QUALITY, OnAoQualityChanged)
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -83,6 +90,9 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_ambient.SetRange(0, k_steps);
 	m_diffuse.SetRange(0, k_steps);
 	m_specular.SetRange(0, k_steps);
+	// AO strength uses a direct 0..100 range so the slider position equals
+	// the percentage value shown in the edit box.
+	m_ao_strength.SetRange(0, 100);
 	// Populate the Method + Kernel comboboxes once. Order matches the enum
 	// values in theme.h so the index can be passed straight through.
 	m_method.AddString("Basic (6 faces)");
@@ -90,6 +100,10 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_method.AddString("Smooth gradient");
 	m_kernel.AddString("3\xB3 (radius 1)");
 	m_kernel.AddString("5\xB3 (radius 2)");
+	// AO Quality: indices match theme::vxl_ao_quality enum (Low=0, High=1, Ultra=2).
+	m_ao_quality.AddString("Low (16 rays)");
+	m_ao_quality.AddString("High (32 rays)");
+	m_ao_quality.AddString("Ultra (64 rays)");
 	load_from_theme();
 
 	// Tooltips. Multi-line wraps via TTM_SETMAXTIPWIDTH; embedded \r\n inside
@@ -138,6 +152,18 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"like antennas and barrels. 5\xB3 smooths blocky hulls more aggressively "
 		"but can over-soften small features. Only used when Method = Smooth "
 		"gradient.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_AO_ENABLED),
+		"Apply view-independent ambient occlusion baked per-voxel at file load. "
+		"Darkens crevices, contact points, and inside-section concavities.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_AO_STRENGTH_SLIDER),
+		"How dark fully-occluded voxels get. 0 = no AO (same as unchecking Enable). "
+		"100 = full strength (occluded voxels go to black). Default 60.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_AO_QUALITY),
+		"AO bake quality. Changing this rebakes the loaded voxel.\r\n"
+		"  Low \x97 16 rays / 5-cell range. Fast.\r\n"
+		"  High \x97 32 rays / 8-cell range. Recommended default.\r\n"
+		"  Ultra \x97 64 rays / 8-cell range. Smoothest gradients, "
+		"slowest bake (still well under 100 ms on big units).");
 	m_tooltips.Activate(TRUE);
 
 	theme::apply_dialog(GetSafeHwnd());
@@ -161,6 +187,7 @@ BOOL CVxlLightingDlg::PreTranslateMessage(MSG* pMsg)
 		else if (focus == m_ambient_value.GetSafeHwnd())  { commit_ambient_edit();  return TRUE; }
 		else if (focus == m_diffuse_value.GetSafeHwnd())  { commit_diffuse_edit();  return TRUE; }
 		else if (focus == m_specular_value.GetSafeHwnd()) { commit_specular_edit(); return TRUE; }
+		else if (focus == m_ao_strength_value.GetSafeHwnd()) { commit_ao_strength_edit(); return TRUE; }
 	}
 	return CDialog::PreTranslateMessage(pMsg);
 }
@@ -172,6 +199,10 @@ void CVxlLightingDlg::load_from_theme()
 	m_ambient.SetPos(scale_unit(theme::vxl_light_ambient()));
 	m_diffuse.SetPos(scale_unit(theme::vxl_light_diffuse()));
 	m_specular.SetPos(scale_spec(theme::vxl_light_specular()));
+	m_ao_strength.SetPos(theme::vxl_ao_strength());
+	CheckDlgButton(IDC_VXL_AO_ENABLED, theme::vxl_ao_enabled() ? BST_CHECKED : BST_UNCHECKED);
+	m_ao_quality.SetCurSel(static_cast<int>(theme::vxl_ao_quality_v()));
+	update_ao_strength_enable();
 	// Sync the normal-source radios with the persisted value.
 	const bool is_file = theme::vxl_normal_src() == theme::vxl_normals_file;
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, is_file ? BST_UNCHECKED : BST_CHECKED);
@@ -235,7 +266,18 @@ void CVxlLightingDlg::update_value_labels()
 	m_diffuse_value.SetWindowText(buf);
 	std::snprintf(buf, sizeof(buf), "%.2f", theme::vxl_light_specular());
 	m_specular_value.SetWindowText(buf);
+	std::snprintf(buf, sizeof(buf), "%d", theme::vxl_ao_strength());
+	m_ao_strength_value.SetWindowText(buf);
 	m_updating_ui = false;
+}
+
+void CVxlLightingDlg::update_ao_strength_enable()
+{
+	const bool ena = theme::vxl_ao_enabled();
+	if (HWND h = m_ao_strength.GetSafeHwnd())        ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = m_ao_strength_value.GetSafeHwnd())  ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_AO_STRENGTH_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, ena ? TRUE : FALSE);
 }
 
 void CVxlLightingDlg::invalidate_vxl_view()
@@ -275,6 +317,7 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_VXL_LIGHT_AMBIENT_SLIDER:  preview_value = unscale_unit(m_ambient.GetPos()); break;
 	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  preview_value = unscale_unit(m_diffuse.GetPos()); break;
 	case IDC_VXL_LIGHT_SPECULAR_SLIDER: preview_value = unscale_spec(m_specular.GetPos()); break;
+	case IDC_VXL_AO_STRENGTH_SLIDER:    preview_value = static_cast<float>(m_ao_strength.GetPos()); break;
 	default:
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
@@ -288,6 +331,7 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_VXL_LIGHT_AMBIENT_SLIDER:  theme::set_vxl_light_ambient(preview_value); break;
 	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  theme::set_vxl_light_diffuse(preview_value); break;
 	case IDC_VXL_LIGHT_SPECULAR_SLIDER: theme::set_vxl_light_specular(preview_value); break;
+	case IDC_VXL_AO_STRENGTH_SLIDER:    theme::set_vxl_ao_strength(static_cast<int>(preview_value + 0.5f)); break;
 	}
 	update_value_labels();
 	invalidate_vxl_view();
@@ -379,6 +423,40 @@ void CVxlLightingDlg::OnElEditKillFocus()       { commit_el_edit(); }
 void CVxlLightingDlg::OnAmbientEditKillFocus()  { commit_ambient_edit(); }
 void CVxlLightingDlg::OnDiffuseEditKillFocus()  { commit_diffuse_edit(); }
 void CVxlLightingDlg::OnSpecularEditKillFocus() { commit_specular_edit(); }
+void CVxlLightingDlg::OnAoStrengthEditKillFocus() { commit_ao_strength_edit(); }
+
+void CVxlLightingDlg::commit_ao_strength_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_ao_strength_value.GetWindowText(s);
+	int v = _tstoi(s);
+	if (v < 0) v = 0; else if (v > 100) v = 100;
+	theme::set_vxl_ao_strength(v);
+	m_ao_strength.SetPos(v);
+	update_value_labels();
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnAoEnabledToggle()
+{
+	const bool ena = IsDlgButtonChecked(IDC_VXL_AO_ENABLED) == BST_CHECKED;
+	theme::set_vxl_ao_enabled(ena);
+	update_ao_strength_enable();
+	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnAoQualityChanged()
+{
+	const int sel = m_ao_quality.GetCurSel();
+	if (sel < 0) return;
+	theme::set_vxl_ao_quality(static_cast<theme::vxl_ao_quality>(sel));
+	// Quality change requires the AO bake to redo with the new ray count /
+	// range, which means rebuilding the voxel cloud (AO lives on each
+	// t_vxl_voxel). Same hook the normal-source/method handlers use.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
 
 void CVxlLightingDlg::OnNormalSrcComputed()
 {

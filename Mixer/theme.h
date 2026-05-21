@@ -206,6 +206,30 @@ namespace theme
 	};
 	vxl_normal_kernel vxl_normals_kernel();
 	void set_vxl_normals_kernel(vxl_normal_kernel v);
+
+	// Ambient occlusion: view-independent, baked per-voxel at file open.
+	// Strength multiplies the baked occlusion term in the shade pass:
+	// final = base * (1 - (ao/255) * strength/100). 0 = AO disabled,
+	// 100 = full strength. Bake runs eagerly regardless of `enabled` so
+	// toggling on/off is instant.
+	bool vxl_ao_enabled();
+	void set_vxl_ao_enabled(bool v);
+	int  vxl_ao_strength();        // 0..100
+	void set_vxl_ao_strength(int v);
+
+	// Bake quality. Affects ray count + max ray length used by the per-voxel
+	// AO bake. Higher tiers smooth crevice gradients and capture broader
+	// concavities; cost scales roughly linearly with ray_count. Tier change
+	// requires a cloud rebuild (the dialog handler routes through
+	// CMainFrame::invalidate_vxl_cloud_in_file_view).
+	enum vxl_ao_quality
+	{
+		ao_q_low   = 0,	// 16 rays, 5-cell range
+		ao_q_high  = 1,	// 32 rays, 8-cell range — default
+		ao_q_ultra = 2,	// 64 rays, 8-cell range
+	};
+	vxl_ao_quality vxl_ao_quality_v();
+	void set_vxl_ao_quality(vxl_ao_quality v);
 	// Resolve azimuth/elevation into a unit direction vector in camera space.
 	void vxl_light_direction(float& x, float& y, float& z);
 

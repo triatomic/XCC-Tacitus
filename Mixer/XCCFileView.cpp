@@ -4,6 +4,7 @@
 #include "keybinds.h"
 #include "resource.h"
 #include <algorithm>
+#include <array>
 #include <csf_file.h>
 #include <aud_file.h>
 #include <big_file.h>
@@ -3074,8 +3075,206 @@ void CXCCFileView::player_decode_frames()
 				float nlen = std::sqrt(wnx * wnx + wny * wny + wnz * wnz);
 				if (nlen > 1e-6f) { wnx /= nlen; wny /= nlen; wnz /= nlen; }
 				else              { wnx = 0; wny = 0; wnz = 1; }
-				t_vxl_voxel v{ wx, wy, wz, lv.color, lv.normal_idx, wnx, wny, wnz };
+				t_vxl_voxel v{ wx, wy, wz, lv.color, lv.normal_idx, wnx, wny, wnz, 0 };
 				m_vxl_cloud.push_back(v);
+			}
+			// Pass 3 — Ambient occlusion bake.
+			//
+			// View-independent per-voxel AO. From each surface voxel we fire
+			// `ray_count` cosine-weighted Hammersley rays in the hemisphere
+			// around the voxel's local normal and step the section's
+			// occupancy grid via 3D DDA up to `max_steps` cells. A hit at
+			// step `s` contributes `1 - s/max_steps` to the occlusion
+			// accumulator (near hits darken more than far ones — produces
+			// smooth gradients instead of binary cliffs). Final AO is
+			// `occlusion * 255 / ray_count` stored as `uint8_t` per voxel.
+			//
+			// Reads `occ` (already populated above) and writes to the
+			// `locals.size()` cloud entries this section just appended. AO
+			// uses its own 6-neighbor local normal for ray orientation —
+			// independent of the shading normal source/method (orientation
+			// only needs "outward enough", and decoupling avoids rebakes
+			// when shading normals change).
+			//
+			// Quality tiers (theme::vxl_ao_quality_v):
+			//   Low    16 rays, 5-cell range  — ~current speed
+			//   High   32 rays, 8-cell range  — default
+			//   Ultra  64 rays, 8-cell range  — best
+			{
+				const size_t cloud_start = m_vxl_cloud.size() - locals.size();
+				int ray_count = 32;
+				int max_steps = 8;
+				switch (theme::vxl_ao_quality_v())
+				{
+				case theme::ao_q_low:   ray_count = 16; max_steps = 5; break;
+				case theme::ao_q_high:  ray_count = 32; max_steps = 8; break;
+				case theme::ao_q_ultra: ray_count = 64; max_steps = 8; break;
+				}
+				// Cosine-weighted Hammersley directions in tangent space
+				// (z-up hemisphere), generated once per section. The
+				// Hammersley sequence is naturally stratified — no banding
+				// from a small fixed direction table reused across voxels.
+				// u1 = (i + 0.5) / N, u2 = van der Corput base-2 of i.
+				// Malley's method: r = sqrt(u1), phi = 2*pi*u2,
+				// dir = (r cos phi, r sin phi, sqrt(1 - u1)).
+				std::vector<std::array<float, 3>> ao_dirs(ray_count);
+				for (int i = 0; i < ray_count; i++)
+				{
+					const float u1 = (static_cast<float>(i) + 0.5f) / static_cast<float>(ray_count);
+					// van der Corput radical inverse, base 2.
+					unsigned int bits = static_cast<unsigned int>(i);
+					bits = (bits << 16) | (bits >> 16);
+					bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
+					bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
+					bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
+					bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
+					const float u2 = static_cast<float>(bits) * 2.3283064365386963e-10f;
+					const float r = std::sqrt(u1);
+					const float phi = 6.28318530717958647692f * u2;
+					ao_dirs[i][0] = r * std::cos(phi);
+					ao_dirs[i][1] = r * std::sin(phi);
+					ao_dirs[i][2] = std::sqrt(1.0f - u1);
+				}
+				const float inv_max_steps = 1.0f / static_cast<float>(max_steps);
+				const float scale_to_byte = 255.0f / static_cast<float>(ray_count);
+				#pragma omp parallel for schedule(static)
+				for (int li = 0; li < static_cast<int>(locals.size()); li++)
+				{
+					const local_voxel& lv = locals[li];
+					// AO orientation normal: cheap 6-neighbor empty-side sum.
+					// Fall back to +Z if fully surrounded.
+					float nx = 0, ny = 0, nz = 0;
+					auto empty_local = [&](int xx, int yy, int zz) {
+						if (xx < 0 || xx >= cx || yy < 0 || yy >= cy || zz < 0 || zz >= cz)
+							return true;
+						return occ[occ_idx(xx, yy, zz)] == 0;
+					};
+					if (empty_local(lv.lx - 1, lv.ly, lv.lz)) nx -= 1.0f;
+					if (empty_local(lv.lx + 1, lv.ly, lv.lz)) nx += 1.0f;
+					if (empty_local(lv.lx, lv.ly - 1, lv.lz)) ny -= 1.0f;
+					if (empty_local(lv.lx, lv.ly + 1, lv.lz)) ny += 1.0f;
+					if (empty_local(lv.lx, lv.ly, lv.lz - 1)) nz -= 1.0f;
+					if (empty_local(lv.lx, lv.ly, lv.lz + 1)) nz += 1.0f;
+					float nlen = std::sqrt(nx * nx + ny * ny + nz * nz);
+					if (nlen > 1e-6f) { nx /= nlen; ny /= nlen; nz /= nlen; }
+					else              { nx = 0; ny = 0; nz = 1; }
+					// Tangent frame (T, B, N) — rotates the z-up hemisphere
+					// directions to align with the voxel's outward normal.
+					float tx, ty, tz;
+					if (std::fabs(nz) < 0.999f)
+					{
+						tx = -ny; ty = nx; tz = 0.0f;	// cross(N, +Z)
+					}
+					else
+					{
+						tx = 1.0f; ty = 0.0f; tz = 0.0f;	// cross(N, +X) for poles
+					}
+					float tlen = std::sqrt(tx * tx + ty * ty + tz * tz);
+					if (tlen > 1e-6f) { tx /= tlen; ty /= tlen; tz /= tlen; }
+					else              { tx = 1.0f; ty = 0.0f; tz = 0.0f; }
+					// B = N x T
+					float bx = ny * tz - nz * ty;
+					float by = nz * tx - nx * tz;
+					float bz = nx * ty - ny * tx;
+					// IMPORTANT: skip the originating voxel cell during the DDA.
+					// `occ[lv.lx, lv.ly, lv.lz] == 1` (the voxel itself is
+					// occupied), and starting the ray at +0.5 along the
+					// direction often leaves us still inside that cell for
+					// grazing rays. Without the skip, every ray hits at step
+					// 0 → occlusion = ray_count → every voxel reads as fully
+					// occluded → uniform darkening with no AO contrast.
+					const int origin_x = lv.lx;
+					const int origin_y = lv.ly;
+					const int origin_z = lv.lz;
+					float occlusion = 0.0f;
+					for (int r = 0; r < ray_count; r++)
+					{
+						const float dx = ao_dirs[r][0];
+						const float dy = ao_dirs[r][1];
+						const float dz = ao_dirs[r][2];
+						const float rx = tx * dx + bx * dy + nx * dz;
+						const float ry = ty * dx + by * dy + ny * dz;
+						const float rz = tz * dx + bz * dy + nz * dz;
+						// 3D DDA seeded at the voxel center. The first
+						// occupied cell *other than the origin* is the hit.
+						float px = origin_x + 0.5f;
+						float py = origin_y + 0.5f;
+						float pz = origin_z + 0.5f;
+						const int step_x = rx > 0 ? 1 : (rx < 0 ? -1 : 0);
+						const int step_y = ry > 0 ? 1 : (ry < 0 ? -1 : 0);
+						const int step_z = rz > 0 ? 1 : (rz < 0 ? -1 : 0);
+						const float inv_rx = (rx != 0) ? 1.0f / std::fabs(rx) : 1e30f;
+						const float inv_ry = (ry != 0) ? 1.0f / std::fabs(ry) : 1e30f;
+						const float inv_rz = (rz != 0) ? 1.0f / std::fabs(rz) : 1e30f;
+						int ix = origin_x;
+						int iy = origin_y;
+						int iz = origin_z;
+						auto frac_pos = [](float f, int step) {
+							float fr = f - std::floor(f);
+							return (step > 0) ? (1.0f - fr) : (step < 0 ? fr : 1e30f);
+						};
+						float t_x = frac_pos(px, step_x) * inv_rx;
+						float t_y = frac_pos(py, step_y) * inv_ry;
+						float t_z = frac_pos(pz, step_z) * inv_rz;
+						int hit_step = -1;
+						// hit_step counts non-origin cells visited along the
+						// ray; the originating cell is implicitly step -1.
+						for (int s = 0; s < max_steps; s++)
+						{
+							// Advance one cell along the dominant axis first.
+							// That way we never test the origin cell — only
+							// cells strictly off the source voxel get an
+							// occupancy check.
+							if (t_x <= t_y && t_x <= t_z)
+							{
+								ix += step_x;
+								t_x += inv_rx;
+							}
+							else if (t_y <= t_z)
+							{
+								iy += step_y;
+								t_y += inv_ry;
+							}
+							else
+							{
+								iz += step_z;
+								t_z += inv_rz;
+							}
+							if (ix < 0 || ix >= cx || iy < 0 || iy >= cy || iz < 0 || iz >= cz)
+								break;
+							if (occ[occ_idx(ix, iy, iz)] != 0)
+							{
+								hit_step = s;
+								break;
+							}
+						}
+						if (hit_step >= 0)
+						{
+							// Linear falloff. hit_step=0 (first non-origin
+							// cell occupied) contributes 1.0; hit_step at
+							// max_steps-1 contributes ~1/max_steps.
+							occlusion += 1.0f - static_cast<float>(hit_step) * inv_max_steps;
+						}
+					}
+					// Linear ratio → byte. The bake produces a natural
+					// distribution where open surfaces have low ratios
+					// (rays escape the section bounds, no hit) and deep
+					// crevices have high ratios (most rays hit nearby
+					// occluders). A gamma curve here is tempting but works
+					// against the desired feel — at strength=100 we want
+					// open faces near full brightness and only enclosed
+					// voxels truly dark; that mapping is `1 - ratio` in
+					// the shade pass, which already does the right thing
+					// with a linear ratio. If the spread feels too gentle
+					// later, add `ratio = std::pow(ratio, gamma)` here
+					// with gamma in (1.0, 2.0]; gamma > 1 darkens crevices
+					// harder.
+					float ratio = occlusion / static_cast<float>(ray_count);
+					if (ratio < 0.0f) ratio = 0.0f; else if (ratio > 1.0f) ratio = 1.0f;
+					int ao_byte = static_cast<int>(ratio * 255.0f + 0.5f);
+					if (ao_byte < 0) ao_byte = 0; else if (ao_byte > 255) ao_byte = 255;
+					m_vxl_cloud[cloud_start + li].ao = static_cast<unsigned char>(ao_byte);
+				}
 			}
 		}
 		} // end for (auto& src : sources)
@@ -3943,6 +4142,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// at splat time, so cam_normal/shade are unused (and would
 			// double-shade if the post-splat lighting pass ran).
 			const bool synth_shading = shading && !m_vpl_loaded;
+			const bool ao_active = theme::vxl_ao_enabled();
 			if (synth_shading)
 			{
 				m_vxl_splat.cam_normal.assign(static_cast<size_t>(c_pixels) * 3, 0);
@@ -3952,6 +4152,10 @@ void CXCCFileView::player_draw(CDC* pDC)
 				m_vxl_splat.cam_normal.clear();
 				m_vxl_splat.shade.clear();
 			}
+			// AO buffer: written whenever the cloud has AO baked, regardless
+			// of whether `ao_active` is true — that gate lives in the shade
+			// pass so toggling AO on/off doesn't invalidate the splat.
+			m_vxl_splat.ao.assign(static_cast<size_t>(c_pixels), 0);
 			// Light direction for VPL section selection. Fetched once per
 			// rebuild — same for every voxel in this splat.
 			float vpl_lx = 0, vpl_ly = 0, vpl_lz = 1;
@@ -4009,6 +4213,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			const int n_voxels = static_cast<int>(m_vxl_cloud.size());
 			const t_vxl_voxel* cloud = m_vxl_cloud.data();
 			signed char* cam_n_buf = synth_shading ? m_vxl_splat.cam_normal.data() : nullptr;
+			unsigned char* ao_buf = m_vxl_splat.ao.data();
 			// Splat is intentionally serial. The previous output-row-banded
 			// OpenMP version made every thread iterate the whole voxel cloud
 			// and run the rotation math for each voxel, then reject ones
@@ -4137,6 +4342,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 								signed char* p = cam_n_buf + 3 * ofs;
 								p[0] = ni8x; p[1] = ni8y; p[2] = ni8z;
 							}
+							ao_buf[ofs] = v.ao;
 						}
 					}
 				}
@@ -4158,28 +4364,64 @@ void CXCCFileView::player_draw(CDC* pDC)
 		// Converts cam_normal[] -> shade[] via the same ambient + diffuse*max(0,
 		// dot(n, light)) formula the old in-splat shading used. Output range
 		// 0..255 where 128 = neutral 1.0 (matches downstream BGRA composite).
-		if (shading && !m_vpl_loaded && m_vxl_splat.shade_lighting_version != lighting_version)
+		//
+		// AO multiplies in here: final = base_shade * (1 - (ao/255)*strength).
+		// When AO is on but synth shading is off (VPL or no-shading), base_shade
+		// stays at 128 (neutral) and only AO modulates the output. When both
+		// are off the pass is skipped entirely.
+		const bool ao_pass_active = theme::vxl_ao_enabled() && theme::vxl_ao_strength() > 0;
+		const bool synth_pass_active = shading && !m_vpl_loaded;
+		if (!synth_pass_active && !ao_pass_active)
+		{
+			// Neither pass wants to contribute — make sure stale shade values
+			// from a previous on->off toggle don't leak into the composite.
+			if (!m_vxl_splat.shade.empty() && m_vxl_splat.shade_lighting_version != lighting_version)
+			{
+				m_vxl_splat.shade.clear();
+				m_vxl_splat.shade_lighting_version = lighting_version;
+			}
+		}
+		if ((synth_pass_active || ao_pass_active) && m_vxl_splat.shade_lighting_version != lighting_version)
 		{
 			const int c_pixels_pass = vxl_ss_cx * vxl_ss_cy;
 			m_vxl_splat.shade.assign(c_pixels_pass, 128);
-			float light_x_pass, light_y_pass, light_z_pass;
-			theme::vxl_light_direction(light_x_pass, light_y_pass, light_z_pass);
-			const float ambient_pass = theme::vxl_light_ambient();
-			const float diffuse_pass = theme::vxl_light_diffuse();
-			const signed char* nbuf = m_vxl_splat.cam_normal.data();
+			float light_x_pass = 0, light_y_pass = 0, light_z_pass = 1;
+			float ambient_pass = 0, diffuse_pass = 0;
+			if (synth_pass_active)
+			{
+				theme::vxl_light_direction(light_x_pass, light_y_pass, light_z_pass);
+				ambient_pass = theme::vxl_light_ambient();
+				diffuse_pass = theme::vxl_light_diffuse();
+			}
+			const float ao_strength_f = theme::vxl_ao_strength() / 100.0f;
+			const signed char* nbuf = synth_pass_active ? m_vxl_splat.cam_normal.data() : nullptr;
+			const unsigned char* aobuf = ao_pass_active && !m_vxl_splat.ao.empty() ? m_vxl_splat.ao.data() : nullptr;
 			const byte* dbuf = m_vxl_splat.buf.data();
 			unsigned char* sbuf = m_vxl_splat.shade.data();
 			#pragma omp parallel for schedule(static) if(c_pixels_pass >= 65536)
 			for (int i = 0; i < c_pixels_pass; i++)
 			{
 				if (dbuf[i] == 0) continue;	// empty pixel; leave at neutral
-				const signed char* p = nbuf + 3 * i;
-				float nx = p[0] / 127.0f;
-				float ny = p[1] / 127.0f;
-				float nz = p[2] / 127.0f;
-				float ndotl = nx * light_x_pass + ny * light_y_pass + nz * light_z_pass;
-				if (ndotl < 0.0f) ndotl = 0.0f;
-				float shade = ambient_pass + diffuse_pass * ndotl;
+				float shade;
+				if (nbuf)
+				{
+					const signed char* p = nbuf + 3 * i;
+					float nx = p[0] / 127.0f;
+					float ny = p[1] / 127.0f;
+					float nz = p[2] / 127.0f;
+					float ndotl = nx * light_x_pass + ny * light_y_pass + nz * light_z_pass;
+					if (ndotl < 0.0f) ndotl = 0.0f;
+					shade = ambient_pass + diffuse_pass * ndotl;
+				}
+				else
+				{
+					shade = 1.0f;	// neutral when only AO is active
+				}
+				if (aobuf)
+				{
+					float ao_f = aobuf[i] / 255.0f;
+					shade *= (1.0f - ao_f * ao_strength_f);
+				}
 				int sb = static_cast<int>(shade * 128.0f + 0.5f);
 				if (sb < 0) sb = 0; else if (sb > 255) sb = 255;
 				sbuf[i] = static_cast<unsigned char>(sb);
