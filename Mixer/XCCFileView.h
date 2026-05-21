@@ -57,6 +57,21 @@ public:
 	// timer-driven repaints during the first animation loop don't trigger
 	// per-frame conversion bursts.
 	void player_prefill_bgra_cache();
+	// Fill a single cache entry: runs player_convert_frame_to_bgra to a
+	// source-sized scratch and, when theme::interp() is a pixel-art
+	// upscaler, runs the matching pixel_upscale routine into ce.bgra at
+	// the upscaled resolution. Sets ce.cx_upscaled/cy_upscaled and
+	// ce.version. Shared by the prefill loop and the in-paint cache-miss
+	// path so they can't drift. Defined further down; forward-declared
+	// here so this signature can see it.
+	struct shp_bgra_cache_entry;	// nested forward decl
+	void player_fill_bgra_cache_entry(int frame_idx, shp_bgra_cache_entry& ce) const;
+	// theme::interp_upscale_factor() with a per-file memory cap applied.
+	// Returns the theme factor (2/3/4) for SHP/WSA sized so the cache fits
+	// in budget, else 1. Centralized so the cache-fill site and the
+	// player_draw source-dim math agree on whether the upscaler is
+	// actually active for the loaded file.
+	int shp_effective_upscale_factor() const;
 	// Drop the cached VXL point cloud and force the next paint to re-run
 	// player_decode_frames(). Called from the VXL Lighting dialog when the
 	// user flips between Computed and File normals — those choices change the
@@ -312,7 +327,11 @@ protected:
 	double m_vxl_drag_pitch0 = 0.0;
 	bool is_vxl_view() const { return m_player_mode && m_ft == ft_vxl; }
 	int player_band_h() const { return 64; }
-	void do_zoom_step(int sign);
+	// `anchor` is the canvas-space pixel under which the world point should
+	// stay fixed across the zoom step (zoom-to-cursor). Pass (-1, -1) to
+	// anchor at the canvas center instead — used by keyboard zoom where no
+	// cursor position is available.
+	void do_zoom_step(int sign, CPoint anchor = CPoint(-1, -1));
 	// Effective on-screen scale percentage for the current SHP/WSA/VXL view.
 	// Mirrors the s_pct math in OnDraw / player_draw so Record can reproduce
 	// the displayed zoom in the captured output. Returns 100 if the viewport
@@ -553,7 +572,15 @@ private:
 	struct shp_bgra_cache_entry
 	{
 		int version = -1;
-		std::vector<DWORD> bgra;	// cx_s * cy_s entries
+		std::vector<DWORD> bgra;	// cx_upscaled * cy_upscaled entries
+		// When a pixel-art upscaler is selected (theme::interp() in
+		// [interp_scale2x .. interp_xbr4x]) the cached BGRA buffer is
+		// pre-scaled by the upscaler's factor (2x, 3x, or 4x). These
+		// fields hold the post-upscale dimensions. For non-upscaler
+		// modes both equal the SHP/WSA frame's source size. Consumed by
+		// the stretch_image call site in player_draw.
+		int cx_upscaled = 0;
+		int cy_upscaled = 0;
 	};
 	std::vector<shp_bgra_cache_entry> m_player_bgra;
 	int m_player_bgra_version = 0;

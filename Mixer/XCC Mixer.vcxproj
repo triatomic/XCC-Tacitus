@@ -206,6 +206,10 @@
     </ClCompile>
     <ClCompile Include="TurntableDlg.cpp">
     </ClCompile>
+    <ClCompile Include="pixel_upscale.cpp">
+    </ClCompile>
+    <ClCompile Include="nnedi3.cpp">
+    </ClCompile>
     <ClCompile Include="keybinds.cpp">
     </ClCompile>
     <ClCompile Include="KeybindsDlg.cpp">
@@ -267,6 +271,8 @@
     <ClInclude Include="AudioPlayerDlg.h" />
     <ClInclude Include="VxlLightingDlg.h" />
     <ClInclude Include="TurntableDlg.h" />
+    <ClInclude Include="pixel_upscale.h" />
+    <ClInclude Include="nnedi3.h" />
     <ClInclude Include="gif.h" />
     <ClInclude Include="keybinds.h" />
     <ClInclude Include="KeybindsDlg.h" />

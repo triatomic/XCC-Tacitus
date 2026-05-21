@@ -192,8 +192,10 @@ namespace theme
 		g_use_checkerboard = AfxGetApp()->GetProfileInt("Theme", "use_checkerboard", 1) != 0;
 		g_use_external_programs = AfxGetApp()->GetProfileInt("Theme", "use_external_programs", 0) != 0;
 		int iv = AfxGetApp()->GetProfileInt("Theme", "interpolation", interp_nearest);
-		// Out-of-range falls back to nearest (covers stale interp_ewa=4 values).
-		if (iv < interp_nearest || iv > interp_lanczos) iv = interp_nearest;
+		// Out-of-range falls back to nearest. Range now includes the pixel-art
+		// upscalers (Scale2x/3x, HQ2x/4x, xBR2x/4x — values 4..9) plus the
+		// neural NNEDI3 variants (10..11).
+		if (iv < interp_nearest || iv > interp_nnedi4x) iv = interp_nearest;
 		g_interp = static_cast<interpolation>(iv);
 		int sa = AfxGetApp()->GetProfileInt("Theme", "sharpen_amount", 0);
 		if (sa < 0) sa = 0; else if (sa > 100) sa = 100;
@@ -762,6 +764,30 @@ namespace theme
 			return;
 		g_interp = v;
 		save();
+	}
+
+	int interp_upscale_factor()
+	{
+		switch (g_interp)
+		{
+		case interp_scale2x:
+		case interp_hq2x:
+		case interp_xbr2x:
+		case interp_nnedi2x:
+			return 2;
+		case interp_scale3x:
+			return 3;
+		case interp_hq4x:
+		case interp_xbr4x:
+		case interp_nnedi4x:
+			return 4;
+		default:
+			return 1;
+		}
+	}
+	bool interp_is_pixel_art_upscaler()
+	{
+		return g_interp >= interp_scale2x && g_interp <= interp_nnedi4x;
 	}
 
 	int sharpen_amount() { return g_sharpen_amount; }

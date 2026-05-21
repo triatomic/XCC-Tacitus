@@ -337,9 +337,39 @@ namespace theme
 		interp_bilinear = 1,  // GDI HALFTONE
 		interp_bicubic = 2,   // GDI+ HighQualityBicubic
 		interp_lanczos = 3,   // hand-rolled Lanczos-3 (separable)
+		// Pixel-art aware upscalers. These don't run inside stretch_image —
+		// they pre-scale the source BGRA into the SHP/WSA cache at 2x/3x/4x
+		// before stretch_image's regular interpolation kicks in. SHP/WSA
+		// only; VXL already has its own supersample slider for the same
+		// purpose. Selecting any of these forces stretch_image to use
+		// interp_bilinear for the downscale step (running bicubic / lanczos
+		// on top of the algorithmic reconstruction adds unwanted blur).
+		interp_scale2x = 4,   // AdvanceMAME Scale2x — corner-fill jaggy smooth
+		interp_scale3x = 5,   // AdvanceMAME Scale3x
+		interp_hq2x    = 6,   // Maxim Stepin HQ2x — heavy smoothing
+		interp_hq4x    = 7,   // HQ4x (HQ2x chained twice or direct)
+		interp_xbr2x   = 8,   // Hyllian xBR-2x — best on curves/diagonals
+		interp_xbr4x   = 9,   // xBR-4x (xBR-2x chained twice)
+		// NNEDI3 — scalar port of znedi3 (Tritical's neural-network edge-
+		// directed interpolation). Substantially higher quality than xBR on
+		// hand-drawn 2D content, ~4-8x slower per pixel. Weights ship as
+		// the NNEDI3_WEIGHTS RCDATA resource (~200 KB). SHP/WSA only.
+		interp_nnedi2x = 10,
+		interp_nnedi4x = 11,
 	};
 	interpolation interp();
 	void set_interp(interpolation v);
+
+	// Pre-upscale factor for the SHP/WSA BGRA cache when a pixel-art
+	// upscaler is selected. Returns 2/3/4 for those modes, 1 for any
+	// regular kernel. Centralized so the cache-fill site and the
+	// stretch_image source-dim math agree.
+	int interp_upscale_factor();
+	// True iff theme::interp() is a pixel-art upscaler. The downstream
+	// stretch_image switches to bilinear in this case — applying bicubic
+	// or Lanczos on top of an algorithmically reconstructed image adds
+	// unwanted blur.
+	bool interp_is_pixel_art_upscaler();
 
 	// Unsharp-mask amount applied as a post-pass to the non-nearest
 	// interpolation paths in stretch_image. 0 = off (current behavior),

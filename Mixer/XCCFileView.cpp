@@ -2,6 +2,7 @@
 #include "MainFrm.h"
 #include "XCCFileView.h"
 #include "keybinds.h"
+#include "pixel_upscale.h"
 #include "resource.h"
 #include <algorithm>
 #include <array>
@@ -464,10 +465,13 @@ BOOL CXCCFileView::OnEraseBkgnd(CDC* pDC)
 // CScrollView image-grid zoom, depending on what the file view is currently
 // displaying. Centralized so wheel-tick and a key-bound zoom hit the same
 // state machine.
-void CXCCFileView::do_zoom_step(int sign)
+void CXCCFileView::do_zoom_step(int sign, CPoint anchor)
 {
 	if (m_player_mode)
 	{
+		CRect rc; GetClientRect(&rc);
+		const int avail_w = rc.Width();
+		const int avail_h = rc.Height() - player_band_h();
 		int cur = m_player_zoom_pct;
 		if (cur <= 0)
 		{
@@ -475,9 +479,6 @@ void CXCCFileView::do_zoom_step(int sign)
 				cur = 100;
 			else
 			{
-				CRect rc; GetClientRect(&rc);
-				int avail_w = rc.Width();
-				int avail_h = rc.Height() - player_band_h();
 				if (m_player_cx > 0 && m_player_cy > 0 && avail_w > 0 && avail_h > 0)
 				{
 					int sx = avail_w * 100 / m_player_cx;
@@ -495,8 +496,41 @@ void CXCCFileView::do_zoom_step(int sign)
 		if (next > 1600) next = 1600;
 		if (next != m_player_zoom_pct)
 		{
+			// Zoom-to-anchor: keep the world point currently under `anchor`
+			// fixed across the zoom step. Default anchor (sentinel -1,-1)
+			// picks the canvas center, matching keyboard zoom semantics.
+			//
+			// Image origin x_d = (avail_w - cx_d)/2 + pan_x, where cur or
+			// next sets cx_d via m_player_cx * pct / 100. We solve for the
+			// new pan that puts the same source-pixel position back under
+			// the anchor canvas pixel after the zoom.
+			if (anchor.x < 0 || anchor.x >= avail_w) anchor.x = avail_w / 2;
+			if (anchor.y < 0 || anchor.y >= avail_h) anchor.y = avail_h / 2;
+			if (m_player_cx > 0 && m_player_cy > 0 && cur > 0)
+			{
+				const int cx_d_old = m_player_cx * cur  / 100;
+				const int cy_d_old = m_player_cy * cur  / 100;
+				const int cx_d_new = m_player_cx * next / 100;
+				const int cy_d_new = m_player_cy * next / 100;
+				const int x_d_old = (avail_w - cx_d_old) / 2 +
+					((cx_d_old > avail_w) ? m_player_pan_x : 0);
+				const int y_d_old = (avail_h - cy_d_old) / 2 +
+					((cy_d_old > avail_h) ? m_player_pan_y : 0);
+				// world coords of the pixel under the anchor (float for
+				// rounding stability, but int math would round to the same
+				// pixel in the common case).
+				const double wx = (anchor.x - x_d_old) * (next / static_cast<double>(cur));
+				const double wy = (anchor.y - y_d_old) * (next / static_cast<double>(cur));
+				const int x_d_new_target = anchor.x - static_cast<int>(wx + 0.5);
+				const int y_d_new_target = anchor.y - static_cast<int>(wy + 0.5);
+				m_player_pan_x = (cx_d_new > avail_w) ? (x_d_new_target - (avail_w - cx_d_new) / 2) : 0;
+				m_player_pan_y = (cy_d_new > avail_h) ? (y_d_new_target - (avail_h - cy_d_new) / 2) : 0;
+			}
+			else
+			{
+				m_player_pan_x = m_player_pan_y = 0;
+			}
 			m_player_zoom_pct = next;
-			m_player_pan_x = m_player_pan_y = 0;
 			Invalidate(FALSE);
 		}
 		return;
@@ -548,8 +582,13 @@ BOOL CXCCFileView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	UINT action = 0;
 	if (keybinds::match_mouse(keybinds::scope_file_view, btn, ctrl, shift, alt, action))
 	{
-		if (action == keybinds::vact_zoom_in)  { do_zoom_step(+1); return TRUE; }
-		if (action == keybinds::vact_zoom_out) { do_zoom_step(-1); return TRUE; }
+		// Wheel zoom anchors on the cursor so the image point under the
+		// mouse stays fixed across the zoom step (image-viewer convention).
+		// pt arrives in screen coords per Win32 WM_MOUSEWHEEL.
+		CPoint anchor = pt;
+		ScreenToClient(&anchor);
+		if (action == keybinds::vact_zoom_in)  { do_zoom_step(+1, anchor); return TRUE; }
+		if (action == keybinds::vact_zoom_out) { do_zoom_step(-1, anchor); return TRUE; }
 		if (action == keybinds::vact_zoom_100)
 		{
 			if (m_player_mode)
@@ -4016,22 +4055,119 @@ void CXCCFileView::invalidate_vxl_cloud()
 	}
 }
 
+int CXCCFileView::shp_effective_upscale_factor() const
+{
+	const int sw = m_player_cx;
+	const int sh = m_player_cy;
+	int factor = theme::interp_upscale_factor();
+	if (factor <= 1 || sw <= 0 || sh <= 0)
+		return 1;
+	// Memory guard. Win32 process has ~2GB heap; a single upscaled cache
+	// entry of >32 MB (8M DWORDs) on a many-frame WSA blows OOM very fast
+	// under the prefill's OpenMP fan-out. Crash report 2026-05-21 caught
+	// a large SHP at xBR-4x trying to allocate 70 MB per frame, multiplied
+	// across worker threads. Fall back to factor=1 (source-res) for the
+	// whole file when even one frame would exceed the cap. 8M DWORDs
+	// covers comfortably: 1414x1414 at factor=2 or any standard SHP/WSA
+	// at factor=4. Per-frame fallback was rejected because it'd leave the
+	// stretch_image source dims out of sync with the cache contents.
+	const size_t k_max_upscaled_pixels = 8u * 1024u * 1024u;
+	const size_t target = static_cast<size_t>(sw) * sh * factor * factor;
+	if (target > k_max_upscaled_pixels)
+		return 1;
+
+	// Aggregate-cost guard. NNEDI3 is ~10x slower per output pixel than
+	// xBR-4x; on a large multi-frame SHP/WSA the prefill can stall the UI
+	// for tens of seconds even with OMP parallelism — looks like a hang.
+	// Fall back to factor=1 when the total work (frame count * upscaled
+	// pixel count) would exceed a budget. The cheap rule-based upscalers
+	// don't need this — the memory cap above is the only limit they hit.
+	const theme::interpolation mode = theme::interp();
+	const bool is_nnedi = (mode == theme::interp_nnedi2x || mode == theme::interp_nnedi4x);
+	if (is_nnedi) {
+		const int nf = static_cast<int>(m_player_frames.size());
+		// Budget: 64 megapixels of total upscaled output, summed across all
+		// frames. That's ~2 seconds of single-core NNEDI3-4x bake on
+		// typical hardware; with 8-core OMP, sub-second. Above the budget
+		// we silently downgrade to factor=1. Examples:
+		// - 100 frames @ 64x64 src, 4x = 100 * 65536 = 6.5 Mpx -> fine.
+		// - 100 frames @ 300x300 src, 4x = 100 * 1.44 Mpx = 144 Mpx -> skip.
+		// - 1 frame @ 1000x1000 src, 4x = 16 Mpx -> fine.
+		const long long total_upscaled = static_cast<long long>(nf) * target;
+		const long long k_nnedi_budget = 64LL * 1024 * 1024;
+		if (total_upscaled > k_nnedi_budget)
+			return 1;
+	}
+	return factor;
+}
+
+void CXCCFileView::player_fill_bgra_cache_entry(int frame_idx, shp_bgra_cache_entry& ce) const
+{
+	const int sw = m_player_cx;
+	const int sh = m_player_cy;
+	const int factor = shp_effective_upscale_factor();
+	const int dw = sw * factor;
+	const int dh = sh * factor;
+	if (factor == 1)
+	{
+		// Regular interpolation OR upscale-skipped (oversize source): cache
+		// stores source-resolution BGRA.
+		ce.bgra.assign(static_cast<size_t>(sw) * sh, 0);
+		player_convert_frame_to_bgra(frame_idx, ce.bgra.data());
+	}
+	else
+	{
+		// Pixel-art upscaler: render source first, then expand into the
+		// cache buffer at the upscaled resolution. Scratch goes on the
+		// heap to keep us off the thread stack at large frame sizes.
+		std::vector<DWORD> src(static_cast<size_t>(sw) * sh, 0);
+		player_convert_frame_to_bgra(frame_idx, src.data());
+		ce.bgra.assign(static_cast<size_t>(dw) * dh, 0);
+		const unsigned int* sp = reinterpret_cast<const unsigned int*>(src.data());
+		unsigned int* dp = reinterpret_cast<unsigned int*>(ce.bgra.data());
+		switch (theme::interp())
+		{
+		case theme::interp_scale2x: pixel_upscale::scale2x(sp, sw, sh, dp); break;
+		case theme::interp_scale3x: pixel_upscale::scale3x(sp, sw, sh, dp); break;
+		case theme::interp_hq2x:    pixel_upscale::hq2x   (sp, sw, sh, dp); break;
+		case theme::interp_hq4x:    pixel_upscale::hq4x   (sp, sw, sh, dp); break;
+		case theme::interp_xbr2x:   pixel_upscale::xbr2x  (sp, sw, sh, dp); break;
+		case theme::interp_xbr4x:   pixel_upscale::xbr4x  (sp, sw, sh, dp); break;
+		case theme::interp_nnedi2x: pixel_upscale::nnedi2x(sp, sw, sh, dp); break;
+		case theme::interp_nnedi4x: pixel_upscale::nnedi4x(sp, sw, sh, dp); break;
+		default: break;	// can't happen — factor==1 path handled above.
+		}
+	}
+	ce.cx_upscaled = dw;
+	ce.cy_upscaled = dh;
+	ce.version = m_player_bgra_version;
+}
+
 void CXCCFileView::player_prefill_bgra_cache()
 {
 	const int nf = static_cast<int>(m_player_frames.size());
 	const int n = m_player_cx * m_player_cy;
 	if (nf <= 0 || n <= 0)
 		return;
+	// Lazy prefill: previously we eagerly baked every frame's BGRA cache
+	// upfront here, parallelized across frames via OpenMP. On a 9 MB SHP
+	// (many large frames) that meant tens of seconds of frozen UI before
+	// the file was visible — and with NNEDI3 active, minutes. Replaced
+	// with a "bake the current frame only, defer the rest" strategy: the
+	// cache-miss path inside player_draw already handles per-frame on-
+	// demand bake correctly, so scrubbing a fresh frame triggers a single
+	// frame's worth of work (small hitch, not a freeze). After one
+	// playthrough the cache is warm and animation runs fluidly.
+	//
+	// Allocate the slot vector but leave entries empty (version=-1) so the
+	// cache-hit check in player_draw misses cleanly until the slot is
+	// filled by the miss-path helper.
 	m_player_bgra.assign(nf, shp_bgra_cache_entry{});
-	// Each frame writes its own buffer — independent, parallelizable across
-	// frames. omp gates on total work to avoid forking for tiny SHPs.
-	#pragma omp parallel for schedule(static) if(static_cast<long long>(nf) * n >= 65536)
-	for (int f = 0; f < nf; f++)
-	{
-		auto& ce = m_player_bgra[f];
-		ce.bgra.assign(n, 0);
-		player_convert_frame_to_bgra(f, ce.bgra.data());
-		ce.version = m_player_bgra_version;
+	// Bake the currently-visible frame synchronously so the very first
+	// paint is a cache hit (avoids one frame of post-open stutter on
+	// single-frame SHPs / cameos / the title-screen WSA frame).
+	if (m_player_frame >= 0 && m_player_frame < nf) {
+		player_fill_bgra_cache_entry(m_player_frame, m_player_bgra[m_player_frame]);
 	}
 }
 
@@ -4438,9 +4574,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 		s = m_player_frames[m_player_frame].data();
 	}
 	// Source buffer size (what gets passed to theme::stretch_image as the
-	// source DIB). VXL renders at supersample resolution; SHP/WSA at native.
-	int cx_s = is_vxl_view() ? vxl_ss_cx : m_player_cx;
-	int cy_s = is_vxl_view() ? vxl_ss_cy : m_player_cy;
+	// source DIB). VXL renders at supersample resolution; SHP/WSA at native
+	// times any active pixel-art upscale factor (interp_scale2x/3x,
+	// interp_hq2x/4x, interp_xbr2x/4x). The upscale is baked into the BGRA
+	// cache during fill, so per-paint cost stays at memcpy + StretchBlt.
+	// shp_effective_upscale_factor() bakes in the memory cap (huge SHP/
+	// WSA + xBR-4x falls back to factor=1 to avoid Win32 OOM).
+	const int shp_upscale = is_vxl_view() ? 1 : shp_effective_upscale_factor();
+	int cx_s = is_vxl_view() ? vxl_ss_cx : (m_player_cx * shp_upscale);
+	int cy_s = is_vxl_view() ? vxl_ss_cy : (m_player_cy * shp_upscale);
 	// Logical canvas size for layout / zoom / fit math. For VXL this stays at
 	// m_player_cx/cy regardless of supersample factor — otherwise enabling a
 	// higher SS would shrink the auto-fit and shift the Ctrl+wheel zoom
@@ -4645,8 +4787,10 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 		}
 		// Cache-miss conversion. Two flavors:
-		//   SHP/WSA → reuse player_convert_frame_to_bgra so the cached bytes
-		//             match what the prefill produces (grid baked in).
+		//   SHP/WSA → route through player_fill_bgra_cache_entry so the
+		//             cached bytes (including any pixel-art upscale) match
+		//             what the prefill produces. Then memcpy from the
+		//             entry to p_dib.
 		//   VXL     → inline loop here because it composites the shading
 		//             buffer that the SHP helper doesn't know about.
 		if (!shp_cache_hit && !vxl_cache_hit)
@@ -4713,7 +4857,33 @@ void CXCCFileView::player_draw(CDC* pDC)
 		}
 		else
 		{
-			player_convert_frame_to_bgra(m_player_frame, p_dib);
+			// SHP/WSA cache-miss path. Fill the cache entry (handles
+			// optional upscaler), then blit into p_dib. The cache size
+			// matches cx_s*cy_s (DIB allocation accounts for the upscale
+			// factor), so the memcpy is straight.
+			const int nf = static_cast<int>(m_player_bgra.size());
+			if (m_player_frame >= 0 && m_player_frame < nf)
+			{
+				auto& ce = m_player_bgra[m_player_frame];
+				player_fill_bgra_cache_entry(m_player_frame, ce);
+				if (static_cast<int>(ce.bgra.size()) == n)
+					memcpy(p_dib, ce.bgra.data(), static_cast<size_t>(n) * 4);
+				else
+				{
+					// Shouldn't happen — the helper sizes the buffer to
+					// cx_upscaled*cy_upscaled and cx_s/cy_s mirror that
+					// math. Fall back to a source-res render so we paint
+					// *something* rather than uninitialized DIB bytes.
+					player_convert_frame_to_bgra(m_player_frame, p_dib);
+				}
+			}
+			else
+			{
+				// No backing cache entry — fall back to the source-res
+				// render. Only reachable if frame_idx is out of range,
+				// which shouldn't happen in practice.
+				player_convert_frame_to_bgra(m_player_frame, p_dib);
+			}
 		}
 		}
 	}
@@ -4747,21 +4917,13 @@ void CXCCFileView::player_draw(CDC* pDC)
 			}
 		}
 	}
-	// Snapshot the per-paint output into the relevant cache. Done after the
-	// grid overlay so the cached bytes are exactly what we'd blit. SHP
-	// snapshot uses the helper's output directly; either way the cache hit
-	// path memcpy's an identical buffer next time.
+	// Snapshot the per-paint output into the VXL BGRA cache. SHP's cache
+	// is already populated by player_fill_bgra_cache_entry in the cache-
+	// miss path above, so it doesn't need a separate snapshot here.
 	if (m_is_open && m_player_mode)
 	{
 		const int n = cx_s * cy_s;
 		const bool vxl_view = is_vxl_view();
-		if (!vxl_view && !shp_cache_hit && m_player_frame >= 0 &&
-			m_player_frame < static_cast<int>(m_player_bgra.size()))
-		{
-			auto& ce = m_player_bgra[m_player_frame];
-			ce.bgra.assign(p_dib, p_dib + n);
-			ce.version = m_player_bgra_version;
-		}
 		if (vxl_view && !vxl_cache_hit)
 		{
 			auto& vc = m_vxl_bgra;
@@ -4807,6 +4969,12 @@ void CXCCFileView::player_draw(CDC* pDC)
 	const bool dragging = m_vxl_dragging || m_player_panning;
 	if (dragging)
 		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s, theme::interp_nearest);
+	else if (!is_vxl_view() && theme::interp_is_pixel_art_upscaler())
+		// SHP/WSA + pixel-art upscaler: the cache already holds the
+		// algorithmically reconstructed image at 2x/3x/4x. Running
+		// bicubic or Lanczos on top adds blur. Force bilinear for the
+		// stretch step so we just smoothly resample to the viewport.
+		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s, theme::interp_bilinear);
 	else
 		theme::stretch_image(pDC, x_d, y_d, cx_d, cy_d, &mem_dc, h_dib, p_dib, cx_s, cy_s);
 	pDC->RestoreDC(-1);

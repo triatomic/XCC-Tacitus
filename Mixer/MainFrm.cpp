@@ -181,10 +181,26 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_INTERP_BILINEAR, OnThemeInterpBilinear)
 	ON_COMMAND(ID_THEME_INTERP_BICUBIC,  OnThemeInterpBicubic)
 	ON_COMMAND(ID_THEME_INTERP_LANCZOS,  OnThemeInterpLanczos)
+	ON_COMMAND(ID_THEME_INTERP_SCALE2X,  OnThemeInterpScale2x)
+	ON_COMMAND(ID_THEME_INTERP_SCALE3X,  OnThemeInterpScale3x)
+	ON_COMMAND(ID_THEME_INTERP_HQ2X,     OnThemeInterpHq2x)
+	ON_COMMAND(ID_THEME_INTERP_HQ4X,     OnThemeInterpHq4x)
+	ON_COMMAND(ID_THEME_INTERP_XBR2X,    OnThemeInterpXbr2x)
+	ON_COMMAND(ID_THEME_INTERP_XBR4X,    OnThemeInterpXbr4x)
+	ON_COMMAND(ID_THEME_INTERP_NNEDI2X,  OnThemeInterpNnedi2x)
+	ON_COMMAND(ID_THEME_INTERP_NNEDI4X,  OnThemeInterpNnedi4x)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_NEAREST,  OnUpdateThemeInterpNearest)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BILINEAR, OnUpdateThemeInterpBilinear)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_BICUBIC,  OnUpdateThemeInterpBicubic)
 	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_LANCZOS,  OnUpdateThemeInterpLanczos)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_SCALE2X,  OnUpdateThemeInterpScale2x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_SCALE3X,  OnUpdateThemeInterpScale3x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_HQ2X,     OnUpdateThemeInterpHq2x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_HQ4X,     OnUpdateThemeInterpHq4x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_XBR2X,    OnUpdateThemeInterpXbr2x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_XBR4X,    OnUpdateThemeInterpXbr4x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_NNEDI2X,  OnUpdateThemeInterpNnedi2x)
+	ON_UPDATE_COMMAND_UI(ID_THEME_INTERP_NNEDI4X,  OnUpdateThemeInterpNnedi4x)
 	ON_COMMAND(ID_THEME_SHARPEN_0,   OnThemeSharpen0)
 	ON_COMMAND(ID_THEME_SHARPEN_25,  OnThemeSharpen25)
 	ON_COMMAND(ID_THEME_SHARPEN_50,  OnThemeSharpen50)
@@ -1951,7 +1967,17 @@ void CMainFrame::OnUpdateThemeUseExternalPrograms(CCmdUI* p)
 
 void CMainFrame::set_interp(theme::interpolation v)
 {
+	const int prev_factor = theme::interp_upscale_factor();
 	theme::set_interp(v);
+	const int new_factor = theme::interp_upscale_factor();
+	// Crossing the pixel-art-upscaler boundary changes what the SHP/WSA
+	// BGRA cache stores (source-res vs 2x/3x/4x). Bump the version stamp
+	// so the cache rebuilds on the next paint. Pure-regular-kernel and
+	// pure-upscaler switches *within* the same factor (e.g. bilinear ->
+	// lanczos) don't need a bump — they only affect stretch_image at the
+	// blit step.
+	if (prev_factor != new_factor && m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->invalidate_player_bgra_cache();
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
 		m_file_info_pane->Invalidate();
 }
@@ -1960,11 +1986,27 @@ void CMainFrame::OnThemeInterpNearest()  { set_interp(theme::interp_nearest); }
 void CMainFrame::OnThemeInterpBilinear() { set_interp(theme::interp_bilinear); }
 void CMainFrame::OnThemeInterpBicubic()  { set_interp(theme::interp_bicubic); }
 void CMainFrame::OnThemeInterpLanczos()  { set_interp(theme::interp_lanczos); }
+void CMainFrame::OnThemeInterpScale2x()  { set_interp(theme::interp_scale2x); }
+void CMainFrame::OnThemeInterpScale3x()  { set_interp(theme::interp_scale3x); }
+void CMainFrame::OnThemeInterpHq2x()     { set_interp(theme::interp_hq2x); }
+void CMainFrame::OnThemeInterpHq4x()     { set_interp(theme::interp_hq4x); }
+void CMainFrame::OnThemeInterpXbr2x()    { set_interp(theme::interp_xbr2x); }
+void CMainFrame::OnThemeInterpXbr4x()    { set_interp(theme::interp_xbr4x); }
+void CMainFrame::OnThemeInterpNnedi2x()  { set_interp(theme::interp_nnedi2x); }
+void CMainFrame::OnThemeInterpNnedi4x()  { set_interp(theme::interp_nnedi4x); }
 
 void CMainFrame::OnUpdateThemeInterpNearest(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_nearest); }
 void CMainFrame::OnUpdateThemeInterpBilinear(CCmdUI* p) { p->SetCheck(theme::interp() == theme::interp_bilinear); }
 void CMainFrame::OnUpdateThemeInterpBicubic(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_bicubic); }
 void CMainFrame::OnUpdateThemeInterpLanczos(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_lanczos); }
+void CMainFrame::OnUpdateThemeInterpScale2x(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_scale2x); }
+void CMainFrame::OnUpdateThemeInterpScale3x(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_scale3x); }
+void CMainFrame::OnUpdateThemeInterpHq2x(CCmdUI* p)     { p->SetCheck(theme::interp() == theme::interp_hq2x); }
+void CMainFrame::OnUpdateThemeInterpHq4x(CCmdUI* p)     { p->SetCheck(theme::interp() == theme::interp_hq4x); }
+void CMainFrame::OnUpdateThemeInterpXbr2x(CCmdUI* p)    { p->SetCheck(theme::interp() == theme::interp_xbr2x); }
+void CMainFrame::OnUpdateThemeInterpXbr4x(CCmdUI* p)    { p->SetCheck(theme::interp() == theme::interp_xbr4x); }
+void CMainFrame::OnUpdateThemeInterpNnedi2x(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_nnedi2x); }
+void CMainFrame::OnUpdateThemeInterpNnedi4x(CCmdUI* p)  { p->SetCheck(theme::interp() == theme::interp_nnedi4x); }
 
 void CMainFrame::set_sharpen(int v)
 {

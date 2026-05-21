@@ -74,6 +74,7 @@ IDR_XCCMIXTYPE          ICON                    "res\\XCC MixerDoc.ico"
 //
 
 GLOBAL_MIX_DATABASE     RCDATA                  "..\\data\\global mix database.dat"
+NNEDI3_WEIGHTS          RCDATA                  "..\\data\\nnedi3_weights_mixer.bin"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -208,6 +209,18 @@ BEGIN
             MENUITEM "&Bilinear",                   ID_THEME_INTERP_BILINEAR
             MENUITEM "B&icubic",                    ID_THEME_INTERP_BICUBIC
             MENUITEM "&Lanczos-2",                  ID_THEME_INTERP_LANCZOS
+            MENUITEM SEPARATOR
+            MENUITEM "Scale&2x (SHP/WSA)",          ID_THEME_INTERP_SCALE2X
+            MENUITEM "Scale&3x (SHP/WSA)",          ID_THEME_INTERP_SCALE3X
+            MENUITEM "&HQ2x (SHP/WSA)",             ID_THEME_INTERP_HQ2X
+            MENUITEM "HQ&4x (SHP/WSA)",             ID_THEME_INTERP_HQ4X
+            MENUITEM "&xBR-2x (SHP/WSA)",           ID_THEME_INTERP_XBR2X
+            MENUITEM "x&BR-4x (SHP/WSA)",           ID_THEME_INTERP_XBR4X
+            POPUP "&NNEDI3 (best quality, slow)"
+            BEGIN
+                MENUITEM "NNEDI3-&2x (SHP/WSA)",    ID_THEME_INTERP_NNEDI2X
+                MENUITEM "NNEDI3-&4x (SHP/WSA)",    ID_THEME_INTERP_NNEDI4X
+            END
         END
         POPUP "S&harpen"
         BEGIN
@@ -727,6 +740,14 @@ BEGIN
                             "Bilinear scaling. Smooth, slight blur on upscale."
     ID_THEME_INTERP_BICUBIC "Bicubic scaling. Sharper edges than bilinear, slower."
     ID_THEME_INTERP_LANCZOS "Lanczos-2 scaling. Sharpest smooth filter, more aliasing on diagonals."
+    ID_THEME_INTERP_SCALE2X "Scale2x pixel-art upscale (SHP/WSA only). Cheap, preserves clean edges with smart corner fill."
+    ID_THEME_INTERP_SCALE3X "Scale3x pixel-art upscale (SHP/WSA only). Like Scale2x at 3x scale."
+    ID_THEME_INTERP_HQ2X    "HQ2x pixel-art upscale (SHP/WSA only). Heavy smoothing, painted look. Good on Dune2/RA1-era sprites."
+    ID_THEME_INTERP_HQ4X    "HQ4x pixel-art upscale (SHP/WSA only). HQ2x chained twice for extra smoothing."
+    ID_THEME_INTERP_XBR2X   "xBR-2x pixel-art upscale (SHP/WSA only). Smooth diagonals and curves. Best on RA2/TS unit sprites."
+    ID_THEME_INTERP_XBR4X   "xBR-4x pixel-art upscale (SHP/WSA only). xBR-2x chained twice. Sharpest at high zoom."
+    ID_THEME_INTERP_NNEDI2X "NNEDI3-2x neural upscale (SHP/WSA only). Best quality on hand-drawn 2D content. Slow."
+    ID_THEME_INTERP_NNEDI4X "NNEDI3-4x neural upscale (SHP/WSA only). NNEDI3-2x chained twice. Highest quality, slowest."
 END
 
 STRINGTABLE
