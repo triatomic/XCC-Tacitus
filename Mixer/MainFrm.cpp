@@ -2,6 +2,7 @@
 #include "XCC Mixer.h"
 #include "MainFrm.h"
 #include "XCCFileView.h"
+#include "id_log.h"
 #include "XSE_dlg.h"
 #include "XSTE_dlg.h"
 #include <fstream>
@@ -113,6 +114,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_FILE_SEARCH, OnFileSearch)
 	ON_COMMAND(ID_FILE_SEARCH_IN_MIX, OnFileSearchInMix)
 	ON_COMMAND(ID_FILE_SEARCH_ON_DISK, OnFileSearchOnDisk)
+	ON_COMMAND(ID_FILE_RELOAD_MIX_DB, OnFileReloadMixDb)
 	ON_COMMAND(ID_FILE_SCREENSHOT, OnFileScreenshot)
 	ON_COMMAND(ID_CONVERSION_ENABLE_COMPRESSION, OnConversionEnableCompression)
 	ON_UPDATE_COMMAND_UI(ID_CONVERSION_ENABLE_COMPRESSION, OnUpdateConversionEnableCompression)
@@ -317,25 +319,37 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// Suffix the frame caption with the mix-database source so the user can
 	// see at a glance whether names are coming from <data dir>\global mix
 	// database.dat (with their own additions, if any) or from the embedded
-	// fallback. mix_db_source_none means lookup will miss and rows will show
-	// 8-hex IDs — flagged loudly to make the cause obvious.
-	{
-		const char* tag = nullptr;
-		switch (g_mix_db_source)
-		{
-		case mix_db_source_on_disk:  tag = " [DB: on-disk]"; break;
-		case mix_db_source_embedded: tag = " [DB: embedded]"; break;
-		case mix_db_source_none:     tag = " [DB: missing]"; break;
-		}
-		if (tag)
-		{
-			CString t;
-			GetWindowText(t);
-			t += tag;
-			SetWindowText(t);
-		}
-	}
+	// fallback. Done via OnUpdateFrameTitle override so document open/close
+	// and runtime DB reload both keep the suffix in sync.
+	OnUpdateFrameTitle(TRUE);
 	return 0;
+}
+
+void CMainFrame::OnUpdateFrameTitle(BOOL bAddToTitle)
+{
+	// Let MFC build the standard "<base> - <doc>" caption first, then
+	// re-append the [DB: ...] suffix. Running our suffix logic after the
+	// base build means it survives every MFC-driven title refresh
+	// (document open, document close, untitled state) without us having
+	// to know which triggered it.
+	CFrameWnd::OnUpdateFrameTitle(bAddToTitle);
+	const char* tag = nullptr;
+	switch (g_mix_db_source)
+	{
+	case mix_db_source_on_disk:  tag = " [DB: on-disk]"; break;
+	case mix_db_source_embedded: tag = " [DB: embedded]"; break;
+	case mix_db_source_none:     tag = " [DB: missing]"; break;
+	}
+	if (!tag)
+		return;
+	CString t;
+	GetWindowText(t);
+	// Strip any prior [DB: ...] tag so repeated calls don't accumulate.
+	int p = t.Find(" [DB: ");
+	if (p >= 0)
+		t = t.Left(p);
+	t += tag;
+	SetWindowText(t);
 }
 
 BOOL CMainFrame::PreCreateWindow(CREATESTRUCT& cs)
@@ -1147,6 +1161,66 @@ void CMainFrame::OnFileSearchOnDisk()
 	CSearchOnDiskDlg dlg;
 	dlg.set(this, prefer_right);
 	dlg.DoModal();
+}
+
+// Ctrl+Shift+R: pick up edits the user made to
+// <data dir>\global mix database.dat without requiring a Mixer restart.
+// Wipes the in-memory name map, re-runs the full DB load chain (disk
+// first, embedded RCDATA fallback if disk is missing/malformed),
+// re-injects LMD names from each pane's currently-open MIX so names
+// previously contributed by LMD chunks don't disappear, then re-runs
+// the extension classifier so entries that just gained a name also
+// get a proper file type (e.g. ft_unknown -> ft_shp_ts). Finally
+// refreshes both panes plus the file-info preview.
+//
+// mix_cache (on-disk) is intentionally untouched — only the in-memory
+// state of currently-open MIXes refreshes. Other MIXes the user later
+// navigates into will hit the (stale) cache; deleting global mix
+// cache.dat is the escape hatch for that case.
+void CMainFrame::OnFileReloadMixDb()
+{
+	mix_database::clear();
+	int source = mix_database::load_source_none;
+	const int rc = mix_database::reload_with_fallback(&source);
+	// Project the local sentinel back onto Mixer's title-bar enum so
+	// the [DB: ...] caption tag stays in sync with reality.
+	switch (source)
+	{
+	case mix_database::load_source_on_disk:  g_mix_db_source = mix_db_source_on_disk;  break;
+	case mix_database::load_source_embedded: g_mix_db_source = mix_db_source_embedded; break;
+	default:                                 g_mix_db_source = mix_db_source_none;     break;
+	}
+	// Re-register LMD-supplied names + reclassify ft_unknown entries on
+	// the currently-visible MIX in each pane. Other MIXes in the
+	// navigation stack are not touched; their names will resolve
+	// correctly on next visit (mix_database::get_name reads the freshly-
+	// loaded map) but file types stay cached until they're re-opened.
+	for (CXCCMixerView* pane : { m_left_mix_pane, m_right_mix_pane })
+	{
+		if (!pane)
+			continue;
+		Cmix_file* mf = pane->current_mix();
+		if (!mf)
+			continue;
+		mf->reinject_lmd_names();
+		mf->reclassify_unknown_types();
+		pane->update_list();
+	}
+	// Intentionally NOT calling m_file_info_pane->reload_current() —
+	// the file-info pane previews a single file's bytes and doesn't
+	// depend on mix_database names. reload_current() also has a
+	// dangling-pointer hazard when m_source_mix references a Cmix_file
+	// that has since been popped from the navigation stack; the user
+	// hit that crash on first reload-after-navigate. The pane will
+	// refresh naturally on the next selection.
+	// Reflect the (possibly changed) DB source in the [DB: ...] caption tag.
+	OnUpdateFrameTitle(TRUE);
+	const char* status = "Mix database reload failed";
+	if (rc == 0 && source == mix_database::load_source_on_disk)
+		status = "Mix database reloaded - on-disk";
+	else if (rc == 0 && source == mix_database::load_source_embedded)
+		status = "Mix database reloaded - embedded";
+	set_msg(status);
 }
 
 void CMainFrame::OnFileSearchInMix()

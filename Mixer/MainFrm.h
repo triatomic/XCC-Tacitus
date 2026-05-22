@@ -268,7 +268,13 @@ protected:
 	afx_msg void OnFileSearch();
 	afx_msg void OnFileSearchInMix();
 	afx_msg void OnFileSearchOnDisk();
+	afx_msg void OnFileReloadMixDb();
 	afx_msg void OnFileScreenshot();
+	// Override of MFC's title formatter so the [DB: ...] suffix is reapplied
+	// on every title update (document open/close, runtime DB reload). Without
+	// this MFC's CFrameWnd::OnUpdateFrameTitle rebuilds the caption from
+	// scratch as "<base> - <doc>" and our suffix is lost.
+	virtual void OnUpdateFrameTitle(BOOL bAddToTitle);
 	afx_msg void OnConversionEnableCompression();
 	afx_msg void OnUpdateConversionEnableCompression(CCmdUI* pCmdUI);
 	afx_msg void OnDestroy();

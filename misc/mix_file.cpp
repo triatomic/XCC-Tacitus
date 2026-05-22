@@ -247,26 +247,10 @@ int Cmix_file::post_open()
 			memcpy(&m_index_ft[0], cached->ft.data(), get_c_files() * sizeof(t_file_type));
 			if (m_game != game_dune2 && m_game != game_rg)
 				m_game = static_cast<t_game>(cached->game);
-			// Re-register LMD-supplied names. Almost every MIX has zero
-			// LMD entries, so this loop is usually a no-op.
-			for (int idx : cached->lmd)
-			{
-				if (idx < 0 || idx >= get_c_files())
-					continue;
-				int id = get_id(idx);
-				Cxcc_lmd_file f;
-				if (f.open(id, *this) || !f.is_valid())
-					continue;
-				m_game = f.get_game();
-				int count = f.get_c_fnames();
-				const char* r = f.get_fnames();
-				while (count--)
-				{
-					string name = r;
-					r += name.length() + 1;
-					mix_database::add_name(m_game, name, "");
-				}
-			}
+			// Re-register LMD-supplied names so the global test_list is
+			// repopulated for this MIX. Almost every MIX has zero LMD
+			// entries, so this is usually a no-op.
+			reinject_lmd_names();
 		}
 		else
 		{
@@ -349,50 +333,7 @@ int Cmix_file::post_open()
 			//      only entries that came back ft_unknown — don't override
 			//      a real probe match.
 			m_index_ft.resize(get_c_files(), ft_unknown);
-			// SHP/TMP variant depends on the game family. TD/RA1 use the
-			// classic SHP (Cshp_file) and TMP (Ctmp_file/Ctmp_ra_file)
-			// formats; TS/RA2/YR use the iso SHP_TS and TMP_TS family.
-			const bool is_td_ra = (m_game == game_td || m_game == game_ra);
-			for (int i = 0; i < get_c_files(); i++)
-			{
-				string name = mix_database::get_name(m_game, get_id(i));
-				if (name.empty())
-					continue;
-				auto dot = name.rfind('.');
-				string ext = dot != string::npos ? name.substr(dot) : string();
-				for (auto& c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-				// Extensions whose content probes are known to misclassify
-				// (.urb and .icn both share enough header shape with SHP/TMP
-				// that Cshp_file::is_valid / Ctmp_file::is_valid return true
-				// on the wrong variant). Force these to the filename-derived
-				// type even when the probe produced something.
-				const bool force_ext = (ext == ".urb" || ext == ".icn" || ext == ".pkt" || ext == ".cps" || ext == ".eng" || ext == ".fre" || ext == ".ger" || ext == ".tem");
-				if (!force_ext && m_index_ft[i] != ft_unknown)
-					continue;
-				if (ext == ".pal") m_index_ft[i] = ft_pal;
-				else if (ext == ".mix") m_index_ft[i] = ft_mix;
-				else if (ext == ".ini" || ext == ".map" || ext == ".pkt") m_index_ft[i] = ft_ini;
-				else if (ext == ".cps") m_index_ft[i] = ft_cps;
-				else if (ext == ".eng" || ext == ".fre" || ext == ".ger") m_index_ft[i] = ft_st;
-				else if (ext == ".shp") m_index_ft[i] = is_td_ra ? ft_shp : ft_shp_ts;
-				else if (ext == ".vxl") m_index_ft[i] = ft_vxl;
-				else if (ext == ".hva") m_index_ft[i] = ft_hva;
-				else if (ext == ".aud") m_index_ft[i] = ft_aud;
-				else if (ext == ".vqa") m_index_ft[i] = ft_vqa;
-				else if (ext == ".csf") m_index_ft[i] = ft_csf;
-				else if (ext == ".pcx") m_index_ft[i] = ft_pcx;
-				else if (ext == ".tmp") m_index_ft[i] = m_game == game_td ? ft_tmp : (m_game == game_ra ? ft_tmp_ra : ft_tmp_ts);
-				else if (ext == ".wsa") m_index_ft[i] = ft_wsa;
-				else if (ext == ".fnt") m_index_ft[i] = ft_fnt;
-				else if (ext == ".icn") m_index_ft[i] = ft_tmp;
-				else if (ext == ".urb" || ext == ".tem") m_index_ft[i] = ft_tmp_ra;
-				else if (ext == ".vpl") m_index_ft[i] = ft_vpl;
-				else if (ext == ".voc") m_index_ft[i] = ft_voc;
-				else if (ext == ".wav") m_index_ft[i] = ft_wav;
-				else if (ext == ".mp3") m_index_ft[i] = ft_mp3;
-				else if (ext == ".ogg") m_index_ft[i] = ft_ogg;
-				else if (ext == ".bin") m_index_ft[i] = ft_bin;
-			}
+			reclassify_unknown_types();
 		}
 	}
 #endif
@@ -519,4 +460,89 @@ ostream& Cmix_file::extract_as_text(ostream& os) const
 		os << nwzl(4, i) << " - " << nh(8, id) << nwsl(11, get_size(id)) << " " << mix_database::get_name(game, id) << endl;
 	}
 	return os;
+}
+
+void Cmix_file::reinject_lmd_names()
+{
+#ifndef NO_FT_SUPPORT
+	// Walk m_index_ft for entries currently typed ft_xcc_lmd, open each,
+	// and feed their name lists back through mix_database::add_name. The
+	// per-LMD-chunk game field can disagree with the host MIX's m_game
+	// (an LMD authored for TS embedded inside an RA2 MIX, say); we
+	// honor whatever the chunk declares — same convention the cold-path
+	// LMD walk uses. m_game is reassigned to match, which is consistent
+	// with post_open's cold path.
+	const int c_files = static_cast<int>(m_index_ft.size());
+	for (int i = 0; i < c_files && i < static_cast<int>(get_c_files()); i++)
+	{
+		if (m_index_ft[i] != ft_xcc_lmd)
+			continue;
+		int id = get_id(i);
+		Cxcc_lmd_file f;
+		if (f.open(id, *this) || !f.is_valid())
+			continue;
+		m_game = f.get_game();
+		int count = f.get_c_fnames();
+		const char* r = f.get_fnames();
+		while (count--)
+		{
+			string name = r;
+			r += name.length() + 1;
+			mix_database::add_name(m_game, name, "");
+		}
+	}
+#endif
+}
+
+void Cmix_file::reclassify_unknown_types()
+{
+#ifndef NO_FT_SUPPORT
+	// SHP/TMP variant depends on the game family. TD/RA1 use the
+	// classic SHP (Cshp_file) and TMP (Ctmp_file/Ctmp_ra_file)
+	// formats; TS/RA2/YR use the iso SHP_TS and TMP_TS family.
+	const bool is_td_ra = (m_game == game_td || m_game == game_ra);
+	const int c_files = static_cast<int>(get_c_files());
+	if (static_cast<int>(m_index_ft.size()) < c_files)
+		m_index_ft.resize(c_files, ft_unknown);
+	for (int i = 0; i < c_files; i++)
+	{
+		string name = mix_database::get_name(m_game, get_id(i));
+		if (name.empty())
+			continue;
+		auto dot = name.rfind('.');
+		string ext = dot != string::npos ? name.substr(dot) : string();
+		for (auto& c : ext) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+		// Extensions whose content probes are known to misclassify
+		// (.urb and .icn both share enough header shape with SHP/TMP
+		// that Cshp_file::is_valid / Ctmp_file::is_valid return true
+		// on the wrong variant). Force these to the filename-derived
+		// type even when the probe produced something.
+		const bool force_ext = (ext == ".urb" || ext == ".icn" || ext == ".pkt" || ext == ".cps" || ext == ".eng" || ext == ".fre" || ext == ".ger" || ext == ".tem");
+		if (!force_ext && m_index_ft[i] != ft_unknown)
+			continue;
+		if (ext == ".pal") m_index_ft[i] = ft_pal;
+		else if (ext == ".mix") m_index_ft[i] = ft_mix;
+		else if (ext == ".ini" || ext == ".map" || ext == ".pkt") m_index_ft[i] = ft_ini;
+		else if (ext == ".cps") m_index_ft[i] = ft_cps;
+		else if (ext == ".eng" || ext == ".fre" || ext == ".ger") m_index_ft[i] = ft_st;
+		else if (ext == ".shp") m_index_ft[i] = is_td_ra ? ft_shp : ft_shp_ts;
+		else if (ext == ".vxl") m_index_ft[i] = ft_vxl;
+		else if (ext == ".hva") m_index_ft[i] = ft_hva;
+		else if (ext == ".aud") m_index_ft[i] = ft_aud;
+		else if (ext == ".vqa") m_index_ft[i] = ft_vqa;
+		else if (ext == ".csf") m_index_ft[i] = ft_csf;
+		else if (ext == ".pcx") m_index_ft[i] = ft_pcx;
+		else if (ext == ".tmp") m_index_ft[i] = m_game == game_td ? ft_tmp : (m_game == game_ra ? ft_tmp_ra : ft_tmp_ts);
+		else if (ext == ".wsa") m_index_ft[i] = ft_wsa;
+		else if (ext == ".fnt") m_index_ft[i] = ft_fnt;
+		else if (ext == ".icn") m_index_ft[i] = ft_tmp;
+		else if (ext == ".urb" || ext == ".tem") m_index_ft[i] = ft_tmp_ra;
+		else if (ext == ".vpl") m_index_ft[i] = ft_vpl;
+		else if (ext == ".voc") m_index_ft[i] = ft_voc;
+		else if (ext == ".wav") m_index_ft[i] = ft_wav;
+		else if (ext == ".mp3") m_index_ft[i] = ft_mp3;
+		else if (ext == ".ogg") m_index_ft[i] = ft_ogg;
+		else if (ext == ".bin") m_index_ft[i] = ft_bin;
+	}
+#endif
 }

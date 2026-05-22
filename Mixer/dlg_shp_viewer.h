@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include "resource.h"
 #include "video_decoder.h"
 #include "virtual_binary.h"
@@ -17,6 +18,13 @@ public:
 	// audio; pass fps <= 0 to skip the duration label.
 	void write_av(Cvirtual_binary wav, double fps, const std::string& name);
 	Cdlg_shp_viewer(CWnd* pParent = NULL);   // standard constructor
+
+	// Owner-painted image control reads this BGRA buffer (top-down,
+	// m_frame_cx * m_frame_cy DWORDs) on every WM_PAINT and aspect-fits
+	// into the static's client rect via theme::bilinear_resample_bgra.
+	std::vector<DWORD> m_frame_bgra;
+	int m_frame_cx;
+	int m_frame_cy;
 
 	//{{AFX_DATA(Cdlg_shp_viewer)
 	enum { IDD = IDD_SHP_VIEWER };
@@ -45,9 +53,15 @@ protected:
 	afx_msg void OnFpsChange();
 	//}}AFX_MSG
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	DECLARE_MESSAGE_MAP()
 private:
 	void update_duration_label();
+	void update_frame_bgra(int i);
+	void toggle_fullscreen();
+	void enter_fullscreen(bool on);
 	Cvideo_decoder* m_decoder;
 	int m_frame;
 	int m_last_access;
@@ -60,6 +74,10 @@ private:
 	bool m_paused;
 	int m_fps_value;
 	bool m_updating_fps;
+	bool m_fullscreen;
+	WINDOWPLACEMENT m_pre_fs_placement;
+	DWORD m_pre_fs_style;
+	DWORD m_pre_fs_ex_style;
 	void restart_timer();
 public:
 	afx_msg void OnDeltaposShpviewFpsSpin(NMHDR* pNMHDR, LRESULT* pResult);

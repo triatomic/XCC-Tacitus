@@ -2,6 +2,7 @@
 #include <id_log.h>
 
 #include <fstream>
+#include <windows.h>
 #include <mix_file.h>
 #include <string_conversion.h>
 #include <xcc_dirs.h>
@@ -106,4 +107,50 @@ const string& mix_database::get_description(t_game game, int id)
 	static const string empty;
 	auto i = find_ptr(get_list(game), id);
 	return i ? i->description : empty;
+}
+
+void mix_database::clear()
+{
+	test_list.clear();
+}
+
+int mix_database::reload_with_fallback(int* source_out)
+{
+	if (source_out)
+		*source_out = mix_database::load_source_none;
+	// Try the primary data dir first (whatever xcc_dirs currently
+	// resolves to). On failure, fall back to a reset of the data dir
+	// (mirrors CXCCMixerApp::InitInstance's startup chain) and retry.
+	if (mix_database::load() == 0)
+	{
+		if (source_out)
+			*source_out = mix_database::load_source_on_disk;
+		return 0;
+	}
+	xcc_dirs::reset_data_dir();
+	if (mix_database::load() == 0)
+	{
+		if (source_out)
+			*source_out = mix_database::load_source_on_disk;
+		return 0;
+	}
+	// On-disk dat is missing or malformed. Fall back to the dat blob
+	// baked into the executable as RCDATA so panes still show
+	// human-readable names instead of 8-hex-digit IDs.
+	HRSRC res = ::FindResource(NULL, "GLOBAL_MIX_DATABASE", RT_RCDATA);
+	if (res)
+	{
+		HGLOBAL g = ::LoadResource(NULL, res);
+		DWORD sz = ::SizeofResource(NULL, res);
+		if (g && sz)
+		{
+			if (mix_database::load_from_buffer(::LockResource(g), static_cast<int>(sz)) == 0)
+			{
+				if (source_out)
+					*source_out = mix_database::load_source_embedded;
+				return 0;
+			}
+		}
+	}
+	return 1;
 }

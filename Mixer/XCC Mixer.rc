@@ -97,6 +97,8 @@ BEGIN
             MENUITEM "Update",                      ID_FILE_FOUND_UPDATE
         END
         MENUITEM SEPARATOR
+        MENUITEM "Reload Mix Database\tCtrl+Shift+R", ID_FILE_RELOAD_MIX_DB
+        MENUITEM SEPARATOR
         MENUITEM "E&xit",                       ID_APP_EXIT
     END
     POPUP "&Conversion"
@@ -592,13 +594,13 @@ BEGIN
 END
 
 IDD_SHP_VIEWER DIALOGEX 0, 0, 340, 122
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "Video Viewer"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "Pause",IDC_PLAY,255,101,36,14
     PUSHBUTTON      "Close",IDOK,294,101,40,14
-    CONTROL         "",IDC_IMAGE,"Static",SS_BITMAP | SS_CENTERIMAGE,7,7,327,88
+    CONTROL         "",IDC_IMAGE,"Static",SS_LEFT | SS_NOPREFIX,7,7,327,88
     CONTROL         "Slider1",IDC_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,107,100,73,15
     EDITTEXT        IDC_FRAME,7,101,22,14,ES_RIGHT | ES_AUTOHSCROLL | ES_READONLY | ES_NUMBER
     LTEXT           "",IDC_DURATION,33,103,70,12,SS_CENTERIMAGE
@@ -829,8 +831,9 @@ BEGIN
     ID_THEME_HIDE_EMPTY_RESULTS
                             "When on, Search in current location and Load PAL show nothing until you type a filter"
     ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
-    ID_THEME_PARALLEL_EXTRACT 
+    ID_THEME_PARALLEL_EXTRACT
                             "Extract batch selections in parallel (faster on SSDs)"
+    ID_FILE_RELOAD_MIX_DB   "Reload the global mix names database from disk (or embedded fallback)"
 END
 
 STRINGTABLE

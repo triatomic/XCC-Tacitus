@@ -197,32 +197,19 @@ BOOL CXCCMixerApp::InitInstance()
 	Cmix_file::enable_ft_support();
 	xcc_dirs::load_from_registry();
 	xcc_log::attach_file("XCC Mixer log.txt");
-	g_mix_db_source = mix_db_source_none;
-	if (mix_database::load())
 	{
-		xcc_dirs::reset_data_dir();
-		if (mix_database::load())
+		// Shared load chain (also used by the runtime Ctrl+Shift+R reload):
+		// on-disk → reset_data_dir + retry → embedded RCDATA fallback. Map
+		// the helper's local sentinel onto Mixer's title-bar enum.
+		int source = mix_database::load_source_none;
+		mix_database::reload_with_fallback(&source);
+		switch (source)
 		{
-			// All on-disk attempts failed. Fall back to the dat blob baked
-			// into the exe as RCDATA so the listview still shows filenames
-			// instead of 8-hex-digit IDs.
-			HRSRC res = ::FindResource(NULL, "GLOBAL_MIX_DATABASE", RT_RCDATA);
-			if (res)
-			{
-				HGLOBAL g = ::LoadResource(NULL, res);
-				DWORD sz = ::SizeofResource(NULL, res);
-				if (g && sz)
-				{
-					if (mix_database::load_from_buffer(::LockResource(g), static_cast<int>(sz)) == 0)
-						g_mix_db_source = mix_db_source_embedded;
-				}
-			}
+		case mix_database::load_source_on_disk:  g_mix_db_source = mix_db_source_on_disk;  break;
+		case mix_database::load_source_embedded: g_mix_db_source = mix_db_source_embedded; break;
+		default:                                 g_mix_db_source = mix_db_source_none;     break;
 		}
-		else
-			g_mix_db_source = mix_db_source_on_disk;
 	}
-	else
-		g_mix_db_source = mix_db_source_on_disk;
 	mix_cache::load();
 
 	CSingleDocTemplate* pDocTemplate;

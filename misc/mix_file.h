@@ -12,6 +12,23 @@ public:
 	string get_name(int id);
 	static int get_id(t_game game, string name);
 	int get_index(unsigned int id) const;
+
+	// Walk this MIX's LMD chunks (entries typed ft_xcc_lmd in m_index_ft)
+	// and re-call mix_database::add_name for each contained filename. Used
+	// both by post_open's warm path (so a cache hit re-registers names
+	// after Mixer restart) and by the runtime "reload mix database"
+	// command (after clearing test_list). Idempotent — safe to call
+	// repeatedly; add_name overwrites by key.
+	void reinject_lmd_names();
+	// Walk m_index_ft and, for every entry currently typed ft_unknown
+	// whose name now resolves via mix_database::get_name, apply the
+	// extension-driven classifier (the same one Cmix_file::post_open's
+	// cold path runs at the end). Used by the runtime "reload mix
+	// database" command so newly-resolved names also pick up their
+	// proper file type without re-opening the MIX. Doesn't downgrade
+	// entries that already have a real type (content-probe results are
+	// authoritative).
+	void reclassify_unknown_types();
 	using Ccc_file::get_size;
 	using Ccc_file::vdata;
 	Cvirtual_binary get_vdata(int id);

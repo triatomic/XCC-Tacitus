@@ -544,6 +544,7 @@
 #define ID_POPUP_OPEN_WITH              33138
 #define ID_KEYBINDS_CONFIGURE           33139
 #define ID_FILE_SEARCH_ON_DISK          33140
+#define ID_FILE_RELOAD_MIX_DB           33141
 #define ID_VIEW_PALETTE_PAL000          40000
 #define ID_VIEW_PALETTE_PAL001          40001
 #define ID_VIEW_PALETTE_PAL002          40002
@@ -1605,7 +1606,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        151
-#define _APS_NEXT_COMMAND_VALUE         33141
+#define _APS_NEXT_COMMAND_VALUE         33142
 #define _APS_NEXT_CONTROL_VALUE         1212
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
