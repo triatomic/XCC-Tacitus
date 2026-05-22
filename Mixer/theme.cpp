@@ -29,6 +29,7 @@ namespace theme
 		bool g_resolved_dark = false;
 		bool g_show_grid = true;
 		bool g_show_column_headers = true;
+		bool g_hide_empty_results = false;
 		size_format g_size_fmt = size_auto;
 		clipboard_format g_clipboard_fmt = clipboard_indexed;
 		vxl_ss g_vxl_ss = vxl_ss_4;
@@ -187,6 +188,7 @@ namespace theme
 		g_resolved_dark = resolve_dark(g_mode);
 		g_show_grid = AfxGetApp()->GetProfileInt("Theme", "show_grid", 1) != 0;
 		g_show_column_headers = AfxGetApp()->GetProfileInt("Theme", "show_column_headers", 1) != 0;
+		g_hide_empty_results = AfxGetApp()->GetProfileInt("Theme", "hide_empty_results", 0) != 0;
 		g_shp_transparency = AfxGetApp()->GetProfileInt("Theme", "shp_transparency", 0) != 0;
 		g_alpha_color = static_cast<COLORREF>(AfxGetApp()->GetProfileInt("Theme", "alpha_color", RGB(0, 255, 0)));
 		g_use_checkerboard = AfxGetApp()->GetProfileInt("Theme", "use_checkerboard", 1) != 0;
@@ -266,6 +268,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "mode", g_mode);
 		AfxGetApp()->WriteProfileInt("Theme", "show_grid", g_show_grid ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "show_column_headers", g_show_column_headers ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "hide_empty_results", g_hide_empty_results ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "shp_transparency", g_shp_transparency ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "alpha_color", static_cast<int>(g_alpha_color));
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
@@ -326,6 +329,16 @@ namespace theme
 		if (g_show_column_headers == v)
 			return;
 		g_show_column_headers = v;
+		save();
+	}
+
+	bool hide_empty_results() { return g_hide_empty_results; }
+
+	void set_hide_empty_results(bool v)
+	{
+		if (g_hide_empty_results == v)
+			return;
+		g_hide_empty_results = v;
 		save();
 	}
 

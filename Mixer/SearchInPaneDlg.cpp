@@ -24,7 +24,7 @@ void CSearchInPaneDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CSearchInPaneDlg, ETSLayoutDialog)
-	ON_BN_CLICKED(IDOK, OnFind)
+	ON_EN_CHANGE(IDC_FILENAME, OnFilterChange)
 	ON_NOTIFY(NM_DBLCLK, IDC_LIST, OnDblclkList)
 	ON_NOTIFY(LVN_COLUMNCLICK, IDC_LIST, OnColumnclickList)
 	ON_WM_DESTROY()
@@ -61,34 +61,98 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 	m_list.InsertColumn(0, "Name");
 	m_list.InsertColumn(1, "Size");
 	m_list.set_size(0);
+
+	// LoadPalDlg-style: pre-populate every entry in the pane on open, then
+	// narrow live as the user types in the filter box. The previous
+	// type-then-Search flow forced an extra Enter/click for the common case
+	// of "show me everything that contains X".
+	populate_all();
+	apply_filter_and_sort();
+	repopulate_list();
+
+	// Header autosize. Per-content autosize was too expensive on huge MIXes
+	// (matched CSearchFileDlg's v10.5 fix); header width plus drag-to-resize
+	// + persisted widths cover the same ground.
+	m_list.SetColumnWidth(0, LVSCW_AUTOSIZE_USEHEADER);
+	m_list.SetColumnWidth(1, LVSCW_AUTOSIZE_USEHEADER);
+
 	theme::apply_dialog(GetSafeHwnd());
 	theme::apply_column_headers(m_list.GetSafeHwnd());
 	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
-	return true;
+
+	// The OK button used to drive the search; with live filtering there's
+	// nothing for it to do, so hide it. ESC / Close still works via IDCANCEL.
+	if (CWnd* ok = GetDlgItem(IDOK))
+		ok->ShowWindow(SW_HIDE);
+
+	// Focus the filter so the user can start typing immediately. If a prior
+	// filter was persisted we re-apply it; SetSel(0,-1) lets the next
+	// keystroke replace the whole thing.
+	if (CEdit* edit = static_cast<CEdit*>(GetDlgItem(IDC_FILENAME)))
+	{
+		edit->SetFocus();
+		edit->SetSel(0, -1);
+	}
+	return FALSE; // we set focus ourselves
 }
 
-bool CSearchInPaneDlg::match_one(const string& name, const string& filter)
+BOOL CSearchInPaneDlg::PreTranslateMessage(MSG* pMsg)
 {
-	if (filter.empty())
-		return true;
-	return fname_filter(name, filter);
+	// Enter in the filter edit activates the focused listview row (open it
+	// in the pane) instead of dismissing the dialog. Matches the
+	// fuzzy-finder convention the LoadPalDlg picker established.
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
+	{
+		HWND focus = ::GetFocus();
+		HWND edit = GetDlgItem(IDC_FILENAME) ? GetDlgItem(IDC_FILENAME)->GetSafeHwnd() : NULL;
+		HWND list = m_list.GetSafeHwnd();
+		if (focus == edit || focus == list)
+		{
+			activate_selected();
+			return TRUE;
+		}
+	}
+	// Down/Up in the filter scroll the list selection so the user can
+	// arrow-key through results without leaving the edit.
+	if (pMsg->message == WM_KEYDOWN &&
+		(pMsg->wParam == VK_DOWN || pMsg->wParam == VK_UP ||
+		 pMsg->wParam == VK_PRIOR || pMsg->wParam == VK_NEXT))
+	{
+		HWND focus = ::GetFocus();
+		HWND edit = GetDlgItem(IDC_FILENAME) ? GetDlgItem(IDC_FILENAME)->GetSafeHwnd() : NULL;
+		if (focus == edit && m_list.GetItemCount() > 0)
+		{
+			int sel = m_list.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+			int next = sel;
+			const int n = m_list.GetItemCount();
+			if (pMsg->wParam == VK_DOWN)         next = (sel < 0) ? 0 : std::min(sel + 1, n - 1);
+			else if (pMsg->wParam == VK_UP)      next = (sel < 0) ? 0 : std::max(sel - 1, 0);
+			else if (pMsg->wParam == VK_NEXT)    next = (sel < 0) ? 0 : std::min(sel + 10, n - 1);
+			else if (pMsg->wParam == VK_PRIOR)   next = (sel < 0) ? 0 : std::max(sel - 10, 0);
+			if (next != sel)
+			{
+				m_list.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+				m_list.SetItemState(next, LVIS_SELECTED | LVIS_FOCUSED,
+					LVIS_SELECTED | LVIS_FOCUSED);
+				m_list.EnsureVisible(next, FALSE);
+			}
+			return TRUE;
+		}
+	}
+	return ETSLayoutDialog::PreTranslateMessage(pMsg);
 }
 
-void CSearchInPaneDlg::OnFind()
+void CSearchInPaneDlg::populate_all()
 {
-	if (!UpdateData(true) || !m_pane)
+	m_all.clear();
+	if (!m_pane)
 		return;
-	CWaitCursor wait;
-	m_list.DeleteAllItems();
-	m_matches.clear();
-	string filter = static_cast<string>(m_filename);
 	const auto& idx = m_pane->t_index_list();
+	m_all.reserve(idx.size());
 	for (auto& i : idx)
 	{
 		const t_index_entry& e = i.second;
 		if (e.name.empty() || e.name == ".." || e.name == "Browse...")
-			continue;
-		if (!match_one(e.name, filter))
 			continue;
 		t_match m;
 		m.name = e.name;
@@ -96,26 +160,31 @@ void CSearchInPaneDlg::OnFind()
 		// e.size_bytes is -1 for directory rows; stash 0 so the size column
 		// stays blank for those instead of rendering as "-1 B".
 		m.size_bytes = e.size_bytes < 0 ? 0 : e.size_bytes;
-		m_matches.push_back(m);
+		m_all.push_back(std::move(m));
 	}
-	apply_sort();
-	repopulate_list();
-	// Fit each column to the wider of its content / header. Empty list still
-	// gets header-width via AUTOSIZE_USEHEADER.
-	auto fit_column = [&](int col) {
-		m_list.SetColumnWidth(col, LVSCW_AUTOSIZE);
-		int content_w = m_list.GetColumnWidth(col);
-		m_list.SetColumnWidth(col, LVSCW_AUTOSIZE_USEHEADER);
-		int header_w = m_list.GetColumnWidth(col);
-		m_list.SetColumnWidth(col, max(content_w, header_w));
-	};
-	fit_column(0);
-	fit_column(1);
-	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
 }
 
-void CSearchInPaneDlg::apply_sort()
+void CSearchInPaneDlg::apply_filter_and_sort()
 {
+	UpdateData(TRUE);
+	string filter = static_cast<string>(m_filename);
+
+	m_visible.clear();
+	// Theme > Hide Results When Search Is Empty: when on, show nothing
+	// until the user types something. The default off keeps the
+	// populate-everything-on-open ergonomics from v10.71.
+	const bool gate_on_empty = theme::hide_empty_results() && filter.empty();
+	m_visible.reserve(gate_on_empty ? 0 : m_all.size());
+	if (!gate_on_empty)
+	{
+		for (size_t i = 0; i < m_all.size(); i++)
+		{
+			if (!filter.empty() && !fname_filter(m_all[i].name, filter))
+				continue;
+			m_visible.push_back(static_cast<int>(i));
+		}
+	}
+
 	auto key_less = [this](const t_match& a, const t_match& b) {
 		switch (m_sort_column)
 		{
@@ -128,33 +197,60 @@ void CSearchInPaneDlg::apply_sort()
 			return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
 		}
 	};
-	auto cmp = [this, &key_less](const t_match& a, const t_match& b) {
+	auto cmp = [this, &key_less](int ia, int ib) {
+		const t_match& a = m_all[ia];
+		const t_match& b = m_all[ib];
 		return m_sort_descending ? key_less(b, a) : key_less(a, b);
 	};
-	std::stable_sort(m_matches.begin(), m_matches.end(), cmp);
+	std::stable_sort(m_visible.begin(), m_visible.end(), cmp);
 }
 
 void CSearchInPaneDlg::repopulate_list()
 {
-	// Same trick as CSearchFileDlg: defer paint, and when the row count
-	// hasn't changed (sort-only), rewrite lParams in place instead of doing
-	// a full DeleteAllItems + InsertItemData rebuild.
+	// Same trick as CSearchFileDlg / CLoadPalDlg: defer paint, and when the
+	// row count hasn't changed (sort-only), rewrite lParams in place
+	// instead of doing a full DeleteAllItems + InsertItemData rebuild.
 	m_list.SetRedraw(FALSE);
 	const int rows = m_list.GetItemCount();
-	const int want = static_cast<int>(m_matches.size());
+	const int want = static_cast<int>(m_visible.size());
 	if (rows == want)
 	{
 		for (int i = 0; i < want; i++)
-			m_list.SetItemData(i, static_cast<DWORD>(i));
+			m_list.SetItemData(i, static_cast<DWORD>(m_visible[i]));
 	}
 	else
 	{
 		m_list.DeleteAllItems();
-		for (size_t i = 0; i < m_matches.size(); i++)
-			m_list.InsertItemData(static_cast<DWORD>(i));
+		for (size_t i = 0; i < m_visible.size(); i++)
+		{
+			LVITEM lv = {};
+			lv.mask = LVIF_TEXT | LVIF_PARAM;
+			lv.iItem = static_cast<int>(i);
+			lv.pszText = LPSTR_TEXTCALLBACK;
+			lv.lParam = m_visible[i];
+			m_list.InsertItem(&lv);
+		}
+	}
+	// Keep a visible selection so Enter in the filter has something to act
+	// on. If nothing was selected before (or selection went off-list after a
+	// filter narrowed results), default to row 0.
+	if (want > 0)
+	{
+		int sel = m_list.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		if (sel < 0)
+		{
+			m_list.SetItemState(0, LVIS_SELECTED | LVIS_FOCUSED,
+				LVIS_SELECTED | LVIS_FOCUSED);
+		}
 	}
 	m_list.SetRedraw(TRUE);
 	m_list.Invalidate();
+}
+
+void CSearchInPaneDlg::OnFilterChange()
+{
+	apply_filter_and_sort();
+	repopulate_list();
 }
 
 void CSearchInPaneDlg::OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult)
@@ -169,34 +265,38 @@ void CSearchInPaneDlg::OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult)
 		// Size defaults to biggest-first; name defaults to A->Z.
 		m_sort_descending = (col == 1);
 	}
-	apply_sort();
+	apply_filter_and_sort();
 	repopulate_list();
 	*pResult = 0;
 }
 
-void CSearchInPaneDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
+void CSearchInPaneDlg::activate_selected()
 {
 	int index = m_list.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
-	if (index != -1 && m_pane)
+	if (index < 0 || !m_pane)
+		return;
+	int data = m_list.GetItemData(index);
+	if (data < 0 || data >= static_cast<int>(m_all.size()))
+		return;
+	int id = m_all[data].id;
+	CListCtrl& lc = m_pane->GetListCtrl();
+	LVFINDINFO lvf;
+	lvf.flags = LVFI_PARAM;
+	lvf.lParam = id;
+	int li = lc.FindItem(&lvf, -1);
+	if (li != -1)
 	{
-		int data = m_list.GetItemData(index);
-		if (data >= 0 && data < static_cast<int>(m_matches.size()))
-		{
-			int id = m_matches[data].id;
-			CListCtrl& lc = m_pane->GetListCtrl();
-			LVFINDINFO lvf;
-			lvf.flags = LVFI_PARAM;
-			lvf.lParam = id;
-			int li = lc.FindItem(&lvf, -1);
-			if (li != -1)
-			{
-				lc.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
-				lc.SetItemState(li, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
-				lc.EnsureVisible(li, false);
-			}
-			EndDialog(IDCANCEL);
-		}
+		lc.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		lc.SetItemState(li, LVIS_FOCUSED | LVIS_SELECTED,
+			LVIS_FOCUSED | LVIS_SELECTED);
+		lc.EnsureVisible(li, false);
 	}
+	EndDialog(IDCANCEL);
+}
+
+void CSearchInPaneDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	activate_selected();
 	*pResult = 0;
 }
 
@@ -211,9 +311,9 @@ void CSearchInPaneDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 	LV_DISPINFO* pDispInfo = reinterpret_cast<LV_DISPINFO*>(pNMHDR);
 	int data = pDispInfo->item.lParam;
 	string& buffer = m_list.get_buffer();
-	if (data >= 0 && data < static_cast<int>(m_matches.size()))
+	if (data >= 0 && data < static_cast<int>(m_all.size()))
 	{
-		const t_match& m = m_matches[data];
+		const t_match& m = m_all[data];
 		switch (pDispInfo->item.iSubItem)
 		{
 		case 0: buffer = m.name; break;

@@ -422,8 +422,11 @@ protected:
 	void load_pal_btn_update_visibility();
 	// Wires the PAL bytes into MainFrame's palette list as a fresh entry
 	// (under a synthetic "Loaded" tree node) and calls set_palette() so the
-	// file repaints with it. Returns false on parse failure.
+	// file repaints with it. Returns false on parse failure. Public because
+	// CLoadPalDlg calls it directly to apply MIX-entry or disk picks.
+public:
 	bool apply_loaded_pal(const Cvirtual_binary& data, const string& display_name);
+protected:
 	// On opening a paletted file, scan the source MIX for a .pal whose
 	// basename (sans extension, lowercased) matches the file's basename
 	// exactly. If found, load it via apply_loaded_pal so the file paints

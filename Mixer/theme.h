@@ -76,6 +76,12 @@ namespace theme
 	bool show_column_headers();
 	void set_show_column_headers(bool v);
 
+	// When on, search / picker dialogs (Ctrl+F Search in current location,
+	// Load PAL...) hide all rows when the filter edit is empty. Default off
+	// preserves the populate-everything-on-open behavior shipped in v10.71.
+	bool hide_empty_results();
+	void set_hide_empty_results(bool v);
+
 	// Size column format: Auto = "1.5 MB" via totalSize(); Bytes = grouped
 	// raw byte count "1,572,864". Applies to the listview panes and to the
 	// right-pane MIX/PAK/BIG/RG-MIX content listings.

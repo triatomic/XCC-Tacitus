@@ -167,6 +167,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_SHOW_GRID, OnThemeShowGrid)
 	ON_COMMAND(ID_THEME_SHOW_COLUMN_HEADERS, OnThemeShowColumnHeaders)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_COLUMN_HEADERS, OnUpdateThemeShowColumnHeaders)
+	ON_COMMAND(ID_THEME_HIDE_EMPTY_RESULTS, OnThemeHideEmptyResults)
+	ON_UPDATE_COMMAND_UI(ID_THEME_HIDE_EMPTY_RESULTS, OnUpdateThemeHideEmptyResults)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
 	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHP_TRANSPARENCY, OnUpdateThemeShpTransparency)
@@ -1908,6 +1910,16 @@ void CMainFrame::OnThemeShowColumnHeaders()
 void CMainFrame::OnUpdateThemeShowColumnHeaders(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::show_column_headers() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeHideEmptyResults()
+{
+	theme::set_hide_empty_results(!theme::hide_empty_results());
+}
+
+void CMainFrame::OnUpdateThemeHideEmptyResults(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::hide_empty_results() ? 1 : 0);
 }
 
 void CMainFrame::OnThemeAlphaColor()

@@ -28,6 +28,7 @@
 #define IDD_FPS_CUSTOM                  147
 #define IDD_VXL_TURNTABLE               148
 #define IDD_SEARCH_ON_DISK              149
+#define IDD_LOAD_PAL                    150
 #define IDC_DUNE2                       1000
 #define IDC_TD_PRIMARY                  1001
 #define IDC_CY                          1001
@@ -221,6 +222,10 @@
 #define IDC_VXL_AO_STRENGTH_VALUE       1214
 #define IDC_VXL_AO_QUALITY_LABEL        1215
 #define IDC_VXL_AO_QUALITY              1216
+#define IDC_LOADPAL_FILTER_LABEL        1217
+#define IDC_LOADPAL_FILTER              1218
+#define IDC_LOADPAL_LIST                1219
+#define IDC_LOADPAL_BROWSE              1220
 #define ID_VIEW_WSA                     32778
 #define ID_POPUP_DELETE                 32780
 #define ID_POPUP_EXTRACT                32781
@@ -1533,6 +1538,7 @@
 #define ID_THEME_INTERP_XBR4X           41053
 #define ID_THEME_INTERP_NNEDI2X         41054
 #define ID_THEME_INTERP_NNEDI4X         41055
+#define ID_THEME_HIDE_EMPTY_RESULTS     41056
 #define ID_THEME_SHP_TRANSPARENCY       41008
 #define ID_THEME_USE_CHECKERBOARD       41010
 #define ID_THEME_USE_EXTERNAL_PROGRAMS  41011

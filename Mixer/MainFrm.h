@@ -94,6 +94,9 @@ public:
 	void reload_pal_paths();
 	t_pal_map_list& pal_map_list_mut() { return m_pal_map_list; }
 	t_pal_list& pal_list_mut() { return m_pal_list; }
+	// Current global palette index into m_pal_list; -1 means default (no
+	// override). Used by the Load PAL dialog to snapshot/revert state.
+	int get_palette() const { return m_palette_i; }
 	BOOL OnIdle(LONG lCount);
 	void close_ds();
 	void open_ds();
@@ -321,6 +324,7 @@ protected:
 	afx_msg void OnUpdateSettingsDirExe(CCmdUI* pCmdUI);
 	afx_msg void OnThemeShowGrid();
 	afx_msg void OnThemeShowColumnHeaders();
+	afx_msg void OnThemeHideEmptyResults();
 	afx_msg void OnThemeAlphaColor();
 	afx_msg void OnThemeShpTransparency();
 	afx_msg void OnUpdateThemeShpTransparency(CCmdUI* pCmdUI);
@@ -332,6 +336,7 @@ protected:
 	afx_msg void OnUpdateThemeDark(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeShowGrid(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeShowColumnHeaders(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeHideEmptyResults(CCmdUI* pCmdUI);
 	afx_msg void OnThemeInterpNearest();
 	afx_msg void OnThemeInterpBilinear();
 	afx_msg void OnThemeInterpBicubic();

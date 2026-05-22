@@ -188,6 +188,7 @@ BEGIN
         END
         MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
         MENUITEM "Show Column &Headers",        ID_THEME_SHOW_COLUMN_HEADERS
+        MENUITEM "Hide Results When Search Is &Empty", ID_THEME_HIDE_EMPTY_RESULTS
         MENUITEM SEPARATOR
         POPUP "&Image"
         BEGIN
@@ -454,6 +455,19 @@ BEGIN
     PUSHBUTTON      "Close",IDCANCEL,263,213,50,14
 END
 
+IDD_LOAD_PAL DIALOGEX 0, 0, 360, 260
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Load palette"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
+BEGIN
+    LTEXT           "Filter:",IDC_LOADPAL_FILTER_LABEL,7,9,22,8
+    EDITTEXT        IDC_LOADPAL_FILTER,33,7,320,14,ES_AUTOHSCROLL
+    CONTROL         "List1",IDC_LOADPAL_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,28,346,205
+    PUSHBUTTON      "Browse disk...",IDC_LOADPAL_BROWSE,7,239,60,14
+    DEFPUSHBUTTON   "OK",IDOK,246,239,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,303,239,50,14
+END
+
 IDD_SEARCH_IN_PANE DIALOGEX 0, 0, 200, 160
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "Search in current location"
@@ -603,6 +617,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_LOAD_PAL, DIALOG
+    BEGIN
+    END
+
     IDD_SEARCH_IN_PANE, DIALOG
     BEGIN
     END
@@ -713,6 +731,11 @@ BEGIN
     0
 END
 
+IDD_LOAD_PAL AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -767,8 +790,10 @@ BEGIN
     ID_THEME_VXL_SS_4       "4x supersampling. Default. Good balance of quality and speed."
     ID_THEME_VXL_SS_8       "8x supersampling. Smoother edges, more CPU."
     ID_THEME_VXL_SS_16      "16x supersampling. Highest quality, heaviest CPU cost."
-    ID_THEME_SHOW_COLUMN_HEADERS 
+    ID_THEME_SHOW_COLUMN_HEADERS
                             "Toggle the Name/Type/Size/Description column header bar on list views"
+    ID_THEME_HIDE_EMPTY_RESULTS
+                            "When on, Search in current location and Load PAL show nothing until you type a filter"
     ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
     ID_THEME_PARALLEL_EXTRACT 
                             "Extract batch selections in parallel (faster on SSDs)"

@@ -59,6 +59,7 @@
 #include <numbers>
 #include "theme.h"
 #include "TurntableDlg.h"
+#include "LoadPalDlg.h"
 // gif.h is a public-domain single-header animated-GIF encoder by Charlie
 // Tangora. Vendored under Mixer/gif.h. Used only by OnPlayerTurntable below;
 // no other TU should include it (it defines functions in-header without
@@ -7432,136 +7433,13 @@ void CXCCFileView::OnLoadPal()
 {
 	if (!m_is_open || !is_paletted_file())
 		return;
-	// Same MIX-popup-then-Browse pattern as OnVxlHvaLoad: list every .pal
-	// entry in the source MIX with a similarity-filtered name, plus a
-	// Browse-disk fallback.
-	const int k_browse_cmd = 1;
-	const int k_mix_base   = 100;
-	struct mix_choice { int id; string label; };
-	std::vector<mix_choice> mix_choices;
-	string file_base;
-	{
-		Cfname fn(m_fname);
-		file_base = fn.get_ftitle();
-		for (auto& c : file_base) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-	}
-	auto similarity = [](const string& a, const string& b) -> double {
-		if (a.empty() || b.empty()) return 0.0;
-		size_t i = 0;
-		const size_t m = (std::min)(a.size(), b.size());
-		while (i < m && a[i] == b[i]) i++;
-		return static_cast<double>(i) / static_cast<double>((std::max)(a.size(), b.size()));
-	};
-	// PAL pairing in Westwood data clusters by 4-letter stem (flashmuz <->
-	// flashbeam, tibtree <-> tibsnow). The HVA similarity score gates on
-	// proportion of full base, which is too strict here — bump the rule to
-	// "first 4 chars match" with the score as a fallback for shorter names.
-	auto pal_likely = [&](const string& shp_base, const string& pal_base) {
-		if (shp_base.size() >= 4 && pal_base.size() >= 4)
-			return shp_base.compare(0, 4, pal_base, 0, 4) == 0;
-		return similarity(shp_base, pal_base) >= 0.8;
-	};
-	// Likely matches (similarity >= 0.8 prefix score vs SHP basename) live
-	// at the top level. Everything else collapses under an "All PALs"
-	// submenu so the default surface stays small but every PAL in the MIX
-	// is still reachable in two clicks.
-	std::vector<mix_choice> likely;
-	std::vector<mix_choice> other;
-	if (m_source_mix)
-	{
-		for (size_t i = 0; i < m_source_mix->get_c_files(); i++)
-		{
-			const int id = m_source_mix->get_id(static_cast<int>(i));
-			string name = m_source_mix->get_name(id);
-			if (name.size() < 4)
-				continue;
-			string lc = name;
-			for (auto& c : lc) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-			if (lc.substr(lc.size() - 4) != ".pal")
-				continue;
-			string pal_base = lc.substr(0, lc.size() - 4);
-			const bool match = !file_base.empty() && pal_likely(file_base, pal_base);
-			(match ? likely : other).push_back({ id, name });
-		}
-	}
-	auto by_name = [](const mix_choice& a, const mix_choice& b) {
-		return _stricmp(a.label.c_str(), b.label.c_str()) < 0;
-	};
-	std::sort(likely.begin(), likely.end(), by_name);
-	std::sort(other.begin(), other.end(), by_name);
-	// Flat indices into mix_choices map 1:1 with k_mix_base commands.
-	// Order: likely first, then other (in submenu). Same flat indexing
-	// works for both because the command IDs are what the chosen value
-	// returns; the menu structure is just presentation.
-	mix_choices.insert(mix_choices.end(), likely.begin(), likely.end());
-	const size_t other_start = mix_choices.size();
-	mix_choices.insert(mix_choices.end(), other.begin(), other.end());
-
-	int chosen = k_browse_cmd;
-	if (!mix_choices.empty())
-	{
-		CMenu menu;
-		menu.CreatePopupMenu();
-		// Top-level: likely matches.
-		for (size_t i = 0; i < other_start; i++)
-			menu.AppendMenu(MF_STRING, k_mix_base + i, mix_choices[i].label.c_str());
-		// "All PALs" submenu for everything else. CMenu destructor would
-		// free the HMENU we attach, so Detach() after AppendMenu hands
-		// ownership to the parent menu (which already owns sub-popups).
-		CMenu all_menu;
-		const bool have_other = (other_start < mix_choices.size());
-		if (have_other)
-		{
-			all_menu.CreatePopupMenu();
-			for (size_t i = other_start; i < mix_choices.size(); i++)
-				all_menu.AppendMenu(MF_STRING, k_mix_base + i, mix_choices[i].label.c_str());
-			if (other_start > 0)
-				menu.AppendMenu(MF_SEPARATOR);
-			menu.AppendMenu(MF_POPUP, reinterpret_cast<UINT_PTR>(all_menu.GetSafeHmenu()), "All PALs");
-			all_menu.Detach();
-		}
-		menu.AppendMenu(MF_SEPARATOR);
-		menu.AppendMenu(MF_STRING, k_browse_cmd, "Browse disk...");
-		CRect br;
-		m_load_pal_btn.GetWindowRect(&br);
-		chosen = menu.TrackPopupMenu(
-			TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-			br.left, br.bottom, this);
-		if (chosen == 0)
-			return;
-	}
-
-	Cvirtual_binary data;
-	string source_label;
-	if (chosen >= k_mix_base && chosen < k_mix_base + static_cast<int>(mix_choices.size()))
-	{
-		const mix_choice& c = mix_choices[chosen - k_mix_base];
-		data = m_source_mix->get_vdata(c.id);
-		source_label = c.label;
-		if (data.size() == 0)
-		{
-			AfxMessageBox("Could not read the selected PAL entry from the MIX.", MB_ICONERROR);
-			return;
-		}
-	}
-	else
-	{
-		CFileDialog dlg(TRUE, "pal", NULL,
-			OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
-			"PAL files (*.pal)|*.pal|All files (*.*)|*.*||", this);
-		if (dlg.DoModal() != IDOK)
-			return;
-		const string path = static_cast<const char*>(dlg.GetPathName());
-		if (data.load(path) || data.size() == 0)
-		{
-			AfxMessageBox("Could not read the selected PAL file.", MB_ICONERROR);
-			return;
-		}
-		source_label = static_cast<Cfname>(path).get_fname();
-	}
-
-	if (!apply_loaded_pal(data, source_label))
-		AfxMessageBox("File is not a valid PAL.", MB_ICONERROR);
+	// Searchable picker dialog. Replaces the unmanageably-tall TrackPopupMenu
+	// that scrolled hundreds of entries off-screen on PAL-rich MIXes (ra2.mix
+	// etc.). Dialog handles ranking, filter, live preview, Browse disk and
+	// Cancel-revert internally; we just open it.
+	CLoadPalDlg dlg(this);
+	dlg.set(GetMainFrame(), this, m_source_mix, m_fname);
+	dlg.DoModal();
 }
 
 void CXCCFileView::OnPlayerGridSel()

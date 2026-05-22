@@ -20,7 +20,8 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
-	afx_msg void OnFind();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	afx_msg void OnFilterChange();
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDestroy();
@@ -36,12 +37,14 @@ private:
 		int id;
 	};
 
-	bool match_one(const string& name, const string& filter);
-	void apply_sort();
+	void populate_all();
+	void apply_filter_and_sort();
 	void repopulate_list();
+	void activate_selected();
 
 	CXCCMixerView* m_pane = nullptr;
-	vector<t_match> m_matches;
+	vector<t_match> m_all;     // every pane entry, snapshotted in OnInitDialog
+	vector<int> m_visible;     // indices into m_all, post-filter, sorted
 	CString m_reg_key;
 	int m_sort_column = 0;     // 0 = Name, 1 = Size
 	bool m_sort_descending = false;
