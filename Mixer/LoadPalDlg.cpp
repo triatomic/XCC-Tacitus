@@ -75,6 +75,7 @@ BEGIN_MESSAGE_MAP(CLoadPalDlg, ETSLayoutDialog)
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_LOADPAL_LIST, OnGetdispinfoList)
 	ON_WM_DESTROY()
 	ON_WM_CTLCOLOR()
+	ON_WM_SHOWWINDOW()
 END_MESSAGE_MAP()
 
 HBRUSH CLoadPalDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -83,6 +84,19 @@ HBRUSH CLoadPalDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 		pWnd ? pWnd->GetSafeHwnd() : NULL, nCtlColor))
 		return br;
 	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+}
+
+void CLoadPalDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	// Final flash insurance: re-apply the DWM dark titlebar attribute at
+	// the moment the window is about to be shown. Even with the
+	// OnInitDialog apply_titlebar + SWP_FRAMECHANGED, some Windows builds
+	// still composed one light frame before the attribute took effect.
+	// Setting it again here gives DWM the value during the very show
+	// transition. Cheap (one DwmSetWindowAttribute call) and idempotent.
+	if (bShow)
+		theme::apply_titlebar(GetSafeHwnd());
+	ETSLayoutDialog::OnShowWindow(bShow, nStatus);
 }
 
 void CLoadPalDlg::set(CMainFrame* main_frame, CXCCFileView* view,
@@ -98,6 +112,19 @@ void CLoadPalDlg::set(CMainFrame* main_frame, CXCCFileView* view,
 
 BOOL CLoadPalDlg::OnInitDialog()
 {
+	// Paint the dark titlebar via DWM BEFORE anything else paints. DWM
+	// immersive dark mode latches per-frame; setting it after the first
+	// paint produces a light-titlebar flash. Same reason child theming
+	// happens under SetRedraw(FALSE) further down. See feedback on
+	// dialog flashbang.
+	theme::apply_titlebar(GetSafeHwnd());
+	// Suppress all paint while we build out the dialog (layout + child
+	// theming + listview populate). Final SetRedraw(TRUE) + RedrawWindow
+	// at the bottom flushes one cohesive themed paint instead of the
+	// light->dark flash the previous (theme-after-populate) order
+	// produced.
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_LOADPAL_FILTER_LABEL, NORESIZE)
@@ -115,6 +142,15 @@ BOOL CLoadPalDlg::OnInitDialog()
 	m_list.InsertColumn(1, "Source");
 	m_list.InsertColumn(2, "Match");
 	m_list.set_size(0);
+
+	// Theme the dialog (and listview header) BEFORE the listview is
+	// populated. apply_dialog walks children and runs uxtheme calls that
+	// override class-default colors; doing it after a populated paint
+	// produced a visible light-mode flash. With SetRedraw(FALSE) above,
+	// neither this nor the populate trigger an intermediate paint.
+	theme::apply_dialog(GetSafeHwnd());
+	theme::apply_column_headers(m_list.GetSafeHwnd());
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "load_pal_dlg_v1");
 
 	// Snapshot the active palette index so OnCancel can revert. Captured
 	// before build_rows() so even if construction somehow flipped state
@@ -153,12 +189,16 @@ BOOL CLoadPalDlg::OnInitDialog()
 		SetWindowText(title.c_str());
 	}
 
-	theme::apply_dialog(GetSafeHwnd());
-	theme::apply_column_headers(m_list.GetSafeHwnd());
-	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "load_pal_dlg_v1");
-
 	// Focus the filter edit so the user can start typing immediately.
 	m_filter_edit.SetFocus();
+
+	// Release the redraw lock and force a single flush so DoModal's
+	// first show paints fully themed instead of producing a light->dark
+	// flash. RDW_ALLCHILDREN reaches the listview / edit / buttons in
+	// one pass.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return FALSE;
 }
 

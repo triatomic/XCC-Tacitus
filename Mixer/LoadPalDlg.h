@@ -43,6 +43,7 @@ protected:
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDestroy();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	DECLARE_MESSAGE_MAP()
 
 private:

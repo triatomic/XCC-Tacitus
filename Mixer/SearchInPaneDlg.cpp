@@ -30,6 +30,7 @@ BEGIN_MESSAGE_MAP(CSearchInPaneDlg, ETSLayoutDialog)
 	ON_WM_DESTROY()
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_LIST, OnGetdispinfoList)
 	ON_WM_CTLCOLOR()
+	ON_WM_SHOWWINDOW()
 END_MESSAGE_MAP()
 
 HBRUSH CSearchInPaneDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -39,6 +40,15 @@ HBRUSH CSearchInPaneDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	return ETSLayoutDialog::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
+void CSearchInPaneDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	// Re-assert DWM dark titlebar during the show transition. See
+	// CLoadPalDlg::OnShowWindow for the rationale.
+	if (bShow)
+		theme::apply_titlebar(GetSafeHwnd());
+	ETSLayoutDialog::OnShowWindow(bShow, nStatus);
+}
+
 void CSearchInPaneDlg::set(CXCCMixerView* pane)
 {
 	m_pane = pane;
@@ -46,6 +56,13 @@ void CSearchInPaneDlg::set(CXCCMixerView* pane)
 
 BOOL CSearchInPaneDlg::OnInitDialog()
 {
+	// Apply dark titlebar via DWM and suppress paint until everything is
+	// laid out + themed + populated. Same flash mitigation as CLoadPalDlg
+	// — without these the first paint shows light defaults for one frame
+	// before apply_dialog's repaint catches up.
+	theme::apply_titlebar(GetSafeHwnd());
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_FILENAME_STATIC, NORESIZE)
@@ -62,6 +79,13 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 	m_list.InsertColumn(1, "Size");
 	m_list.set_size(0);
 
+	// Theme before populate so the listview's rows arrive into a
+	// dark-themed control. Order matters for the flash fix — see
+	// CLoadPalDlg::OnInitDialog comment.
+	theme::apply_dialog(GetSafeHwnd());
+	theme::apply_column_headers(m_list.GetSafeHwnd());
+	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
+
 	// LoadPalDlg-style: pre-populate every entry in the pane on open, then
 	// narrow live as the user types in the filter box. The previous
 	// type-then-Search flow forced an extra Enter/click for the common case
@@ -76,10 +100,6 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 	m_list.SetColumnWidth(0, LVSCW_AUTOSIZE_USEHEADER);
 	m_list.SetColumnWidth(1, LVSCW_AUTOSIZE_USEHEADER);
 
-	theme::apply_dialog(GetSafeHwnd());
-	theme::apply_column_headers(m_list.GetSafeHwnd());
-	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_in_pane");
-
 	// The OK button used to drive the search; with live filtering there's
 	// nothing for it to do, so hide it. ESC / Close still works via IDCANCEL.
 	if (CWnd* ok = GetDlgItem(IDOK))
@@ -93,6 +113,11 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 		edit->SetFocus();
 		edit->SetSel(0, -1);
 	}
+
+	// Release redraw + flush one fully-themed paint.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return FALSE; // we set focus ourselves
 }
 

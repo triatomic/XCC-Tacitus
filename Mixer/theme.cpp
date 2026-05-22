@@ -1260,6 +1260,22 @@ namespace theme
 		HRESULT hr = ::DwmSetWindowAttribute(h_top_level, 20, &dark, sizeof(dark));
 		if (FAILED(hr))
 			::DwmSetWindowAttribute(h_top_level, 19, &dark, sizeof(dark));
+		// DWM composition lazily picks up the new attribute. For hidden
+		// dialogs that are about to be shown, the first composed frame can
+		// still render with the previous (light) titlebar — the "flashbang"
+		// reports on the v10.80 Load PAL / Ctrl+F dialogs were this:
+		// apply_titlebar ran during OnInitDialog while the window was still
+		// hidden, then MFC's post-init ShowWindow produced one light frame
+		// before DWM re-composed dark. Forcing SWP_FRAMECHANGED makes the
+		// next composed frame honor the attribute. Only do it for hidden
+		// windows; on visible windows the existing repaint path already
+		// catches the change and an extra SetWindowPos would flicker.
+		if (!::IsWindowVisible(h_top_level))
+		{
+			::SetWindowPos(h_top_level, NULL, 0, 0, 0, 0,
+				SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+				SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+		}
 	}
 
 	void apply_window(HWND h)
