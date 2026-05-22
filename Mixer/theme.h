@@ -432,6 +432,14 @@ namespace theme
 	void apply_titlebar(HWND h_top_level);      // DWM immersive dark title bar
 	void apply_app_mode();                      // global SetPreferredAppMode
 
+	// Install a parent-side WM_NOTIFY interceptor that paints child trackbars
+	// (msctls_trackbar32 / CSliderCtrl) with dark channel + thumb colors via
+	// NM_CUSTOMDRAW. apply_dialog already installs this on every themed
+	// dialog; call directly for non-dialog parents (e.g. CXCCFileView's
+	// player slider, which is parented to the view, not a dialog).
+	// Idempotent.
+	void install_trackbar_parent_subclass(HWND h_parent);
+
 	// Apply dark-mode treatment to a whole dialog: immersive title bar,
 	// dark scrollbars/headers on the dialog itself and every child window,
 	// listview/header subtreatments where applicable. Safe to call

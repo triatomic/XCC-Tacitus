@@ -198,6 +198,8 @@
     </ClCompile>
     <ClCompile Include="LoadPalDlg.cpp">
     </ClCompile>
+    <ClCompile Include="ColorPickerDlg.cpp">
+    </ClCompile>
     <ClCompile Include="SearchStringDlg.cpp">
     </ClCompile>
     <ClCompile Include="PalPathsDlg.cpp">
@@ -269,6 +271,7 @@
     <ClInclude Include="SearchInPaneDlg.h" />
     <ClInclude Include="SearchOnDiskDlg.h" />
     <ClInclude Include="LoadPalDlg.h" />
+    <ClInclude Include="ColorPickerDlg.h" />
     <ClInclude Include="SearchStringDlg.h" />
     <ClInclude Include="PalPathsDlg.h" />
     <ClInclude Include="AudioPlayerDlg.h" />

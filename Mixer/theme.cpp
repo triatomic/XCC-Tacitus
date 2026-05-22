@@ -2136,6 +2136,337 @@ namespace theme
 		::InvalidateRect(h, NULL, TRUE);
 	}
 
+	// ---------- Edit-control dark border (NppDarkMode CustomBorderSubclass port) ----------
+	//
+	// Standard Edit controls (single-line WC_EDIT) with WS_EX_CLIENTEDGE paint
+	// a hardcoded light 1px sunken frame in dark mode — uxtheme draws the
+	// frame even after AllowDarkModeForWindow + DarkMode_Explorer, producing
+	// the "light-bordered edit on dark dialog" look. Filter edits in
+	// CLoadPalDlg / CSearchInPaneDlg made this glaring.
+	//
+	// Fix mirrors NppDarkMode.cpp:1849-1995 (CustomBorderSubclass) + the
+	// install dispatcher at :3087-3128: strip WS_EX_CLIENTEDGE in dark mode
+	// so uxtheme stops drawing the light frame, then own WM_NCPAINT to
+	// repaint the border ourselves (inner 1px in bg(), outer 1px in
+	// border() or accent() on focus/hover). WM_NCCALCSIZE inflates the
+	// client rect inward by SM_CXEDGE/CYEDGE so the text doesn't kiss our
+	// border. WM_MOUSEMOVE/WM_MOUSELEAVE track hover via TrackMouseEvent for
+	// the accent-color hover state. WS_EX_CLIENTEDGE is restored on theme
+	// flip back to light by light-mode default path (uninstall not needed —
+	// the subclass no-ops when !is_dark()).
+	//
+	// Edge metrics are queried per-process from SM_CXEDGE / SM_CYEDGE /
+	// SM_CXVSCROLL / SM_CYVSCROLL. Mixer doesn't ship DPI-per-monitor (the
+	// app is Win32-MFC vintage), so the once-at-install snapshot is fine —
+	// no WM_DPICHANGED handling like Npp needs.
+	struct dark_edit_metrics
+	{
+		LONG x_edge   = ::GetSystemMetrics(SM_CXEDGE);
+		LONG y_edge   = ::GetSystemMetrics(SM_CYEDGE);
+		LONG x_scroll = ::GetSystemMetrics(SM_CXVSCROLL);
+		LONG y_scroll = ::GetSystemMetrics(SM_CYVSCROLL);
+	};
+
+	static LRESULT CALLBACK dark_edit_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.dark_edit_orig_proc";
+		static const wchar_t* k_metrics   = L"xcc.dark_edit_metrics";
+		static const wchar_t* k_hot       = L"xcc.dark_edit_hot";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		dark_edit_metrics* m = reinterpret_cast<dark_edit_metrics*>(::GetPropW(h, k_metrics));
+
+		if (is_dark() && m)
+		{
+			switch (msg)
+			{
+			case WM_NCPAINT:
+			{
+				// Let the default proc paint the non-client area first so any
+				// scrollbar / system widgets render, then overpaint the border
+				// rect with our colors. Same order Npp uses.
+				if (orig) ::CallWindowProcW(orig, h, msg, wp, lp);
+				HDC hdc = ::GetWindowDC(h);
+				if (!hdc) return 0;
+				RECT rc{};
+				::GetClientRect(h, &rc);
+				// Expand client rect to window rect by adding the edge inset we
+				// stole back in WM_NCCALCSIZE, plus the scrollbar widths if the
+				// control has WS_VSCROLL/WS_HSCROLL.
+				rc.right += 2 * m->x_edge;
+				rc.bottom += 2 * m->y_edge;
+				const LONG_PTR style = ::GetWindowLongPtrW(h, GWL_STYLE);
+				if (style & WS_VSCROLL) rc.right += m->x_scroll;
+				if (style & WS_HSCROLL) rc.bottom += m->y_scroll;
+
+				const bool enabled = ::IsWindowEnabled(h) == TRUE;
+				const bool has_focus = ::GetFocus() == h;
+				const bool is_hot = ::GetPropW(h, k_hot) != NULL;
+
+				// Inner 1px: paint with dialog bg so the frame visually melts
+				// into the surrounding edit fill instead of producing a double
+				// border. Matches Npp's enabled vs disabled split.
+				HPEN inner = ::CreatePen(PS_SOLID, 1, enabled ? bg() : bg_alt());
+				RECT rc_inner = rc;
+				::InflateRect(&rc_inner, -1, -1);
+				HGDIOBJ old_pen = ::SelectObject(hdc, inner);
+				HGDIOBJ old_brush = ::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+				::Rectangle(hdc, rc_inner.left, rc_inner.top, rc_inner.right, rc_inner.bottom);
+
+				// Outer 1px: border() normally, accent() on focus or hover.
+				HPEN outer = ::CreatePen(PS_SOLID, 1,
+					(has_focus || is_hot) ? accent() :
+					(enabled ? border() : bg_alt()));
+				::SelectObject(hdc, outer);
+				::Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+
+				::SelectObject(hdc, old_brush);
+				::SelectObject(hdc, old_pen);
+				::DeleteObject(inner);
+				::DeleteObject(outer);
+				::ReleaseDC(h, hdc);
+				return 0;
+			}
+			case WM_NCCALCSIZE:
+			{
+				// Steal the area uxtheme would have used for its light frame
+				// so we have somewhere to paint our dark border. Without this,
+				// our WM_NCPAINT would draw over the first row of text pixels.
+				LPRECT prc = reinterpret_cast<LPRECT>(lp);
+				if (prc)
+					::InflateRect(prc, -m->x_edge, -m->y_edge);
+				break;
+			}
+			case WM_MOUSEMOVE:
+			{
+				if (::GetFocus() == h) break; // focus owns the accent already
+				TRACKMOUSEEVENT tme{};
+				tme.cbSize = sizeof(tme);
+				tme.dwFlags = TME_LEAVE;
+				tme.hwndTrack = h;
+				tme.dwHoverTime = HOVER_DEFAULT;
+				::TrackMouseEvent(&tme);
+				if (!::GetPropW(h, k_hot))
+				{
+					::SetPropW(h, k_hot, reinterpret_cast<HANDLE>(1));
+					::SetWindowPos(h, NULL, 0, 0, 0, 0,
+						SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+				}
+				break;
+			}
+			case WM_MOUSELEAVE:
+			{
+				if (::GetPropW(h, k_hot))
+				{
+					::RemovePropW(h, k_hot);
+					::SetWindowPos(h, NULL, 0, 0, 0, 0,
+						SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+				}
+				break;
+			}
+			case WM_SETFOCUS:
+			case WM_KILLFOCUS:
+			{
+				// Repaint the border so the focus state's accent color
+				// appears/disappears. CallWindowProc first so the caret /
+				// selection state updates, then frame-invalidate.
+				LRESULT r = orig
+					? ::CallWindowProcW(orig, h, msg, wp, lp)
+					: ::DefWindowProcW(h, msg, wp, lp);
+				::SetWindowPos(h, NULL, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+				return r;
+			}
+			}
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			delete m;
+			::RemovePropW(h, k_metrics);
+			::RemovePropW(h, k_hot);
+			::RemovePropW(h, L"xcc.dark_edit_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return orig
+			? ::CallWindowProcW(orig, h, msg, wp, lp)
+			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	static void install_dark_edit_subclass(HWND h)
+	{
+		if (!h) return;
+		static const wchar_t* k_subclassed = L"xcc.dark_edit_subclass";
+		static const wchar_t* k_orig_proc  = L"xcc.dark_edit_orig_proc";
+		static const wchar_t* k_metrics    = L"xcc.dark_edit_metrics";
+		if (::GetPropW(h, k_subclassed))
+			return;
+		LONG_PTR orig = ::GetWindowLongPtrW(h, GWLP_WNDPROC);
+		::SetPropW(h, k_orig_proc, reinterpret_cast<HANDLE>(orig));
+		::SetPropW(h, k_metrics, reinterpret_cast<HANDLE>(new dark_edit_metrics));
+		::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(dark_edit_proc));
+		::SetPropW(h, k_subclassed, reinterpret_cast<HANDLE>(1));
+		// Force a non-client recalc + paint NOW so our border shows on the
+		// initial dialog paint. Without this, sync_edit_client_edge's earlier
+		// SWP_FRAMECHANGED happened before our subclass existed, so the first
+		// WM_NCPAINT went to the default proc (which drew nothing because
+		// WS_EX_CLIENTEDGE was already stripped). Border only appeared after
+		// the user tabbed away and back. Now the border paints on open.
+		::SetWindowPos(h, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED |
+			SWP_NOACTIVATE);
+		::RedrawWindow(h, NULL, NULL,
+			RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+	}
+
+	// Theme-aware sync of the edit's WS_EX_CLIENTEDGE bit. In dark mode the
+	// uxtheme-drawn light sunken frame fights our WM_NCPAINT, so strip the
+	// style. In light mode restore it so the control gets the standard
+	// system look. SWP_FRAMECHANGED forces non-client recalc + repaint.
+	// Per Npp this is applied to every edit, not only the subclassed ones —
+	// the WS_EX_CLIENTEDGE removal alone is most of the visible improvement,
+	// and the subclass painting layers a proper border on top.
+	static void sync_edit_client_edge(HWND h)
+	{
+		if (!h) return;
+		LONG_PTR ex = ::GetWindowLongPtrW(h, GWL_EXSTYLE);
+		const bool want_edge = !is_dark();
+		const bool has_edge = (ex & WS_EX_CLIENTEDGE) != 0;
+		if (want_edge == has_edge) return;
+		if (want_edge) ex |= WS_EX_CLIENTEDGE;
+		else           ex &= ~WS_EX_CLIENTEDGE;
+		::SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
+		::SetWindowPos(h, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED |
+			SWP_NOACTIVATE);
+	}
+
+	// ---------- Trackbar (msctls_trackbar32) dark custom-draw ----------
+	//
+	// Trackbars (CSliderCtrl) paint a hardcoded light channel + thumb on
+	// dark dialogs because uxtheme's trackbar parts ignore the dark mode
+	// flag. NppDarkMode handles this via parent-side NM_CUSTOMDRAW
+	// reflection (NppDarkMode.cpp:3404-3481 darkTrackBarNotifyCustomDraw,
+	// dispatched from a parent SetWindowSubclass that intercepts
+	// WM_NOTIFY).
+	//
+	// We do the same — install a parent-side GWLP_WNDPROC subclass on each
+	// dialog themed via apply_dialog, intercept WM_NOTIFY → NM_CUSTOMDRAW
+	// for trackbar children, fill the channel + thumb with dark colors,
+	// return CDRF_SKIPDEFAULT so uxtheme doesn't repaint over us. Tick
+	// marks aren't currently styled — all Mixer trackbars use TBS_NOTICKS
+	// so there's nothing visible to fix there.
+	static LRESULT trackbar_custom_draw(NMCUSTOMDRAW* nmcd)
+	{
+		switch (nmcd->dwDrawStage)
+		{
+		case CDDS_PREPAINT:
+			return is_dark() ? CDRF_NOTIFYITEMDRAW : CDRF_DODEFAULT;
+		case CDDS_ITEMPREPAINT:
+			if (!is_dark())
+				return CDRF_DODEFAULT;
+			switch (nmcd->dwItemSpec)
+			{
+			case TBCD_CHANNEL:
+			{
+				// Channel: filled rect in bg_alt (the "elevated surface"
+				// color, matches edit/listview bg) with a 1px border in
+				// theme::border() so the channel reads as a distinct
+				// rail rather than a flat band.
+				const bool enabled = ::IsWindowEnabled(nmcd->hdr.hwndFrom) == TRUE;
+				::FillRect(nmcd->hdc, &nmcd->rc, enabled ? bg_alt_brush() : bg_brush());
+				HPEN pen = ::CreatePen(PS_SOLID, 1, border());
+				HGDIOBJ op = ::SelectObject(nmcd->hdc, pen);
+				HGDIOBJ ob = ::SelectObject(nmcd->hdc, ::GetStockObject(NULL_BRUSH));
+				::Rectangle(nmcd->hdc, nmcd->rc.left, nmcd->rc.top,
+					nmcd->rc.right, nmcd->rc.bottom);
+				::SelectObject(nmcd->hdc, ob);
+				::SelectObject(nmcd->hdc, op);
+				::DeleteObject(pen);
+				return CDRF_SKIPDEFAULT;
+			}
+			case TBCD_THUMB:
+			{
+				// Thumb: solid accent fill with a 1px border. Win11 trackbars
+				// use a circular thumb but the rect Win32 hands us is the
+				// bounding box; FillRect + border is close enough to the
+				// vanilla msctls look and reads correctly in dark.
+				const bool enabled = ::IsWindowEnabled(nmcd->hdr.hwndFrom) == TRUE;
+				const bool pressed = (nmcd->uItemState & CDIS_SELECTED) != 0;
+				COLORREF fill_c = !enabled ? bg_alt()
+					: pressed ? text() : accent();
+				HBRUSH fill = ::CreateSolidBrush(fill_c);
+				::FillRect(nmcd->hdc, &nmcd->rc, fill);
+				::DeleteObject(fill);
+				HPEN pen = ::CreatePen(PS_SOLID, 1, enabled ? text() : border());
+				HGDIOBJ op = ::SelectObject(nmcd->hdc, pen);
+				HGDIOBJ ob = ::SelectObject(nmcd->hdc, ::GetStockObject(NULL_BRUSH));
+				::Rectangle(nmcd->hdc, nmcd->rc.left, nmcd->rc.top,
+					nmcd->rc.right, nmcd->rc.bottom);
+				::SelectObject(nmcd->hdc, ob);
+				::SelectObject(nmcd->hdc, op);
+				::DeleteObject(pen);
+				return CDRF_SKIPDEFAULT;
+			}
+			default:
+				return CDRF_DODEFAULT;
+			}
+		}
+		return CDRF_DODEFAULT;
+	}
+
+	// Parent-dialog subclass that intercepts trackbar NM_CUSTOMDRAW and
+	// routes it through trackbar_custom_draw. Installed by apply_dialog on
+	// every themed dialog. Idempotent.
+	static LRESULT CALLBACK dark_parent_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		static const wchar_t* k_orig_proc = L"xcc.dark_parent_orig_proc";
+		WNDPROC orig = reinterpret_cast<WNDPROC>(::GetPropW(h, k_orig_proc));
+		if (msg == WM_NOTIFY)
+		{
+			NMHDR* hdr = reinterpret_cast<NMHDR*>(lp);
+			if (hdr && hdr->code == NM_CUSTOMDRAW && hdr->hwndFrom)
+			{
+				char cls[32];
+				::GetClassNameA(hdr->hwndFrom, cls, sizeof(cls));
+				if (_stricmp(cls, "msctls_trackbar32") == 0)
+				{
+					LRESULT r = trackbar_custom_draw(
+						reinterpret_cast<NMCUSTOMDRAW*>(lp));
+					if (r != CDRF_DODEFAULT)
+						return r;
+				}
+			}
+		}
+		if (msg == WM_NCDESTROY)
+		{
+			::RemovePropW(h, L"xcc.dark_parent_subclass");
+			::RemovePropW(h, k_orig_proc);
+			::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig));
+		}
+		return orig
+			? ::CallWindowProcW(orig, h, msg, wp, lp)
+			: ::DefWindowProcW(h, msg, wp, lp);
+	}
+
+	static void install_dark_parent_subclass(HWND h)
+	{
+		if (!h) return;
+		static const wchar_t* k_subclassed = L"xcc.dark_parent_subclass";
+		static const wchar_t* k_orig_proc  = L"xcc.dark_parent_orig_proc";
+		if (::GetPropW(h, k_subclassed))
+			return;
+		LONG_PTR orig = ::GetWindowLongPtrW(h, GWLP_WNDPROC);
+		::SetPropW(h, k_orig_proc, reinterpret_cast<HANDLE>(orig));
+		::SetWindowLongPtrW(h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(dark_parent_proc));
+		::SetPropW(h, k_subclassed, reinterpret_cast<HANDLE>(1));
+	}
+
+	// Public alias for non-dialog parents (e.g. CXCCFileView's player band).
+	void install_trackbar_parent_subclass(HWND h_parent)
+	{
+		install_dark_parent_subclass(h_parent);
+	}
+
 	void apply_listview(HWND h_listview)
 	{
 		if (!h_listview)
@@ -2266,6 +2597,29 @@ namespace theme
 		// refuses owner-draw combos (their parents handle painting).
 		if (_stricmp(cls, "ComboBox") == 0)
 			subclass_combobox(h);
+		// Standard Edit controls — strip WS_EX_CLIENTEDGE in dark and
+		// install our own border subclass. Ported from NppDarkMode's
+		// CustomBorderSubclass — see install_dark_edit_subclass comment.
+		// Combobox-internal edit children (CBS_DROPDOWN) come through here
+		// too, but they're handled by combobox_subclass already; skip them
+		// here so we don't double-paint the combo's border. ID -1 is the
+		// magic value Win32 uses for combo's edit child.
+		if (_stricmp(cls, "Edit") == 0)
+		{
+			const int ctrl_id = ::GetDlgCtrlID(h);
+			if (ctrl_id != -1)
+			{
+				// Order matters: install the subclass BEFORE syncing
+				// WS_EX_CLIENTEDGE so the SWP_FRAMECHANGED that
+				// sync_edit_client_edge triggers routes WM_NCPAINT through
+				// our wndproc. Otherwise the first paint happens with the
+				// default proc + no border style and stays blank until the
+				// user changes focus.
+				if (is_dark())
+					install_dark_edit_subclass(h);
+				sync_edit_client_edge(h);
+			}
+		}
 		// Force redraw so any cached non-client decoration repaints with the
 		// new theme.
 		::InvalidateRect(h, NULL, TRUE);
@@ -2280,6 +2634,11 @@ namespace theme
 		// frame itself.
 		apply_titlebar(h_dialog);
 		apply_window(h_dialog);
+		// Install the parent-side WM_NOTIFY interceptor that handles trackbar
+		// (msctls_trackbar32) NM_CUSTOMDRAW so sliders render dark. Idempotent.
+		// Must run before EnumChildWindows so a trackbar's first paint goes
+		// through our handler.
+		install_dark_parent_subclass(h_dialog);
 		// Walk every descendant and apply per-control theming.
 		::EnumChildWindows(h_dialog, theme_child_proc, 0);
 		// Force a full repaint so backgrounds picked up via WM_CTLCOLOR* in

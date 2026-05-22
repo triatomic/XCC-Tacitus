@@ -60,6 +60,7 @@
 #include "theme.h"
 #include "TurntableDlg.h"
 #include "LoadPalDlg.h"
+#include "ColorPickerDlg.h"
 // gif.h is a public-domain single-header animated-GIF encoder by Charlie
 // Tangora. Vendored under Mixer/gif.h. Used only by OnPlayerTurntable below;
 // no other TU should include it (it defines functions in-header without
@@ -3520,6 +3521,11 @@ void CXCCFileView::player_enter()
 		theme::apply_window(m_player_fps_label.GetSafeHwnd());
 		theme::apply_window(m_player_fps_edit.GetSafeHwnd());
 		theme::apply_window(m_player_fps_spin.GetSafeHwnd());
+		// Wire dark trackbar custom-draw for the player slider. The slider
+		// is parented to the view (not a dialog), so apply_dialog doesn't
+		// reach it — install the parent-side WM_NOTIFY interceptor on the
+		// view directly. Idempotent so repeated player_enter calls are fine.
+		theme::install_trackbar_parent_subclass(GetSafeHwnd());
 
 		m_player_shadows.Create("Shadows", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_SHADOWS);
 		// 3-state pushbutton: click cycles Color → Checker → Pane bg.
@@ -6766,10 +6772,10 @@ void CXCCFileView::OnPlayerSideCustom()
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
-	CColorDialog dlg(m_player_side_custom_color, CC_FULLOPEN | CC_RGBINIT, this);
+	CColorPickerDlg dlg(m_player_side_custom_color, this);
 	if (dlg.DoModal() != IDOK)
 		return;
-	m_player_side_custom_color = dlg.GetColor();
+	m_player_side_custom_color = dlg.color();
 	m_player_side_idx = 8;
 	m_player_bgra_version++;
 	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
@@ -6807,10 +6813,10 @@ void CXCCFileView::OnVxlSideCustom()
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
-	CColorDialog dlg(m_vxl_side_custom_color, CC_FULLOPEN | CC_RGBINIT, this);
+	CColorPickerDlg dlg(m_vxl_side_custom_color, this);
 	if (dlg.DoModal() != IDOK)
 		return;
-	m_vxl_side_custom_color = dlg.GetColor();
+	m_vxl_side_custom_color = dlg.color();
 	m_vxl_side_idx = 8;
 	for (int k = 0; k < 8; k++)
 		m_vxl_side[k].Invalidate();

@@ -12,6 +12,7 @@
 #include "SearchInPaneDlg.h"
 #include "SearchOnDiskDlg.h"
 #include "PalPathsDlg.h"
+#include "ColorPickerDlg.h"
 #include "KeybindsDlg.h"
 #include "keybinds.h"
 #include "SelectPaletteDlg.h"
@@ -1924,10 +1925,10 @@ void CMainFrame::OnUpdateThemeHideEmptyResults(CCmdUI* pCmdUI)
 
 void CMainFrame::OnThemeAlphaColor()
 {
-	CColorDialog dlg(theme::alpha_color(), CC_FULLOPEN | CC_RGBINIT, this);
+	CColorPickerDlg dlg(theme::alpha_color(), this);
 	if (dlg.DoModal() != IDOK)
 		return;
-	theme::set_alpha_color(dlg.GetColor());
+	theme::set_alpha_color(dlg.color());
 	// Repaint the file-info pane so any currently-shown image with alpha
 	// re-composites against the new checker color.
 	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
