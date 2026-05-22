@@ -3121,22 +3121,90 @@ void CXCCFileView::player_decode_frames()
 			}
 			// Pass 3 — Ambient occlusion bake.
 			//
-			// View-independent per-voxel AO. From each surface voxel we fire
-			// `ray_count` cosine-weighted Hammersley rays in the hemisphere
-			// around the voxel's local normal and step the section's
-			// occupancy grid via 3D DDA up to `max_steps` cells. A hit at
-			// step `s` contributes `1 - s/max_steps` to the occlusion
-			// accumulator (near hits darken more than far ones — produces
-			// smooth gradients instead of binary cliffs). Final AO is
-			// `occlusion * 255 / ray_count` stored as `uint8_t` per voxel.
+			// Two mutually-exclusive strategies write to the same per-voxel
+			// `ao` byte. The splat / shade pass downstream doesn't know which
+			// produced the value.
 			//
-			// Reads `occ` (already populated above) and writes to the
+			//   ao_method_contact     3×3×3 neighborhood walk per voxel.
+			//                         Distance-weighted (Soft) or bit-count
+			//                         (Hard) over face / edge / corner
+			//                         neighbors. ~free at file load.
+			//                         Captures only immediate-neighbor
+			//                         occlusion (contact shadows under
+			//                         edges + concave corners).
+			//
+			//   ao_method_hemisphere  Cosine-weighted Hammersley rays + 3D
+			//                         DDA up to ~8 cells. Captures
+			//                         medium-range cavities and undercuts
+			//                         the 3×3×3 neighborhood can't see.
+			//                         Slower file open (Quality combo tunes
+			//                         ray count / range).
+			//
+			// Both paths read `occ` (populated above) and write to the
 			// `locals.size()` cloud entries this section just appended. AO
 			// uses its own 6-neighbor local normal for ray orientation —
 			// independent of the shading normal source/method (orientation
 			// only needs "outward enough", and decoupling avoids rebakes
 			// when shading normals change).
-			//
+			if (theme::vxl_ao_method_v() == theme::ao_method_contact)
+			{
+				// Contact AO. For each voxel, walk the 26 neighbors of the
+				// 3×3×3 cube (excluding the center, which is the voxel
+				// itself). Score by distance class:
+				//   face   (6 cells, dist=1)          weight 1.000
+				//   edge   (12 cells, dist=sqrt 2)    weight 1/sqrt(2) ≈ 0.707
+				//   corner (8 cells, dist=sqrt 3)     weight 1/sqrt(3) ≈ 0.577
+				// Soft = weighted sum / max possible. Hard = filled count / 26.
+				// Result mapped to byte and clamped.
+				const size_t cloud_start = m_vxl_cloud.size() - locals.size();
+				const theme::vxl_ao_contact_falloff falloff = theme::vxl_ao_contact_falloff_v();
+				// Pre-tabulated weight per (dx,dy,dz) offset (taxicab class).
+				// Index by |dx|+|dy|+|dz| — 1=face, 2=edge, 3=corner.
+				const float w_face   = 1.0f;
+				const float w_edge   = 0.7071067812f;
+				const float w_corner = 0.5773502692f;
+				const float max_weighted = 6.0f * w_face + 12.0f * w_edge + 8.0f * w_corner;
+				#pragma omp parallel for schedule(static)
+				for (int li = 0; li < static_cast<int>(locals.size()); li++)
+				{
+					const local_voxel& lv = locals[li];
+					int filled_count = 0;
+					float filled_weight = 0.0f;
+					for (int dz = -1; dz <= 1; dz++)
+					for (int dy = -1; dy <= 1; dy++)
+					for (int dx = -1; dx <= 1; dx++)
+					{
+						if (dx == 0 && dy == 0 && dz == 0) continue;
+						const int nx2 = lv.lx + dx;
+						const int ny2 = lv.ly + dy;
+						const int nz2 = lv.lz + dz;
+						// Treat out-of-bounds cells as empty (open air) so
+						// voxels at the section boundary don't get falsely
+						// darkened.
+						if (nx2 < 0 || nx2 >= cx || ny2 < 0 || ny2 >= cy ||
+						    nz2 < 0 || nz2 >= cz) continue;
+						if (occ[occ_idx(nx2, ny2, nz2)] == 0) continue;
+						filled_count++;
+						const int taxicab = std::abs(dx) + std::abs(dy) + std::abs(dz);
+						const float w = (taxicab == 1) ? w_face :
+						                (taxicab == 2) ? w_edge : w_corner;
+						filled_weight += w;
+					}
+					float ratio;
+					if (falloff == theme::ao_contact_soft)
+						ratio = filled_weight / max_weighted;
+					else
+						ratio = static_cast<float>(filled_count) / 26.0f;
+					if (ratio < 0.0f) ratio = 0.0f;
+					else if (ratio > 1.0f) ratio = 1.0f;
+					int ao_byte = static_cast<int>(ratio * 255.0f + 0.5f);
+					if (ao_byte < 0) ao_byte = 0;
+					else if (ao_byte > 255) ao_byte = 255;
+					m_vxl_cloud[cloud_start + li].ao = static_cast<unsigned char>(ao_byte);
+				}
+			}
+			else
+			{
 			// Quality tiers (theme::vxl_ao_quality_v):
 			//   Low    16 rays, 5-cell range  — ~current speed
 			//   High   32 rays, 8-cell range  — default
@@ -3316,6 +3384,7 @@ void CXCCFileView::player_decode_frames()
 					if (ao_byte < 0) ao_byte = 0; else if (ao_byte > 255) ao_byte = 255;
 					m_vxl_cloud[cloud_start + li].ao = static_cast<unsigned char>(ao_byte);
 				}
+			}
 			}
 		}
 		} // end for (auto& src : sources)
@@ -4900,26 +4969,34 @@ void CXCCFileView::player_draw(CDC* pDC)
 	// player_convert_frame_to_bgra; this per-paint pass is VXL-only and only
 	// runs when the VXL cache missed (otherwise the cached bytes already
 	// contain the grid).
+	// Grid math runs in *logical* (non-supersampled) space — derive logical
+	// coords by dividing the SS pixel position by ss. Without this the tile
+	// width and line thickness shrink proportionally with SS, so at SS=4 the
+	// 48/60-px tiles become 12/15 output pixels and the 2-px line becomes
+	// 0.5 output pixels (blurred to invisibility by bilinear/lanczos).
 	if (is_vxl_view() && !vxl_cache_hit && m_player_grid_mode > 0)
 	{
+		const int ss_grid = (m_player_cx > 0) ? (cx_s / m_player_cx) : 1;
 		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
-		const int gcx = cx_s / 2;
-		const int gcy = cy_s;
+		const int gcx_l = m_player_cx / 2;
+		const int gcy_l = m_player_cy;
 		const DWORD line = 0x00FFFFFF;
 		// Serial; same sizing reasoning as the BGRA loop above.
 		for (int py = 0; py < cy_s; py++)
 		{
+			int ly = (ss_grid > 0) ? (py / ss_grid) : py;
 			for (int px = 0; px < cx_s; px++)
 			{
 				int i = px + cx_s * py;
 				if (s[i] != 0) continue; // sprite pixel — keep
-				int dx = px - gcx;
-				int dy = py - gcy;
+				int lx = (ss_grid > 0) ? (px / ss_grid) : px;
+				int dx = lx - gcx_l;
+				int dy = ly - gcy_l;
 				int u = dx + 2 * dy;
 				int v = 2 * dy - dx;
 				int au = u % tileW; if (au < 0) au += tileW;
 				int av = v % tileW; if (av < 0) av += tileW;
-				if (au < 2 || av < 2 || au > tileW - 2 || av > tileW - 2)
+				if (au < 2 || av < 2)
 					p_dib[i] = line;
 			}
 		}

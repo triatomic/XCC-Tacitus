@@ -41,3 +41,5 @@ XCCCabal.md
 # Claude Code per-folder context (local-only, never push)
 CLAUDE.md
 **/CLAUDE.md
+CHANGELOG-internal.md
+**/CHANGELOG-internal.md

@@ -43,6 +43,12 @@ namespace theme
 		bool g_vxl_ao_enabled = true;
 		int g_vxl_ao_strength = 60;	// 0..100
 		vxl_ao_quality g_vxl_ao_quality = ao_q_high;
+		// Default method is contact: free file open, immediate-neighbor AO.
+		// Hemisphere is still available for users who want medium-range
+		// cavity darkening at the cost of a slower bake.
+		vxl_ao_method g_vxl_ao_method = ao_method_contact;
+		// Only consulted in contact mode; ignored by the hemisphere path.
+		vxl_ao_contact_falloff g_vxl_ao_contact_falloff = ao_contact_soft;
 		// Defaults below match the original hand-tuned constants in
 		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
 		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
@@ -236,6 +242,16 @@ namespace theme
 			if (aoq < ao_q_low || aoq > ao_q_ultra) aoq = ao_q_high;
 			g_vxl_ao_quality = static_cast<vxl_ao_quality>(aoq);
 		}
+		{
+			int aom = AfxGetApp()->GetProfileInt("Theme", "vxl_ao_method", ao_method_contact);
+			if (aom != ao_method_hemisphere && aom != ao_method_contact) aom = ao_method_contact;
+			g_vxl_ao_method = static_cast<vxl_ao_method>(aom);
+		}
+		{
+			int aof = AfxGetApp()->GetProfileInt("Theme", "vxl_ao_contact_falloff", ao_contact_soft);
+			if (aof != ao_contact_soft && aof != ao_contact_hard) aof = ao_contact_soft;
+			g_vxl_ao_contact_falloff = static_cast<vxl_ao_contact_falloff>(aof);
+		}
 		// Lighting parameters: stored as int * 1000 to preserve precision via
 		// the int-only WriteProfileInt API. Out-of-range values fall back to
 		// defaults so corrupted/manually-edited registry entries don't render
@@ -286,6 +302,8 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_enabled", g_vxl_ao_enabled ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_strength", g_vxl_ao_strength);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_quality", static_cast<int>(g_vxl_ao_quality));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_method", static_cast<int>(g_vxl_ao_method));
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_ao_contact_falloff", static_cast<int>(g_vxl_ao_contact_falloff));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_az", static_cast<int>(g_vxl_light_az * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_el", static_cast<int>(g_vxl_light_el * 1000.0f));
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_ambient", static_cast<int>(g_vxl_light_ambient * 1000.0f));
@@ -443,6 +461,30 @@ namespace theme
 		// the lighting version so any post-rebake splat key check invalidates
 		// cleanly. Quality is a discrete combobox change, not a drag, so
 		// save() immediately (no flush deferral).
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	vxl_ao_method vxl_ao_method_v() { return g_vxl_ao_method; }
+	void set_vxl_ao_method(vxl_ao_method v)
+	{
+		if (g_vxl_ao_method == v) return;
+		g_vxl_ao_method = v;
+		// Both AO paths write into the same per-voxel `ao` byte, so a method
+		// change is a cloud rebuild — caller routes through
+		// invalidate_vxl_cloud_in_file_view. Bump version + save immediately.
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	vxl_ao_contact_falloff vxl_ao_contact_falloff_v() { return g_vxl_ao_contact_falloff; }
+	void set_vxl_ao_contact_falloff(vxl_ao_contact_falloff v)
+	{
+		if (g_vxl_ao_contact_falloff == v) return;
+		g_vxl_ao_contact_falloff = v;
+		// Falloff is consulted only by the contact bake; rebake the cloud
+		// when in contact mode (caller decides). In hemisphere mode the
+		// setting is dormant, so the rebake call is harmless.
 		g_vxl_lighting_version++;
 		save();
 	}

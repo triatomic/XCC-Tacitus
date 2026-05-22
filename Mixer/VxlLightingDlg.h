@@ -48,9 +48,23 @@ protected:
 	afx_msg void OnAoEnabledToggle();
 	afx_msg void OnAoStrengthEditKillFocus();
 	afx_msg void OnAoQualityChanged();
+	afx_msg void OnAoMethodChanged();
+	afx_msg void OnAoFalloffChanged();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
+
+	// Light-indicator visibility is transient feedback: shown only while the
+	// user is actively changing one of the 5 light knobs (Azimuth / Elevation
+	// / Diffuse / Ambient / Specular). On each knob change we call
+	// show_indicator_briefly(), which flips the runtime visibility flag on
+	// and (re)arms a one-shot timer; when the timer fires the indicator hides
+	// again. Indicator-mode radios (overlay/corner) and normal-source / VPL
+	// controls do NOT count as "knob changes" and don't re-arm the timer.
+	static const UINT_PTR TIMER_INDICATOR_HIDE = 1;
+	static const UINT     INDICATOR_HIDE_DELAY_MS = 1500;
+	void show_indicator_briefly();
 
 	DECLARE_MESSAGE_MAP()
 
@@ -68,6 +82,8 @@ private:
 	CButton     m_ao_enabled;
 	CEdit       m_ao_strength_value;
 	CComboBox   m_ao_quality;
+	CComboBox   m_ao_method;
+	CComboBox   m_ao_falloff;
 	CEdit m_az_value;
 	CEdit m_el_value;
 	CEdit m_ambient_value;
@@ -97,4 +113,8 @@ private:
 	void commit_ao_strength_edit();
 	// Gray out the AO strength slider/edit when "Enable AO" is unchecked.
 	void update_ao_strength_enable();
+	// Quality combo is only meaningful for hemisphere; Falloff combo is
+	// only meaningful for contact. Greys out the dormant one based on the
+	// current method.
+	void update_ao_method_controls();
 };

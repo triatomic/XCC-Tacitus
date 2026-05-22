@@ -236,6 +236,38 @@ namespace theme
 	};
 	vxl_ao_quality vxl_ao_quality_v();
 	void set_vxl_ao_quality(vxl_ao_quality v);
+
+	// AO method. Two mutually-exclusive bake strategies write to the same
+	// per-voxel `ao` byte; the splat / shade pass is identical for both.
+	//   Hemisphere: cosine-weighted Hammersley rays + 3D DDA up to ~8 cells.
+	//               Captures medium-range cavities and undercuts. Quality
+	//               combo tunes ray count and step range. Slower file open.
+	//   Contact:    goxel-style 3×3×3 neighborhood mask lookup. Effectively
+	//               free at file load — just walks the section's existing
+	//               occupancy grid once per voxel. Captures only immediate
+	//               edge / corner contact darkening. Quality combo greys out.
+	// Default is `ao_method_contact` so a fresh install opens files instantly;
+	// existing users with a persisted value keep their choice.
+	enum vxl_ao_method
+	{
+		ao_method_hemisphere = 0,
+		ao_method_contact    = 1,
+	};
+	vxl_ao_method vxl_ao_method_v();
+	void set_vxl_ao_method(vxl_ao_method v);
+
+	// Contact AO falloff shape. Soft = sqrt(border-distance) tile center
+	// sampled per goxel's get_border_dist; gives a smooth gradient that
+	// darkens toward occupied edges/corners. Hard = bit-count of the
+	// 8-bit neighborhood mask; coarser, more cartoony. Only consulted
+	// when `vxl_ao_method_v() == ao_method_contact`.
+	enum vxl_ao_contact_falloff
+	{
+		ao_contact_soft = 0,
+		ao_contact_hard = 1,
+	};
+	vxl_ao_contact_falloff vxl_ao_contact_falloff_v();
+	void set_vxl_ao_contact_falloff(vxl_ao_contact_falloff v);
 	// Resolve azimuth/elevation into a unit direction vector in camera space.
 	void vxl_light_direction(float& x, float& y, float& z);
 

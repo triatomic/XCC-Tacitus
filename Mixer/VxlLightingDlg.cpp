@@ -54,6 +54,8 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_SLIDER, m_ao_strength);
 	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_VALUE, m_ao_strength_value);
 	DDX_Control(pDX, IDC_VXL_AO_QUALITY, m_ao_quality);
+	DDX_Control(pDX, IDC_VXL_AO_METHOD, m_ao_method);
+	DDX_Control(pDX, IDC_VXL_AO_FALLOFF, m_ao_falloff);
 }
 
 BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
@@ -78,7 +80,10 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_SPECULAR_VALUE, OnSpecularEditKillFocus)
 	ON_BN_CLICKED(IDC_VXL_AO_ENABLED, OnAoEnabledToggle)
 	ON_EN_KILLFOCUS(IDC_VXL_AO_STRENGTH_VALUE, OnAoStrengthEditKillFocus)
+	ON_WM_TIMER()
 	ON_CBN_SELCHANGE(IDC_VXL_AO_QUALITY, OnAoQualityChanged)
+	ON_CBN_SELCHANGE(IDC_VXL_AO_METHOD, OnAoMethodChanged)
+	ON_CBN_SELCHANGE(IDC_VXL_AO_FALLOFF, OnAoFalloffChanged)
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -104,6 +109,14 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_ao_quality.AddString("Low (16 rays)");
 	m_ao_quality.AddString("High (32 rays)");
 	m_ao_quality.AddString("Ultra (64 rays)");
+	// AO Method: indices match theme::vxl_ao_method enum
+	// (hemisphere=0, contact=1).
+	m_ao_method.AddString("Hemisphere (high quality)");
+	m_ao_method.AddString("Contact (fast)");
+	// AO Contact Falloff: indices match theme::vxl_ao_contact_falloff
+	// enum (soft=0, hard=1). Only meaningful when method == contact.
+	m_ao_falloff.AddString("Soft (distance-weighted)");
+	m_ao_falloff.AddString("Hard (neighbor count)");
 	load_from_theme();
 
 	// Tooltips. Multi-line wraps via TTM_SETMAXTIPWIDTH; embedded \r\n inside
@@ -163,7 +176,20 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"  Low \x97 16 rays / 5-cell range. Fast.\r\n"
 		"  High \x97 32 rays / 8-cell range. Recommended default.\r\n"
 		"  Ultra \x97 64 rays / 8-cell range. Smoothest gradients, "
-		"slowest bake (still well under 100 ms on big units).");
+		"slowest bake (still well under 100 ms on big units).\r\n"
+		"Only applies when Method = Hemisphere.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_AO_METHOD),
+		"How AO is computed at file load.\r\n"
+		"  Hemisphere \x97 cosine-weighted rays + DDA. Catches medium-range "
+		"cavities and undercuts. Slower bake (tuned by Quality).\r\n"
+		"  Contact \x97 3x3x3 neighborhood walk. Effectively free; catches "
+		"only immediate edge / corner contact darkening.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_AO_FALLOFF),
+		"Contact AO darkening shape.\r\n"
+		"  Soft \x97 distance-weighted (face=1, edge=0.71, corner=0.58). "
+		"Smoother gradient.\r\n"
+		"  Hard \x97 plain neighbor count / 26. Coarser, more cartoony.\r\n"
+		"Only applies when Method = Contact.");
 	m_tooltips.Activate(TRUE);
 
 	theme::apply_dialog(GetSafeHwnd());
@@ -202,7 +228,10 @@ void CVxlLightingDlg::load_from_theme()
 	m_ao_strength.SetPos(theme::vxl_ao_strength());
 	CheckDlgButton(IDC_VXL_AO_ENABLED, theme::vxl_ao_enabled() ? BST_CHECKED : BST_UNCHECKED);
 	m_ao_quality.SetCurSel(static_cast<int>(theme::vxl_ao_quality_v()));
+	m_ao_method.SetCurSel(static_cast<int>(theme::vxl_ao_method_v()));
+	m_ao_falloff.SetCurSel(static_cast<int>(theme::vxl_ao_contact_falloff_v()));
 	update_ao_strength_enable();
+	update_ao_method_controls();
 	// Sync the normal-source radios with the persisted value.
 	const bool is_file = theme::vxl_normal_src() == theme::vxl_normals_file;
 	CheckDlgButton(IDC_VXL_NORMAL_SRC_COMPUTED, is_file ? BST_UNCHECKED : BST_CHECKED);
@@ -278,6 +307,31 @@ void CVxlLightingDlg::update_ao_strength_enable()
 	if (HWND h = m_ao_strength_value.GetSafeHwnd())  ::EnableWindow(h, ena ? TRUE : FALSE);
 	if (HWND h = GetDlgItem(IDC_VXL_AO_STRENGTH_LABEL)->GetSafeHwnd())
 		::EnableWindow(h, ena ? TRUE : FALSE);
+	// Method combo follows the Enable checkbox. The method-dependent combos
+	// (Quality, Falloff) are then further gated by update_ao_method_controls
+	// — but if AO itself is off, all of them should grey out together.
+	if (HWND h = m_ao_method.GetSafeHwnd())          ::EnableWindow(h, ena ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_AO_METHOD_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, ena ? TRUE : FALSE);
+}
+
+void CVxlLightingDlg::update_ao_method_controls()
+{
+	// Quality belongs to hemisphere; Falloff belongs to contact. Each is
+	// dormant in the other mode. Both are also gated on the Enable checkbox
+	// via the outer && — when AO is off everything stays grey regardless of
+	// method.
+	const bool ena = theme::vxl_ao_enabled();
+	const bool is_hemisphere = theme::vxl_ao_method_v() == theme::ao_method_hemisphere;
+	const bool is_contact    = theme::vxl_ao_method_v() == theme::ao_method_contact;
+	if (HWND h = m_ao_quality.GetSafeHwnd())
+		::EnableWindow(h, (ena && is_hemisphere) ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_AO_QUALITY_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, (ena && is_hemisphere) ? TRUE : FALSE);
+	if (HWND h = m_ao_falloff.GetSafeHwnd())
+		::EnableWindow(h, (ena && is_contact) ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_AO_FALLOFF_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, (ena && is_contact) ? TRUE : FALSE);
 }
 
 void CVxlLightingDlg::invalidate_vxl_view()
@@ -288,6 +342,31 @@ void CVxlLightingDlg::invalidate_vxl_view()
 	// that a single full-quality paint per commit is fine.)
 	if (CMainFrame* mf = GetMainFrame())
 		mf->invalidate_file_info_pane();
+}
+
+void CVxlLightingDlg::show_indicator_briefly()
+{
+	// Flip the runtime visibility flag on and (re)arm the one-shot hide
+	// timer. Kill+SetTimer every call so the 1.5 s window resets on each
+	// new knob change — rapid slider drag therefore keeps the indicator
+	// visible continuously, and the timer fires 1.5 s after the *last*
+	// tick. CMainFrame::throttle_input_tick() already rate-limits the
+	// slider handler body, so the KillTimer/SetTimer churn is bounded.
+	theme::set_vxl_light_indicator_visible(true);
+	KillTimer(TIMER_INDICATOR_HIDE);
+	SetTimer(TIMER_INDICATOR_HIDE, INDICATOR_HIDE_DELAY_MS, NULL);
+}
+
+void CVxlLightingDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == TIMER_INDICATOR_HIDE)
+	{
+		KillTimer(TIMER_INDICATOR_HIDE);
+		theme::set_vxl_light_indicator_visible(false);
+		invalidate_vxl_view();
+		return;
+	}
+	CDialog::OnTimer(nIDEvent);
 }
 
 void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
@@ -333,6 +412,18 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_VXL_LIGHT_SPECULAR_SLIDER: theme::set_vxl_light_specular(preview_value); break;
 	case IDC_VXL_AO_STRENGTH_SLIDER:    theme::set_vxl_ao_strength(static_cast<int>(preview_value + 0.5f)); break;
 	}
+	// Light-knob changes (Az/El/Ambient/Diffuse/Specular) show the
+	// indicator with a 1.5 s auto-hide. AO strength is not a light knob.
+	switch (id)
+	{
+	case IDC_VXL_LIGHT_AZ_SLIDER:
+	case IDC_VXL_LIGHT_EL_SLIDER:
+	case IDC_VXL_LIGHT_AMBIENT_SLIDER:
+	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:
+	case IDC_VXL_LIGHT_SPECULAR_SLIDER:
+		show_indicator_briefly();
+		break;
+	}
 	update_value_labels();
 	invalidate_vxl_view();
 	// Registry save is deferred until the dialog is closed (OnOK / OnCancel),
@@ -362,6 +453,7 @@ void CVxlLightingDlg::commit_az_edit()
 	theme::set_vxl_light_azimuth(v);
 	m_az.SetPos(static_cast<int>((v / 360.0f) * 1000));
 	update_value_labels();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
@@ -375,6 +467,7 @@ void CVxlLightingDlg::commit_el_edit()
 	theme::set_vxl_light_elevation(v);
 	m_el.SetPos(static_cast<int>(((v + 90.0f) / 180.0f) * 1000));
 	update_value_labels();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
@@ -388,6 +481,7 @@ void CVxlLightingDlg::commit_ambient_edit()
 	theme::set_vxl_light_ambient(v);
 	m_ambient.SetPos(static_cast<int>(v * 1000));
 	update_value_labels();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
@@ -401,6 +495,7 @@ void CVxlLightingDlg::commit_diffuse_edit()
 	theme::set_vxl_light_diffuse(v);
 	m_diffuse.SetPos(static_cast<int>(v * 1000));
 	update_value_labels();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
@@ -414,6 +509,7 @@ void CVxlLightingDlg::commit_specular_edit()
 	theme::set_vxl_light_specular(v);
 	m_specular.SetPos(scale_spec(v));
 	update_value_labels();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
@@ -443,6 +539,7 @@ void CVxlLightingDlg::OnAoEnabledToggle()
 	const bool ena = IsDlgButtonChecked(IDC_VXL_AO_ENABLED) == BST_CHECKED;
 	theme::set_vxl_ao_enabled(ena);
 	update_ao_strength_enable();
+	update_ao_method_controls();
 	invalidate_vxl_view();
 }
 
@@ -454,6 +551,31 @@ void CVxlLightingDlg::OnAoQualityChanged()
 	// Quality change requires the AO bake to redo with the new ray count /
 	// range, which means rebuilding the voxel cloud (AO lives on each
 	// t_vxl_voxel). Same hook the normal-source/method handlers use.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnAoMethodChanged()
+{
+	const int sel = m_ao_method.GetCurSel();
+	if (sel < 0) return;
+	theme::set_vxl_ao_method(static_cast<theme::vxl_ao_method>(sel));
+	// Method swap rewrites the per-voxel `ao` byte using a different bake
+	// algorithm — rebuild the cloud. Also re-grey the dependent combos.
+	update_ao_method_controls();
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
+}
+
+void CVxlLightingDlg::OnAoFalloffChanged()
+{
+	const int sel = m_ao_falloff.GetCurSel();
+	if (sel < 0) return;
+	theme::set_vxl_ao_contact_falloff(static_cast<theme::vxl_ao_contact_falloff>(sel));
+	// Falloff only affects the contact bake. In hemisphere mode the setter
+	// still bumps the version + persists, but no rebake is needed since the
+	// hemisphere path never reads the falloff value. Trigger a rebake
+	// unconditionally — cheap in contact mode, near-no-op in hemisphere.
 	if (CMainFrame* mf = GetMainFrame())
 		mf->invalidate_vxl_cloud_in_file_view();
 }
@@ -534,11 +656,18 @@ void CVxlLightingDlg::OnIndicatorCorner()
 void CVxlLightingDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CDialog::OnShowWindow(bShow, nStatus);
-	// Mirror the dialog's visibility into the runtime flag so the VXL view
-	// only draws the light indicator while the dialog is on screen.
-	theme::set_vxl_light_indicator_visible(bShow ? true : false);
-	if (CMainFrame* mf = GetMainFrame())
-		mf->invalidate_file_info_pane();
+	// Indicator visibility no longer mirrors the dialog: it's driven by the
+	// 5 light knobs via show_indicator_briefly() + the hide timer. Opening
+	// the dialog leaves the indicator off until the user touches a knob.
+	// Closing the dialog forces it off and kills any pending hide timer
+	// so a WM_TIMER doesn't race the dialog teardown.
+	if (!bShow)
+	{
+		KillTimer(TIMER_INDICATOR_HIDE);
+		theme::set_vxl_light_indicator_visible(false);
+		if (CMainFrame* mf = GetMainFrame())
+			mf->invalidate_file_info_pane();
+	}
 }
 
 void CVxlLightingDlg::OnOK()

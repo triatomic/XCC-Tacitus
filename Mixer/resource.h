@@ -223,6 +223,10 @@
 #define IDC_VXL_AO_STRENGTH_VALUE       1214
 #define IDC_VXL_AO_QUALITY_LABEL        1215
 #define IDC_VXL_AO_QUALITY              1216
+#define IDC_VXL_AO_METHOD_LABEL         1242
+#define IDC_VXL_AO_METHOD               1243
+#define IDC_VXL_AO_FALLOFF_LABEL        1244
+#define IDC_VXL_AO_FALLOFF              1245
 #define IDC_LOADPAL_FILTER_LABEL        1217
 #define IDC_LOADPAL_FILTER              1218
 #define IDC_LOADPAL_LIST                1219
@@ -1607,7 +1611,7 @@
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        151
 #define _APS_NEXT_COMMAND_VALUE         33142
-#define _APS_NEXT_CONTROL_VALUE         1212
+#define _APS_NEXT_CONTROL_VALUE         1246
 #define _APS_NEXT_SYMED_VALUE           103
 #endif
 #endif
