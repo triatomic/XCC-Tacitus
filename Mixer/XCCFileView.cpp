@@ -5151,7 +5151,9 @@ void CXCCFileView::player_draw(CDC* pDC)
 	// top of voxels. Active only when the VXL Lighting dialog is open
 	// (theme::vxl_light_indicator_visible). Mode:
 	//   overlay: line from model center to sun-disc, scaled to ~35% of canvas.
-	//   corner:  small widget in the top-right (40px radius).
+	//   corner:  small widget in the pane's top-right (32px radius).
+	//            Pinned to the view client rect (NOT the canvas) so it stays
+	//            put as zoom changes and never overlaps the model.
 	//
 	// Axis mapping — must match the *shading* path, not raw camera space:
 	//   The splat stores normals as cam_normal = (nrx, -nry_p, nrz_p), so a
@@ -5199,10 +5201,16 @@ void CXCCFileView::player_draw(CDC* pDC)
 		int center_x, center_y, radius;
 		if (theme::vxl_light_indicator_mode() == theme::vxl_light_indicator_corner)
 		{
+			// Pin to the pane's top-right (above the player band), not to the
+			// canvas (x_d+cx_d / y_d). Anchoring to the canvas made the widget
+			// overlap the model at low zoom on small voxels (canvas < 2*(margin
+			// +widget_r)) and drift inward as zoom shrank the canvas.
 			const int margin = 12;
 			const int widget_r = 32;
-			center_x = x_d + cx_d - margin - widget_r;
-			center_y = y_d + margin + widget_r;
+			CRect cr;
+			GetClientRect(&cr);
+			center_x = cr.right - margin - widget_r;
+			center_y = cr.top + margin + widget_r;
 			radius = widget_r;
 		}
 		else
