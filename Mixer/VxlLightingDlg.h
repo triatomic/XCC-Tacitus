@@ -36,6 +36,7 @@ protected:
 	afx_msg void OnNormalMethodChanged();
 	afx_msg void OnNormalKernelChanged();
 	afx_msg void OnVplFaithfulToggle();
+	afx_msg void OnLightFrameChanged();
 	afx_msg void OnZoomAwareSsToggle();
 	afx_msg void OnIndicatorOverlay();
 	afx_msg void OnIndicatorCorner();
@@ -106,6 +107,7 @@ private:
 	CEdit m_specular_value;
 	CComboBox m_method;
 	CComboBox m_kernel;
+	CComboBox m_light_frame;
 	CToolTipCtrl m_tooltips;
 	// Reentrancy guard: set true while we're programmatically updating the
 	// edit-box text in response to a slider movement, so the EN_KILLFOCUS /

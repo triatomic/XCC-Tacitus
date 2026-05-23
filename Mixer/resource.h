@@ -234,6 +234,8 @@
 #define IDC_VXL_SPLAT_PAD_SLIDER        1250
 #define IDC_VXL_SPLAT_PAD_VALUE         1251
 #define IDC_VXL_DEBUG_GROUP             1252
+#define IDC_VXL_LIGHT_FRAME_LABEL       1253
+#define IDC_VXL_LIGHT_FRAME_COMBO       1254
 #define IDC_LOADPAL_FILTER_LABEL        1217
 #define IDC_LOADPAL_FILTER              1218
 #define IDC_LOADPAL_LIST                1219

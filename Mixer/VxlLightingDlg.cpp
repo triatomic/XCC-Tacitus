@@ -50,6 +50,7 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_LIGHT_SPECULAR_VALUE, m_specular_value);
 	DDX_Control(pDX, IDC_VXL_NORMAL_METHOD, m_method);
 	DDX_Control(pDX, IDC_VXL_NORMAL_KERNEL, m_kernel);
+	DDX_Control(pDX, IDC_VXL_LIGHT_FRAME_COMBO, m_light_frame);
 	DDX_Control(pDX, IDC_VXL_AO_ENABLED, m_ao_enabled);
 	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_SLIDER, m_ao_strength);
 	DDX_Control(pDX, IDC_VXL_AO_STRENGTH_VALUE, m_ao_strength_value);
@@ -74,6 +75,7 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_METHOD, OnNormalMethodChanged)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_KERNEL, OnNormalKernelChanged)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_VPL_FAITHFUL, OnVplFaithfulToggle)
+	ON_CBN_SELCHANGE(IDC_VXL_LIGHT_FRAME_COMBO, OnLightFrameChanged)
 	ON_BN_CLICKED(IDC_VXL_ZOOM_AWARE_SS, OnZoomAwareSsToggle)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_OVERLAY, OnIndicatorOverlay)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_CORNER, OnIndicatorCorner)
@@ -117,6 +119,10 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_method.AddString("Smooth gradient");
 	m_kernel.AddString("3\xB3 (radius 1)");
 	m_kernel.AddString("5\xB3 (radius 2)");
+	// Light frame: indices match theme::vxl_light_frame
+	// (vlf_camera_fixed=0, vlf_world_fixed=1).
+	m_light_frame.AddString("Camera-fixed (light stays put)");
+	m_light_frame.AddString("World-fixed (rotates with model)");
 	// AO Quality: indices match theme::vxl_ao_quality enum (Low=0, High=1, Ultra=2).
 	m_ao_quality.AddString("Low (16 rays)");
 	m_ao_quality.AddString("High (32 rays)");
@@ -169,6 +175,11 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_PRESET_TS),
 		"Set the engine-faithful Tiberian Sun voxel light (Set_Voxel_Light_Angle "
 		"45 deg). World-fixed light, matching how TS renders voxels.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_FRAME_COMBO),
+		"Camera-fixed: the lit side stays put on screen as you orbit (studio "
+		"lamp / XCC default). World-fixed: the light is glued to the model -- "
+		"orbiting rotates the lit side with the model (matches the TS/RA2 "
+		"engine). The RA2/TS preset buttons switch to World-fixed automatically.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_ZOOM_AWARE_SS),
 		"DEBUG: when on (default), the VXL splat raises its effective SS factor "
 		"at >100% zoom so high-zoom views stay crisp. Uncheck to A/B-compare "
@@ -276,6 +287,7 @@ void CVxlLightingDlg::load_from_theme()
 	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_CORNER, overlay_mode ? BST_UNCHECKED : BST_CHECKED);
 	CheckDlgButton(IDC_VXL_LIGHT_VPL_FAITHFUL, theme::vxl_vpl_engine_faithful() ? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(IDC_VXL_ZOOM_AWARE_SS, theme::vxl_zoom_aware_ss() ? BST_CHECKED : BST_UNCHECKED);
+	m_light_frame.SetCurSel(static_cast<int>(theme::vxl_light_frame_v()));
 	update_ambient_diffuse_enable();
 	update_computed_combos_enable();
 	update_value_labels();
@@ -732,6 +744,19 @@ void CVxlLightingDlg::OnVplFaithfulToggle()
 		else
 			mf->reload_vpl_in_file_view();
 	}
+	invalidate_vxl_view();
+	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnLightFrameChanged()
+{
+	const int sel = m_light_frame.GetCurSel();
+	const theme::vxl_light_frame v = (sel == theme::vlf_world_fixed)
+		? theme::vlf_world_fixed : theme::vlf_camera_fixed;
+	theme::set_vxl_light_frame(v);
+	// Frame change bumps lighting_version internally, which invalidates the
+	// splat (VPL path keys on it). For the synthetic path the shade-pass
+	// version check picks it up. Repaint to make the change immediate.
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }

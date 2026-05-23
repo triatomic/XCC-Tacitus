@@ -4344,27 +4344,41 @@ void CXCCFileView::player_draw(CDC* pDC)
 			const double sinY = std::sin(m_vxl_yaw);
 			const double cosP = std::cos(m_vxl_pitch);
 			const double sinP = std::sin(m_vxl_pitch);
-			// World-fixed light: the engine's VoxelLightSource is fixed to the
-			// model, not the camera. theme::vxl_light_direction() returns a
-			// world-space vector; rotate it into camera space by the SAME
-			// yaw+pitch+Y-flip the voxel normals get (cam_normal = (nrx,
-			// -nry_p, nrz_p), see ~line 4455). Since dot(R*n, R*L) = dot(n, L),
-			// dotting the camera-space light against the camera-space normal
-			// reproduces a model-fixed light regardless of orbit. Computed once
-			// per splat (same for every voxel) and shared by both the VPL
-			// section pick and the synthetic shade pass.
+			// Light vector in camera space. Two frames supported:
+			//   world_fixed: vxl_light_direction() is a world-space vector;
+			//     rotate it into camera space by the SAME yaw+pitch+Y-flip
+			//     the voxel normals get (cam_normal = (nrx, -nry_p, nrz_p),
+			//     see ~line 4455). Since dot(R*n, R*L) = dot(n, L), dotting
+			//     the camera-space light against the camera-space normal
+			//     reproduces a model-fixed light regardless of orbit. Matches
+			//     the TS/RA2 engine's VoxelLightSource.
+			//   camera_fixed (default): vxl_light_direction() is already
+			//     interpreted in camera space; skip the rotation. The lit
+			//     side stays put on screen as the camera orbits (XCC's
+			//     traditional "studio lamp" behavior).
+			// Computed once per splat (same for every voxel) and shared by
+			// both the VPL section pick and the synthetic shade pass.
 			float cam_lx, cam_ly, cam_lz;
 			{
 				float lwx, lwy, lwz;
 				theme::vxl_light_direction(lwx, lwy, lwz);
-				float lrx = static_cast<float>(lwx * cosY - lwy * sinY);
-				float lry = static_cast<float>(lwx * sinY + lwy * cosY);
-				float lrz = lwz;
-				float lry_p = static_cast<float>(lry * cosP - lrz * sinP);
-				float lrz_p = static_cast<float>(lry * sinP + lrz * cosP);
-				cam_lx = lrx;
-				cam_ly = -lry_p;	// match cam_normal's Y flip
-				cam_lz = lrz_p;
+				if (theme::vxl_light_frame_v() == theme::vlf_world_fixed)
+				{
+					float lrx = static_cast<float>(lwx * cosY - lwy * sinY);
+					float lry = static_cast<float>(lwx * sinY + lwy * cosY);
+					float lrz = lwz;
+					float lry_p = static_cast<float>(lry * cosP - lrz * sinP);
+					float lrz_p = static_cast<float>(lry * sinP + lrz * cosP);
+					cam_lx = lrx;
+					cam_ly = -lry_p;	// match cam_normal's Y flip
+					cam_lz = lrz_p;
+				}
+				else
+				{
+					cam_lx = lwx;
+					cam_ly = lwy;
+					cam_lz = lwz;
+				}
 			}
 			// Each voxel projects to a parallelogram (the rotated unit cube),
 			// not an axis-aligned square. Fixed ss x ss splats leave diagonal
@@ -4640,26 +4654,36 @@ void CXCCFileView::player_draw(CDC* pDC)
 			float ambient_pass = 0, diffuse_pass = 0;
 			if (synth_pass_active)
 			{
-				// World-fixed light: rotate the world-space light into camera
-				// space by the splat's yaw+pitch+Y-flip (same transform the
-				// cam_normal underwent), so the lit side stays fixed to the
-				// model as the camera orbits. This pass can run without a splat
-				// rebuild (keyed on shade_lighting_version), so recompute from
-				// the splat's stored angles rather than relying on the splat
-				// block's locals. Matches the camera-space light derived above.
+				// Two frames (see ~line 4347 for the matching block in splat).
+				// world_fixed: rotate the world-space light into camera space
+				//   by the splat's yaw+pitch+Y-flip so the lit side stays
+				//   fixed to the model as the camera orbits. This pass runs
+				//   without a splat rebuild (keyed on shade_lighting_version),
+				//   so recompute from the splat's stored angles.
+				// camera_fixed: skip the rotation -- light vector is already
+				//   in camera space.
 				float lwx, lwy, lwz;
 				theme::vxl_light_direction(lwx, lwy, lwz);
-				const double cY = std::cos(m_vxl_splat.yaw);
-				const double sY = std::sin(m_vxl_splat.yaw);
-				const double cP = std::cos(m_vxl_splat.pitch);
-				const double sP = std::sin(m_vxl_splat.pitch);
-				float lrx = static_cast<float>(lwx * cY - lwy * sY);
-				float lry = static_cast<float>(lwx * sY + lwy * cY);
-				float lry_p = static_cast<float>(lry * cP - lwz * sP);
-				float lrz_p = static_cast<float>(lry * sP + lwz * cP);
-				light_x_pass = lrx;
-				light_y_pass = -lry_p;	// match cam_normal's Y flip
-				light_z_pass = lrz_p;
+				if (theme::vxl_light_frame_v() == theme::vlf_world_fixed)
+				{
+					const double cY = std::cos(m_vxl_splat.yaw);
+					const double sY = std::sin(m_vxl_splat.yaw);
+					const double cP = std::cos(m_vxl_splat.pitch);
+					const double sP = std::sin(m_vxl_splat.pitch);
+					float lrx = static_cast<float>(lwx * cY - lwy * sY);
+					float lry = static_cast<float>(lwx * sY + lwy * cY);
+					float lry_p = static_cast<float>(lry * cP - lwz * sP);
+					float lrz_p = static_cast<float>(lry * sP + lwz * cP);
+					light_x_pass = lrx;
+					light_y_pass = -lry_p;	// match cam_normal's Y flip
+					light_z_pass = lrz_p;
+				}
+				else
+				{
+					light_x_pass = lwx;
+					light_y_pass = lwy;
+					light_z_pass = lwz;
+				}
 				ambient_pass = theme::vxl_light_ambient();
 				diffuse_pass = theme::vxl_light_diffuse();
 			}
@@ -5140,25 +5164,36 @@ void CXCCFileView::player_draw(CDC* pDC)
 	//   so the sun should *shrink*, not grow. Modulate radius by (1 - 0.3*lz).
 	if (is_vxl_view() && theme::vxl_light_indicator_visible())
 	{
-		// World-fixed light: rotate the world-space light into camera space
-		// (same yaw+pitch+Y-flip the shading uses) so the indicator points at
-		// the side that's actually lit, tracking the model as the camera
-		// orbits. Uses the live m_vxl_yaw/m_vxl_pitch.
+		// Indicator vector mirrors the shading frame so it always points at
+		// the side that's actually lit. world_fixed: rotate the world-space
+		// light by live yaw+pitch+Y-flip (so the indicator tracks the model
+		// as the camera orbits). camera_fixed: skip the rotation -- the
+		// indicator stays put on screen, matching where the light is
+		// effectively coming from.
 		float lx, ly, lz;
 		{
 			float lwx, lwy, lwz;
 			theme::vxl_light_direction(lwx, lwy, lwz);
-			const double cY = std::cos(m_vxl_yaw);
-			const double sY = std::sin(m_vxl_yaw);
-			const double cP = std::cos(m_vxl_pitch);
-			const double sP = std::sin(m_vxl_pitch);
-			float lrx = static_cast<float>(lwx * cY - lwy * sY);
-			float lry = static_cast<float>(lwx * sY + lwy * cY);
-			float lry_p = static_cast<float>(lry * cP - lwz * sP);
-			float lrz_p = static_cast<float>(lry * sP + lwz * cP);
-			lx = lrx;
-			ly = -lry_p;	// match cam_normal's Y flip / shading axis mapping
-			lz = lrz_p;
+			if (theme::vxl_light_frame_v() == theme::vlf_world_fixed)
+			{
+				const double cY = std::cos(m_vxl_yaw);
+				const double sY = std::sin(m_vxl_yaw);
+				const double cP = std::cos(m_vxl_pitch);
+				const double sP = std::sin(m_vxl_pitch);
+				float lrx = static_cast<float>(lwx * cY - lwy * sY);
+				float lry = static_cast<float>(lwx * sY + lwy * cY);
+				float lry_p = static_cast<float>(lry * cP - lwz * sP);
+				float lrz_p = static_cast<float>(lry * sP + lwz * cP);
+				lx = lrx;
+				ly = -lry_p;	// match cam_normal's Y flip / shading axis mapping
+				lz = lrz_p;
+			}
+			else
+			{
+				lx = lwx;
+				ly = lwy;
+				lz = lwz;
+			}
 		}
 
 		int center_x, center_y, radius;

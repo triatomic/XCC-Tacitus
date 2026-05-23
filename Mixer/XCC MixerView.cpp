@@ -515,7 +515,7 @@ void CXCCMixerView::open_location_mix(const string& name)
 	update_list();
 }
 
-void CXCCMixerView::open_location_mix(t_mix_map_list::const_iterator i, int file_id)
+void CXCCMixerView::open_location_mix(t_mix_map_list::const_iterator i, int file_id, const vector<int>& sub_mix_chain)
 {
 	using t_stack = stack<int>;
 	t_stack stack;
@@ -532,6 +532,19 @@ void CXCCMixerView::open_location_mix(t_mix_map_list::const_iterator i, int file
 		open_location_mix(stack.top());
 		stack.pop();
 	}
+	// After the mix_map_list parent chain is opened, descend any further
+	// in-mix sub-MIX indices the search captured. Required for hits in
+	// nested mixes that aren't pre-registered in mix_map_list (e.g.
+	// ra2.mix > local.mix > file: ra2.mix is in mix_map_list, local.mix
+	// is just a nested mix discovered by the recursive scan). Without
+	// this the navigation stops at ra2.mix and file_id is missing from
+	// its listing, leaving the user staring at the wrong MIX.
+	for (int idx_in_parent : sub_mix_chain)
+	{
+		if (idx_in_parent < 0 || !m_mix_f)
+			break;
+		open_location_mix(m_mix_f->get_id(idx_in_parent));
+	}
 	if (file_id)
 	{
 		CListCtrl& lc = GetListCtrl();
@@ -547,14 +560,23 @@ void CXCCMixerView::open_location_mix(t_mix_map_list::const_iterator i, int file
 	}
 }
 
-void CXCCMixerView::open_location_mix(int mix_id, int sub_mix_id, int file_id)
+void CXCCMixerView::open_location_mix(int mix_id, const vector<int>& sub_mix_chain, int file_id)
 {
 	close_all_locations();
 	const t_index_entry& mix = t_index_list().at(mix_id);
 	open_location_mix(m_dir.rfind('\\') == string::npos ? (m_dir + '\\' + mix.name) : (m_dir + mix.name));
-	if (sub_mix_id >= 0)
+	// Descend through every nested MIX in the chain (root -> sub -> sub -> ...
+	// -> immediate parent of file). Each element is an index that
+	// Cmix_file::get_id() resolves to the next level's MIX id.
+	// Each open_location_mix(id) refreshes m_mix_f to point at the just-opened
+	// mix, so the next chain step's get_id() addresses the correct level.
+	// Previously this took a single sub_mix_id int and could only navigate 2
+	// levels deep -- deeper nesting landed on the wrong MIX.
+	for (int idx_in_parent : sub_mix_chain)
 	{
-		open_location_mix(m_mix_f->get_id(sub_mix_id));
+		if (idx_in_parent < 0 || !m_mix_f)
+			break;
+		open_location_mix(m_mix_f->get_id(idx_in_parent));
 	}
 	if (file_id)
 	{

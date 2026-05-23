@@ -76,8 +76,8 @@ public:
 	void open_location_dir(const string& name);
 	void open_location_mix(const string& name);
 	void open_location_mix(int id);
-	void open_location_mix(t_mix_map_list::const_iterator i, int file_id);
-	void open_location_mix(int mix_id, int sub_mix_id, int file_id);
+	void open_location_mix(t_mix_map_list::const_iterator i, int file_id, const vector<int>& sub_mix_chain = {});
+	void open_location_mix(int mix_id, const vector<int>& sub_mix_chain, int file_id);
 	void set_other_panes(CXCCFileView* file_view_pane, CXCCMixerView* other_pane);
 	void sort_list(int i, bool reverse);
 	void update_list();

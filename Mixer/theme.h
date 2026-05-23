@@ -166,6 +166,16 @@ namespace theme
 	// az/el to match the engine vector and bumps the lighting version.
 	enum vxl_light_preset { vlp_custom, vlp_ra2, vlp_ts };
 	void set_vxl_light_preset(vxl_light_preset p);
+
+	// Light reference frame.
+	//   camera_fixed: light stays put on screen as the camera orbits
+	//                 (XCC's traditional behavior; "studio lamp"). Default.
+	//   world_fixed:  light is fixed to the model -- orbit rotates the
+	//                 lit side with the model. Matches the TS/RA2 engine,
+	//                 used implicitly by the RA2/TS light presets.
+	enum vxl_light_frame { vlf_camera_fixed = 0, vlf_world_fixed = 1 };
+	vxl_light_frame vxl_light_frame_v();
+	void set_vxl_light_frame(vxl_light_frame v);
 	// Bumped on every lighting setter; used as a cheap cache key by the VXL
 	// splat cache so changing lighting invalidates without explicit flushes.
 	int vxl_lighting_version();

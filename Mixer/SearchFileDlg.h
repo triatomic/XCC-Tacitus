@@ -4,6 +4,7 @@
 #include "resource.h"
 
 #include <atomic>
+#include <vector>
 
 using namespace std;
 
@@ -18,7 +19,14 @@ public:
 		string name;
 		int id;
 		int parent;
-		int parent_parent;
+		// Sub-MIX index chain from the root container (`parent`) down to the
+		// file's immediate container. Empty when the file lives directly in
+		// the root MIX. Each element is the index that `Cmix_file::get_id()`
+		// resolves to the next nested MIX. Used to be a single `parent_parent`
+		// int which truncated to 2-level nesting — at depth 3+ the navigation
+		// dropped intermediate levels and landed on the wrong MIX. The vector
+		// lets us walk arbitrary depth (mix > mix > mix > ... > file).
+		std::vector<int> sub_mix_chain;
 		string top_mix_path;
 		long long size_bytes = 0;
 		int group_id = -1;       // LVGROUP id; assigned at search time
@@ -27,12 +35,12 @@ public:
 	};
 
 	void open_mix(int id);
-	void add(string name, int mix_id, int file_id, int sub_mix_id = -1, const string& top_mix_path = "", long long size_bytes = 0, bool predefined = false);
+	void add(string name, int mix_id, int file_id, const std::vector<int>& sub_mix_chain = {}, const string& top_mix_path = "", long long size_bytes = 0, bool predefined = false);
 	// `cancel` is checked at the top of each per-file iteration; pass nullptr
 	// to disable cancellation. `mix_map` is a snapshot of MainFrame's
 	// mix_map_list — passing one avoids touching MFC state from a worker
 	// thread; nullptr means "read live from m_main_frame" (foreground only).
-	void find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id = -1, const string& top_mix_path = "", bool predefined = false, std::atomic<bool>* cancel = nullptr, const t_mix_map_list* mix_map = nullptr);
+	void find(Cmix_file& f, string file_name, string mix_name, int mix_id, const std::vector<int>& sub_mix_chain = {}, const string& top_mix_path = "", bool predefined = false, std::atomic<bool>* cancel = nullptr, const t_mix_map_list* mix_map = nullptr);
 	void find(const map<int, t_index_entry>& t_map, const string& post, const string& dir, std::atomic<bool>* cancel = nullptr, const t_mix_map_list* mix_map = nullptr);
 	void find_predefined(std::atomic<bool>* cancel = nullptr, const t_mix_map_list* mix_map = nullptr);
 	void set(CMainFrame* main_frame, bool prefer_right = false);

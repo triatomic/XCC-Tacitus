@@ -99,6 +99,7 @@ namespace theme
 		bool g_vxl_full_hierarchy = true;
 		bool g_vxl_zoom_aware_ss = true;
 		int g_vxl_splat_pad_extra = 0;
+		vxl_light_frame g_vxl_light_frame = vlf_camera_fixed;
 		bool g_parallel_extract = true;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
@@ -298,6 +299,10 @@ namespace theme
 		g_vxl_full_hierarchy = AfxGetApp()->GetProfileInt("Theme", "vxl_full_hierarchy", 1) != 0;
 		g_vxl_zoom_aware_ss = AfxGetApp()->GetProfileInt("Theme", "vxl_zoom_aware_ss", 1) != 0;
 		g_vxl_splat_pad_extra = std::clamp(static_cast<int>(AfxGetApp()->GetProfileInt("Theme", "vxl_splat_pad_extra", 0)), -64, 64);
+		{
+			int v = static_cast<int>(AfxGetApp()->GetProfileInt("Theme", "vxl_light_frame", vlf_camera_fixed));
+			g_vxl_light_frame = (v == vlf_world_fixed) ? vlf_world_fixed : vlf_camera_fixed;
+		}
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
 		create_brushes();
 	}
@@ -338,6 +343,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_full_hierarchy", g_vxl_full_hierarchy ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_zoom_aware_ss", g_vxl_zoom_aware_ss ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_splat_pad_extra", g_vxl_splat_pad_extra);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_frame", static_cast<int>(g_vxl_light_frame));
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
 	}
 
@@ -597,6 +603,26 @@ namespace theme
 		case vlp_ts:  g_vxl_light_az = k_ts_az;  g_vxl_light_el = k_ts_el;  break;
 		default: return;	// vlp_custom: nothing to set
 		}
+		// Engine presets only make engine-faithful sense in world-fixed mode
+		// (the engine's VoxelLightSource is fixed to the model, not the
+		// camera). Force it on for the user; they can flip back to
+		// camera-fixed via the dropdown after if they prefer.
+		g_vxl_light_frame = vlf_world_fixed;
+		g_vxl_lighting_version++;
+		save();
+	}
+
+	vxl_light_frame vxl_light_frame_v() { return g_vxl_light_frame; }
+
+	void set_vxl_light_frame(vxl_light_frame v)
+	{
+		if (g_vxl_light_frame == v) return;
+		g_vxl_light_frame = v;
+		// Frame change alters how the splat consumes the light vector and the
+		// VPL bake's section indices, so it must invalidate the splat. The
+		// version bump piggybacks on lighting_version (the splat key already
+		// includes it for VPL mode and ignores it for synthetic — both want a
+		// rebuild here).
 		g_vxl_lighting_version++;
 		save();
 	}

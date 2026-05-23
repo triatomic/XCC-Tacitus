@@ -149,7 +149,7 @@ BOOL CSearchFileDlg::OnInitDialog()
 	return true;
 }
 
-void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, int sub_mix_id, const string& top_mix_path, bool predefined, std::atomic<bool>* cancel, const t_mix_map_list* mix_map)
+void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int mix_id, const std::vector<int>& sub_mix_chain, const string& top_mix_path, bool predefined, std::atomic<bool>* cancel, const t_mix_map_list* mix_map)
 {
 	for (int i = 0; i < f.get_c_files(); i++)
 	{
@@ -162,16 +162,24 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 		{
 			name = nh(8, id);
 			if (Cmix_file::get_id(f.get_game(), file_name) == id)
-				add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz, predefined);
+				add(mix_name + " - " + name, mix_id, id, sub_mix_chain, top_mix_path, sz, predefined);
 		}
 		else if (fname_filter(name, file_name))
-			add(mix_name + " - " + name, mix_id, id, sub_mix_id, top_mix_path, sz, predefined);
+			add(mix_name + " - " + name, mix_id, id, sub_mix_chain, top_mix_path, sz, predefined);
 		if (f.get_type(id) == ft_mix)
 		{
 			Cmix_file fg;
 			if (!fg.open(id, f))
 			{
-				find(fg, file_name, mix_name + " - " + name, mix_id, i, top_mix_path, predefined, cancel, mix_map);
+				// Descend into the nested mix: append the in-mix index of this
+				// sub-MIX to the chain so the opener can walk root -> sub_chain
+				// to reach the file. Previously this overload took a single
+				// `sub_mix_id` int that got overwritten on each recursion,
+				// dropping intermediate links and landing on the wrong mix at
+				// depth 3+ (the user-reported "goes to second mix, not file").
+				std::vector<int> next_chain = sub_mix_chain;
+				next_chain.push_back(i);
+				find(fg, file_name, mix_name + " - " + name, mix_id, next_chain, top_mix_path, predefined, cancel, mix_map);
 			}
 		}
 	}
@@ -184,7 +192,9 @@ void CSearchFileDlg::find(Cmix_file& f, string file_name, string mix_name, int m
 			continue;
 		Cmix_file g;
 		if (!g.open(i.second.id, f))
-			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, -1, top_mix_path, predefined, cancel, mix_map);
+			// New mix_map_list root: chain resets to empty (this nested mix is
+			// opened via mix_map_list lookups, not by descending in-mix indices).
+			find(g, file_name, mix_name + " - " + (i.second.name.empty() ? nh(8, i.second.id) : i.second.name), i.first, std::vector<int>{}, top_mix_path, predefined, cancel, mix_map);
 	}
 }
 
@@ -209,7 +219,7 @@ void CSearchFileDlg::find_predefined(std::atomic<bool>* cancel, const t_mix_map_
 		if (f.open(i.second.fname))
 			continue;
 		const auto& parent = find_ref(mm, i.second.parent);
-		find(f, get_filename(), parent.name + " - " + i.second.name, i.first, -1, i.second.fname, true, cancel, mix_map);
+		find(f, get_filename(), parent.name + " - " + i.second.name, i.first, std::vector<int>{}, i.second.fname, true, cancel, mix_map);
 	}
 }
 
@@ -225,14 +235,14 @@ void CSearchFileDlg::find(const map<int, t_index_entry>& t_map, const string& po
 		Cmix_file f;
 		if (!f.open(fname))
 		{
-			find(f, get_filename(), i.second.name + post, i.first, -1, fname, false, cancel, mix_map);
+			find(f, get_filename(), i.second.name + post, i.first, std::vector<int>{}, fname, false, cancel, mix_map);
 		}
 		else if (i.second.ft == ft_mix)
 		{
 			Cmix_file_rd f_rd;
 			if (!f_rd.open(fname))
 			{
-				find(f_rd, get_filename(), i.second.name + post, i.first, -1, fname, false, cancel, mix_map);
+				find(f_rd, get_filename(), i.second.name + post, i.first, std::vector<int>{}, fname, false, cancel, mix_map);
 			}
 		}
 	}
@@ -560,13 +570,13 @@ void CSearchFileDlg::OnColumnclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	*pResult = 0;
 }
 
-void CSearchFileDlg::add(string name, int mix_id, int file_id, int sub_mix_id, const string& top_mix_path, long long size_bytes, bool predefined)
+void CSearchFileDlg::add(string name, int mix_id, int file_id, const std::vector<int>& sub_mix_chain, const string& top_mix_path, long long size_bytes, bool predefined)
 {
 	t_map_entry& e = m_map[m_map.size()];
 	e.name = name;
 	e.id = file_id;
 	e.parent = mix_id;
-	e.parent_parent = sub_mix_id;
+	e.sub_mix_chain = sub_mix_chain;
 	e.top_mix_path = top_mix_path;
 	e.size_bytes = size_bytes;
 	e.predefined = predefined;
@@ -592,15 +602,15 @@ void CSearchFileDlg::open_mix(int id)
 		CXCCMixerView* target = m_prefer_right
 			? m_main_frame->right_mix_pane()
 			: m_main_frame->left_mix_pane();
-		target->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id);
+		target->open_location_mix(m_main_frame->mix_map_list().find(e.parent), e.id, e.sub_mix_chain);
 	}
 	else if (id < m_sepindex) // left
 	{
-		m_main_frame->left_mix_pane()->open_location_mix(e.parent, e.parent_parent, e.id);
+		m_main_frame->left_mix_pane()->open_location_mix(e.parent, e.sub_mix_chain, e.id);
 	}
 	else
 	{
-		m_main_frame->right_mix_pane()->open_location_mix(e.parent, e.parent_parent, e.id);
+		m_main_frame->right_mix_pane()->open_location_mix(e.parent, e.sub_mix_chain, e.id);
 	}
 	EndDialog(IDCANCEL);
 }
@@ -629,9 +639,12 @@ void CSearchFileDlg::OnExtract()
 	// top MIX (and any sub MIX) from scratch — re-running the per-file
 	// type probe / LMD scan / blowfish decrypt — making N selected rows
 	// cost N x full-archive-open instead of N x one-file-extract. Cache
-	// keyed on path for the top MIX, and (top_path, sub_id) for nested.
+	// keyed on path for the top MIX, and (top_path, chain-prefix) for any
+	// nested level (supports arbitrary mix > mix > mix > ... > file depth;
+	// previously only the immediate parent was cached so deeper nesting
+	// re-opened intermediate mixes per file).
 	std::map<std::string, std::unique_ptr<Cmix_file>> top_cache;
-	std::map<std::pair<std::string, int>, std::unique_ptr<Cmix_file>> sub_cache;
+	std::map<std::pair<std::string, std::vector<int>>, std::unique_ptr<Cmix_file>> sub_cache;
 
 	int idx = -1;
 	while ((idx = m_list.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) != -1)
@@ -653,20 +666,31 @@ void CSearchFileDlg::OnExtract()
 		}
 		Cmix_file* top = top_it->second.get();
 		Cmix_file* container = top;
-		if (e.parent_parent >= 0)
+		// Walk the sub-MIX chain (root -> ... -> immediate parent of file),
+		// reusing cached containers per chain prefix. A bad open at any level
+		// skips the row (continue propagates via the goto-equivalent below).
+		bool chain_ok = true;
+		std::vector<int> prefix;
+		for (int idx_in_parent : e.sub_mix_chain)
 		{
-			int sub_id = top->get_id(e.parent_parent);
-			auto key = std::make_pair(e.top_mix_path, sub_id);
+			prefix.push_back(idx_in_parent);
+			auto key = std::make_pair(e.top_mix_path, prefix);
 			auto sub_it = sub_cache.find(key);
 			if (sub_it == sub_cache.end())
 			{
+				int sub_id = container->get_id(idx_in_parent);
 				auto sub_ptr = std::make_unique<Cmix_file>();
-				if (sub_ptr->open(sub_id, *top))
-					continue;
+				if (sub_ptr->open(sub_id, *container))
+				{
+					chain_ok = false;
+					break;
+				}
 				sub_it = sub_cache.emplace(key, std::move(sub_ptr)).first;
 			}
 			container = sub_it->second.get();
 		}
+		if (!chain_ok)
+			continue;
 		Ccc_file f(false);
 		if (f.open(static_cast<unsigned int>(e.id), *container))
 			continue;
