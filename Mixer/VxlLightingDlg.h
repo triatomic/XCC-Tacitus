@@ -26,14 +26,21 @@ protected:
 
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnReset();
+	// Engine-faithful light presets: set the light vector to the RA2/TS
+	// Set_Voxel_Light_Angle(45°) result and snap the camera to the engine's
+	// 55° default. World-fixed light, so the lit side tracks the model on orbit.
+	afx_msg void OnPresetRa2();
+	afx_msg void OnPresetTs();
 	afx_msg void OnNormalSrcComputed();
 	afx_msg void OnNormalSrcFile();
 	afx_msg void OnNormalMethodChanged();
 	afx_msg void OnNormalKernelChanged();
 	afx_msg void OnVplFaithfulToggle();
+	afx_msg void OnZoomAwareSsToggle();
 	afx_msg void OnIndicatorOverlay();
 	afx_msg void OnIndicatorCorner();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	// Edit-box commit handlers. EN_KILLFOCUS fires when the user tabs away
 	// or clicks elsewhere; we also intercept Enter in PreTranslateMessage
 	// and route through commit_<field>() so committed-on-Enter feels
@@ -47,6 +54,7 @@ protected:
 	afx_msg void OnSpecularEditKillFocus();
 	afx_msg void OnAoEnabledToggle();
 	afx_msg void OnAoStrengthEditKillFocus();
+	afx_msg void OnSplatPadEditKillFocus();
 	afx_msg void OnAoQualityChanged();
 	afx_msg void OnAoMethodChanged();
 	afx_msg void OnAoFalloffChanged();
@@ -84,6 +92,13 @@ private:
 	CComboBox   m_ao_quality;
 	CComboBox   m_ao_method;
 	CComboBox   m_ao_falloff;
+	CSliderCtrl m_splat_pad;
+	CEdit       m_splat_pad_value;
+	// Grey out the Debug group when Supersampling = Off (the two debug knobs
+	// have no effect at ss=1: zoom-aware can't bump SS above an Off floor,
+	// and the seam pad is ignored at ss=1 by the splat). Re-evaluated on
+	// dialog activate so external SS-menu changes are picked up.
+	void update_debug_enable();
 	CEdit m_az_value;
 	CEdit m_el_value;
 	CEdit m_ambient_value;
@@ -111,6 +126,7 @@ private:
 	void commit_diffuse_edit();
 	void commit_specular_edit();
 	void commit_ao_strength_edit();
+	void commit_splat_pad_edit();
 	// Gray out the AO strength slider/edit when "Enable AO" is unchecked.
 	void update_ao_strength_enable();
 	// Quality combo is only meaningful for hemisphere; Falloff combo is

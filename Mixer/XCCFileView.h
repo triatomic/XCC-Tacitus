@@ -525,6 +525,16 @@ private:
 		// cheaply after the fact.
 		bool vpl_active = false;
 		int vpl_lighting_version = -1;
+		// Palette version stamp the VPL bake (and therefore buf's baked
+		// indices) was built against. m_vpl_baked maps original color ->
+		// nearest palette slot via redmean against the *current* color
+		// table; when the user swaps palette on the fly (Load PAL,
+		// Ctrl+[/]) the baked indices in buf become wrong. Compared
+		// against m_player_bgra_version at cache time so a palette swap
+		// forces a splat rebuild. Synthetic (non-VPL) path doesn't need
+		// this since buf holds the original v.color and BGRA composite
+		// looks up live m_color_table.
+		int vpl_pal_version = -1;
 		int cx_s = 0;
 		int cy_s = 0;
 		Cvirtual_binary buf;	// paletted supersample framebuffer (cx_s*cy_s bytes)

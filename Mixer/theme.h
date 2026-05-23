@@ -157,6 +157,15 @@ namespace theme
 	void set_vxl_light_diffuse(float v);
 	void set_vxl_light_specular(float v);
 	void reset_vxl_lighting();
+
+	// Engine-faithful light presets. RA2 and TS derive their voxel light
+	// vector from Set_Voxel_Light_Angle(45°): TS rotates (-1,0,0), RA2
+	// rotates (-cos45,-cos45,0), both by Rotate_Y(45°). The light is treated
+	// as a WORLD-space vector (fixed to the model, not the camera) — the
+	// splat rotates it into camera space per frame. Applying a preset sets
+	// az/el to match the engine vector and bumps the lighting version.
+	enum vxl_light_preset { vlp_custom, vlp_ra2, vlp_ts };
+	void set_vxl_light_preset(vxl_light_preset p);
 	// Bumped on every lighting setter; used as a cheap cache key by the VXL
 	// splat cache so changing lighting invalidates without explicit flushes.
 	int vxl_lighting_version();
@@ -310,6 +319,22 @@ namespace theme
 	// behavior (VXLFormat.cpp). Default on.
 	bool vxl_full_hierarchy();
 	void set_vxl_full_hierarchy(bool v);
+
+	// Debug toggle: when on (default), the VXL splat raises its effective SS
+	// at >100% zoom toward on-screen pixel coverage so high-zoom views stay
+	// crisp instead of blocky. Off pins SS to the user's chosen value at every
+	// zoom level. Exposed in the VXL Lighting dialog for A/B comparison.
+	bool vxl_zoom_aware_ss();
+	void set_vxl_zoom_aware_ss(bool v);
+
+	// Debug knob: pad delta added to the splat footprint per voxel, on top of
+	// the size-derived baseline max(2, ss/2). Range -64..+64, default 0.
+	// Negative shrinks the footprint (exposes seams); positive grows it (more
+	// overdraw). Pad ≤ 0 may yield a 0-or-negative footprint, which the dy/dx
+	// splat loops handle as "don't write" (harmless). Free-form debug range —
+	// no enforced ceiling, since the user is in control.
+	int vxl_splat_pad_extra();
+	void set_vxl_splat_pad_extra(int v);
 
 	// Parallel batch extract: when on, right-click → Extract / Extract
 	// preserving structure reads each selected entry's bytes serially on the

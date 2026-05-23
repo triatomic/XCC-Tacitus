@@ -10,6 +10,15 @@
 CColorPickerDlg::CColorPickerDlg(COLORREF initial, CWnd* pParent)
 	: CDialog(CColorPickerDlg::IDD, pParent), m_color(initial)
 {
+	// Seed cached H/S from the initial color so degenerate starting points
+	// (gray, white, black) still let the user pull the picker into a sensible
+	// hue/saturation. For a chromatic starting color rgb_to_hsl gives a real
+	// value; for a degenerate one it returns 0 and the user gets the default
+	// (red, S=1.0) when they first move the H slider.
+	double h, s, l;
+	rgb_to_hsl(GetRValue(initial), GetGValue(initial), GetBValue(initial), h, s, l);
+	m_hue_cached = h;
+	m_sat_cached = (s > 0.0) ? s : 1.0;
 }
 
 void CColorPickerDlg::DoDataExchange(CDataExchange* pDX)
@@ -133,6 +142,16 @@ void CColorPickerDlg::refresh_all(UINT skip_id /*=0*/)
 	const int b = GetBValue(m_color);
 	double h, s, l;
 	rgb_to_hsl(r, g, b, h, s, l);
+	// Preserve cached H through grayscale (r==g==b) and cached S through
+	// pure white/black (l==0 or l==1) — rgb_to_hsl returns 0 in those cases
+	// (mathematically undefined), which would snap the H/S sliders back to 0
+	// every time the user typed a value while on those axes. The cache is
+	// updated by R/G/B changes and by H/S/L changes that move OUT of the
+	// degenerate state.
+	const bool gray = (r == g && g == b);
+	const bool pure = (l <= 0.0 || l >= 1.0);
+	if (gray) h = m_hue_cached; else m_hue_cached = h;
+	if (pure || s == 0.0) s = m_sat_cached; else m_sat_cached = s;
 	const int h_i = static_cast<int>(std::lround(h));
 	const int s_i = static_cast<int>(std::lround(s * 100.0));
 	const int l_i = static_cast<int>(std::lround(l * 100.0));
@@ -173,6 +192,12 @@ void CColorPickerDlg::refresh_all(UINT skip_id /*=0*/)
 	}
 	m_updating = false;
 	redraw_preview();
+	// Fire the optional live-preview callback. Set by callers that want the
+	// main view to track the picker's current color in real time (e.g. the
+	// VXL / SHP custom side-color swatches). Cancel restores the original
+	// value via the caller's snapshot — picker doesn't manage that.
+	if (m_on_change)
+		m_on_change(m_color);
 }
 
 void CColorPickerDlg::redraw_preview()
@@ -211,11 +236,18 @@ void CColorPickerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_CP_S_SLIDER:
 	case IDC_CP_L_SLIDER:
 	{
-		double h, sat, l;
-		rgb_to_hsl(r, g, b, h, sat, l);
-		if (id == IDC_CP_H_SLIDER) h = v;
-		else if (id == IDC_CP_S_SLIDER) sat = v / 100.0;
-		else                            l = v / 100.0;
+		// Use cached H/S as the basis, then apply the new slider value to its
+		// channel. Same reason as the edit handlers: round-tripping through
+		// rgb_to_hsl loses H/S on gray and pure white/black, leaving the H/S
+		// sliders effectively dead at those colors. L is taken from RGB (always
+		// well-defined).
+		double h = m_hue_cached;
+		double sat = m_sat_cached;
+		double tmp_h, tmp_s, l;
+		rgb_to_hsl(r, g, b, tmp_h, tmp_s, l);
+		if (id == IDC_CP_H_SLIDER)      { h = v;          m_hue_cached = h; }
+		else if (id == IDC_CP_S_SLIDER) { sat = v / 100.0; m_sat_cached = sat; }
+		else                            { l = v / 100.0; }
 		int nr, ng, nb;
 		hsl_to_rgb(h, sat, l, nr, ng, nb);
 		m_color = RGB(nr, ng, nb);
@@ -264,11 +296,14 @@ void CColorPickerDlg::OnHChange()
 	CString s;
 	GetDlgItem(IDC_CP_H_EDIT)->GetWindowTextA(s);
 	int v = atoi(s); if (v < 0) v = 0; if (v > 359) v = 359;
+	// Use cached H/S so typing H on a gray color (where rgb_to_hsl gives S=0)
+	// still produces a proper hue. L comes from RGB — it's always well-defined.
 	double h, sat, l;
 	rgb_to_hsl(GetRValue(m_color), GetGValue(m_color), GetBValue(m_color),
 		h, sat, l);
+	m_hue_cached = v;
 	int nr, ng, nb;
-	hsl_to_rgb(v, sat, l, nr, ng, nb);
+	hsl_to_rgb(v, m_sat_cached, l, nr, ng, nb);
 	m_color = RGB(nr, ng, nb);
 	refresh_all(IDC_CP_H_EDIT);
 }
@@ -282,8 +317,9 @@ void CColorPickerDlg::OnSChange()
 	double h, sat, l;
 	rgb_to_hsl(GetRValue(m_color), GetGValue(m_color), GetBValue(m_color),
 		h, sat, l);
+	m_sat_cached = v / 100.0;
 	int nr, ng, nb;
-	hsl_to_rgb(h, v / 100.0, l, nr, ng, nb);
+	hsl_to_rgb(m_hue_cached, m_sat_cached, l, nr, ng, nb);
 	m_color = RGB(nr, ng, nb);
 	refresh_all(IDC_CP_S_EDIT);
 }
@@ -298,7 +334,7 @@ void CColorPickerDlg::OnLChange()
 	rgb_to_hsl(GetRValue(m_color), GetGValue(m_color), GetBValue(m_color),
 		h, sat, l);
 	int nr, ng, nb;
-	hsl_to_rgb(h, sat, v / 100.0, nr, ng, nb);
+	hsl_to_rgb(m_hue_cached, m_sat_cached, v / 100.0, nr, ng, nb);
 	m_color = RGB(nr, ng, nb);
 	refresh_all(IDC_CP_L_EDIT);
 }

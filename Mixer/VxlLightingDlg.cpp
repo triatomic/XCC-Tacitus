@@ -56,11 +56,15 @@ void CVxlLightingDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_VXL_AO_QUALITY, m_ao_quality);
 	DDX_Control(pDX, IDC_VXL_AO_METHOD, m_ao_method);
 	DDX_Control(pDX, IDC_VXL_AO_FALLOFF, m_ao_falloff);
+	DDX_Control(pDX, IDC_VXL_SPLAT_PAD_SLIDER, m_splat_pad);
+	DDX_Control(pDX, IDC_VXL_SPLAT_PAD_VALUE, m_splat_pad_value);
 }
 
 BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_WM_HSCROLL()
 	ON_BN_CLICKED(IDC_VXL_LIGHT_RESET, OnReset)
+	ON_BN_CLICKED(IDC_VXL_LIGHT_PRESET_RA2, OnPresetRa2)
+	ON_BN_CLICKED(IDC_VXL_LIGHT_PRESET_TS, OnPresetTs)
 	ON_BN_CLICKED(IDC_VXL_NORMAL_SRC_COMPUTED, OnNormalSrcComputed)
 	ON_BN_CLICKED(IDC_VXL_NORMAL_SRC_FILE, OnNormalSrcFile)
 	// Clicks on the label statics route into the same radio handlers, after
@@ -70,9 +74,11 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_METHOD, OnNormalMethodChanged)
 	ON_CBN_SELCHANGE(IDC_VXL_NORMAL_KERNEL, OnNormalKernelChanged)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_VPL_FAITHFUL, OnVplFaithfulToggle)
+	ON_BN_CLICKED(IDC_VXL_ZOOM_AWARE_SS, OnZoomAwareSsToggle)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_OVERLAY, OnIndicatorOverlay)
 	ON_BN_CLICKED(IDC_VXL_LIGHT_INDICATOR_CORNER, OnIndicatorCorner)
 	ON_WM_SHOWWINDOW()
+	ON_WM_ACTIVATE()
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AZ_VALUE,       OnAzEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_EL_VALUE,       OnElEditKillFocus)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_AMBIENT_VALUE,  OnAmbientEditKillFocus)
@@ -80,6 +86,7 @@ BEGIN_MESSAGE_MAP(CVxlLightingDlg, CDialog)
 	ON_EN_KILLFOCUS(IDC_VXL_LIGHT_SPECULAR_VALUE, OnSpecularEditKillFocus)
 	ON_BN_CLICKED(IDC_VXL_AO_ENABLED, OnAoEnabledToggle)
 	ON_EN_KILLFOCUS(IDC_VXL_AO_STRENGTH_VALUE, OnAoStrengthEditKillFocus)
+	ON_EN_KILLFOCUS(IDC_VXL_SPLAT_PAD_VALUE,   OnSplatPadEditKillFocus)
 	ON_WM_TIMER()
 	ON_CBN_SELCHANGE(IDC_VXL_AO_QUALITY, OnAoQualityChanged)
 	ON_CBN_SELCHANGE(IDC_VXL_AO_METHOD, OnAoMethodChanged)
@@ -98,6 +105,11 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	// AO strength uses a direct 0..100 range so the slider position equals
 	// the percentage value shown in the edit box.
 	m_ao_strength.SetRange(0, 100);
+	// Splat seam pad: delta added to the splat footprint per voxel, on top of
+	// the size-derived max(2, ss/2) baseline. Range -64..+64, default 0.
+	// Negative shrinks the footprint (exposes seams); positive grows it.
+	m_splat_pad.SetRange(-64, 64);
+	m_splat_pad.SetPos(theme::vxl_splat_pad_extra());
 	// Populate the Method + Kernel comboboxes once. Order matches the enum
 	// values in theme.h so the index can be passed straight through.
 	m_method.AddString("Basic (6 faces)");
@@ -150,6 +162,23 @@ BOOL CVxlLightingDlg::OnInitDialog()
 		"into the table at generation time); without one it drives synthetic shading.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_RESET),
 		"Restore all four sliders to their default values.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_PRESET_RA2),
+		"Set the engine-faithful RA2 voxel light (Set_Voxel_Light_Angle 45 deg). "
+		"The light is fixed to the model, so the lit side stays put as you orbit "
+		"(like the game).");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_PRESET_TS),
+		"Set the engine-faithful Tiberian Sun voxel light (Set_Voxel_Light_Angle "
+		"45 deg). World-fixed light, matching how TS renders voxels.");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_ZOOM_AWARE_SS),
+		"DEBUG: when on (default), the VXL splat raises its effective SS factor "
+		"at >100% zoom so high-zoom views stay crisp. Uncheck to A/B-compare "
+		"against the old behavior (pins SS to your chosen value at every zoom).");
+	m_tooltips.AddTool(GetDlgItem(IDC_VXL_SPLAT_PAD_SLIDER),
+		"DEBUG: delta to the splat footprint per voxel, on top of the "
+		"size-derived baseline. Range -64..+64, default 0. Negative shrinks "
+		"the footprint (exposes seams to diagnose what's causing them); "
+		"positive grows it (more overdraw, only useful for confirming the "
+		"baseline is the limit).");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_SRC_COMPUTED),
 		"Compute normals from voxel neighborhood (6-neighbor empty sides). "
 		"Smooth, view-independent of the file's stored normals.");
@@ -217,6 +246,7 @@ BOOL CVxlLightingDlg::PreTranslateMessage(MSG* pMsg)
 		else if (focus == m_diffuse_value.GetSafeHwnd())  { commit_diffuse_edit();  return TRUE; }
 		else if (focus == m_specular_value.GetSafeHwnd()) { commit_specular_edit(); return TRUE; }
 		else if (focus == m_ao_strength_value.GetSafeHwnd()) { commit_ao_strength_edit(); return TRUE; }
+		else if (focus == m_splat_pad_value.GetSafeHwnd())   { commit_splat_pad_edit();   return TRUE; }
 	}
 	return CDialog::PreTranslateMessage(pMsg);
 }
@@ -245,9 +275,11 @@ void CVxlLightingDlg::load_from_theme()
 	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_OVERLAY, overlay_mode ? BST_CHECKED : BST_UNCHECKED);
 	CheckDlgButton(IDC_VXL_LIGHT_INDICATOR_CORNER, overlay_mode ? BST_UNCHECKED : BST_CHECKED);
 	CheckDlgButton(IDC_VXL_LIGHT_VPL_FAITHFUL, theme::vxl_vpl_engine_faithful() ? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton(IDC_VXL_ZOOM_AWARE_SS, theme::vxl_zoom_aware_ss() ? BST_CHECKED : BST_UNCHECKED);
 	update_ambient_diffuse_enable();
 	update_computed_combos_enable();
 	update_value_labels();
+	update_debug_enable();
 }
 
 void CVxlLightingDlg::update_ambient_diffuse_enable()
@@ -301,6 +333,8 @@ void CVxlLightingDlg::update_value_labels()
 	m_specular_value.SetWindowText(buf);
 	std::snprintf(buf, sizeof(buf), "%d", theme::vxl_ao_strength());
 	m_ao_strength_value.SetWindowText(buf);
+	std::snprintf(buf, sizeof(buf), "%d", theme::vxl_splat_pad_extra());
+	m_splat_pad_value.SetWindowText(buf);
 	m_updating_ui = false;
 }
 
@@ -401,6 +435,7 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  preview_value = unscale_unit(m_diffuse.GetPos()); break;
 	case IDC_VXL_LIGHT_SPECULAR_SLIDER: preview_value = unscale_spec(m_specular.GetPos()); break;
 	case IDC_VXL_AO_STRENGTH_SLIDER:    preview_value = static_cast<float>(m_ao_strength.GetPos()); break;
+	case IDC_VXL_SPLAT_PAD_SLIDER:      preview_value = static_cast<float>(m_splat_pad.GetPos()); break;
 	default:
 		CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 		return;
@@ -415,6 +450,14 @@ void CVxlLightingDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	case IDC_VXL_LIGHT_DIFFUSE_SLIDER:  theme::set_vxl_light_diffuse(preview_value); break;
 	case IDC_VXL_LIGHT_SPECULAR_SLIDER: theme::set_vxl_light_specular(preview_value); break;
 	case IDC_VXL_AO_STRENGTH_SLIDER:    theme::set_vxl_ao_strength(static_cast<int>(preview_value + 0.5f)); break;
+	case IDC_VXL_SPLAT_PAD_SLIDER:
+		theme::set_vxl_splat_pad_extra(static_cast<int>(preview_value + 0.5f));
+		// Pad changes the splat output, not lighting — invalidate the cloud so
+		// the splat cache rebuilds with the new pad. Cheap (<1ms for typical
+		// models).
+		if (CMainFrame* mf = GetMainFrame())
+			mf->invalidate_vxl_cloud_in_file_view();
+		break;
 	}
 	// Light-knob changes (Az/El/Ambient/Diffuse/Specular) show the
 	// indicator with a 1.5 s auto-hide. AO strength is not a light knob.
@@ -439,6 +482,27 @@ void CVxlLightingDlg::OnReset()
 {
 	theme::reset_vxl_lighting();
 	load_from_theme();
+	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnPresetRa2()
+{
+	// Engine-faithful RA2 light. The light is world-fixed, so the lit side
+	// stays on the model as the user orbits (matches the engine). Camera angle
+	// is intentionally left as-is — the engine's DefaultCameraAngle uses a
+	// different parameterization than XCC's orbit pitch; XCC's 30° default
+	// matches the iso grid.
+	theme::set_vxl_light_preset(theme::vlp_ra2);
+	load_from_theme();
+	show_indicator_briefly();
+	invalidate_vxl_view();
+}
+
+void CVxlLightingDlg::OnPresetTs()
+{
+	theme::set_vxl_light_preset(theme::vlp_ts);
+	load_from_theme();
+	show_indicator_briefly();
 	invalidate_vxl_view();
 }
 
@@ -536,6 +600,24 @@ void CVxlLightingDlg::commit_ao_strength_edit()
 	update_value_labels();
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
+}
+
+void CVxlLightingDlg::OnSplatPadEditKillFocus() { commit_splat_pad_edit(); }
+
+void CVxlLightingDlg::commit_splat_pad_edit()
+{
+	if (m_updating_ui) return;
+	CString s; m_splat_pad_value.GetWindowText(s);
+	int v = _tstoi(s);
+	if (v < -64) v = -64; else if (v > 64) v = 64;
+	theme::set_vxl_splat_pad_extra(v);
+	m_splat_pad.SetPos(v);
+	update_value_labels();
+	// Pad changes the splat output, not lighting — invalidate the cloud so
+	// the splat cache rebuilds with the new pad. Matches the slider's commit
+	// path in OnHScroll.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->invalidate_vxl_cloud_in_file_view();
 }
 
 void CVxlLightingDlg::OnAoEnabledToggle()
@@ -654,6 +736,16 @@ void CVxlLightingDlg::OnVplFaithfulToggle()
 	theme::flush_lighting_save();
 }
 
+void CVxlLightingDlg::OnZoomAwareSsToggle()
+{
+	// Debug A/B: when off, the splat pins SS to the user's chosen value at
+	// every zoom level (high-zoom views look blocky). Splat cache keys on ss,
+	// so the next paint rebuilds at the new effective SS.
+	const bool checked = IsDlgButtonChecked(IDC_VXL_ZOOM_AWARE_SS) == BST_CHECKED;
+	theme::set_vxl_zoom_aware_ss(checked);
+	invalidate_vxl_view();
+}
+
 void CVxlLightingDlg::OnIndicatorOverlay()
 {
 	theme::set_vxl_light_indicator_mode(theme::vxl_light_indicator_overlay);
@@ -685,6 +777,29 @@ void CVxlLightingDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 		if (CMainFrame* mf = GetMainFrame())
 			mf->invalidate_file_info_pane();
 	}
+}
+
+void CVxlLightingDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CDialog::OnActivate(nState, pWndOther, bMinimized);
+	// Re-evaluate the Debug-group enable on activation: the user can change
+	// Supersampling via the main Graphics menu while this dialog is open, and
+	// we want the grey-out to track that without forcing a close/reopen.
+	if (nState != WA_INACTIVE)
+		update_debug_enable();
+}
+
+void CVxlLightingDlg::update_debug_enable()
+{
+	const bool ss_on = static_cast<int>(theme::vxl_supersample()) > 1;
+	if (HWND h = GetDlgItem(IDC_VXL_ZOOM_AWARE_SS)->GetSafeHwnd())
+		::EnableWindow(h, ss_on ? TRUE : FALSE);
+	if (HWND h = m_splat_pad.GetSafeHwnd())
+		::EnableWindow(h, ss_on ? TRUE : FALSE);
+	if (HWND h = m_splat_pad_value.GetSafeHwnd())
+		::EnableWindow(h, ss_on ? TRUE : FALSE);
+	if (HWND h = GetDlgItem(IDC_VXL_SPLAT_PAD_LABEL)->GetSafeHwnd())
+		::EnableWindow(h, ss_on ? TRUE : FALSE);
 }
 
 void CVxlLightingDlg::OnOK()

@@ -3524,9 +3524,13 @@ void CXCCFileView::notify_palette_changed()
 	// Player mode: rebuild the color table from the new default palette.
 	// load_color_table bumps m_player_bgra_version (so VXL BGRA cache
 	// misses) and, for SHP/WSA, re-prefills the per-frame BGRA cache.
-	// VXL keeps its splat cache (it's index-buffer + cam_normal data;
-	// the colorization happens during the BGRA composite which now sees
-	// the new color table on cache miss).
+	// VXL synthetic-shading path keeps its splat (buf holds the original
+	// v.color and the BGRA composite picks up the new color table on
+	// cache miss). VPL path REBUILDS the splat: buf holds vpl_baked
+	// indices (redmean nearest-color against the *old* palette), so
+	// stale baked indices look wrong under the new color table. The
+	// splat cache key now includes vpl_pal_version (= m_player_bgra_version),
+	// so the bgra_version bump above forces a fresh splat + re-bake.
 	load_color_table(get_default_palette(), true);
 	Invalidate();
 }
@@ -4282,13 +4286,33 @@ void CXCCFileView::player_draw(CDC* pDC)
 	{
 		if (m_vxl_cloud.empty())
 			return;
-		// Interactive low-SS: while the user is dragging (orbit/pan/slider),
-		// override the user's SS down to 1 so each paint is cheap. On drag
-		// end the flag clears and we trigger one final paint at the user's
-		// chosen SS, so the still image is always full quality.
-		const int ss = m_interactive_low_ss
-			? 1
-			: static_cast<int>(theme::vxl_supersample());
+		// Effective SS = user's chosen value. The previous interactive low-SS
+		// override (force SS=1 while dragging) was removed: it prevented the
+		// zoom-aware bump and seam pad from applying mid-drag, which is exactly
+		// where the user notices their effect. Drag perf stays acceptable
+		// because (a) the splat itself is cheap (<1ms for ~5-10k voxels) and
+		// (b) the blit still forces nearest while dragging (see stretch_image
+		// branch below), so the heavy resample doesn't fire per frame.
+		const int ss_user = static_cast<int>(theme::vxl_supersample());
+		// Zoom-aware effective SS. SS resolution is logical * ss; at high zoom
+		// the splat is then stretched up by stretch_image, so a small voxel at
+		// 500% zoom + SS=4 ends up as a ~120 px source filling a ~150 px target
+		// — only a 1.25x stretch of a low-res image, which reads as blocky.
+		// When zoom > 100%, raise the effective SS toward the on-screen pixel
+		// coverage (cap 16, snap to the {1,2,4,8,16} ladder used by the combo).
+		// Gated on ss_user > 1 so the explicit Supersampling=Off choice is
+		// honored at every zoom level. Applies during orbit too (user wants to
+		// see the model at full quality even while dragging).
+		int ss = ss_user;
+		if (theme::vxl_zoom_aware_ss()
+			&& ss_user > 1 && m_player_zoom_pct > 100)
+		{
+			int ss_zoom = (m_player_zoom_pct + 99) / 100;	// ceil(zoom/100)
+			if (ss_zoom > 16) ss_zoom = 16;
+			if (ss_zoom > ss) ss = ss_zoom;
+			static const int k_ss_ladder[] = { 1, 2, 4, 8, 16 };
+			for (int v : k_ss_ladder) { if (v >= ss) { ss = v; break; } }
+		}
 		const bool shading = theme::vxl_shading();
 		const int lighting_version = theme::vxl_lighting_version();
 		vxl_ss_cx = m_player_cx * ss;
@@ -4308,6 +4332,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.shading == shading &&
 			m_vxl_splat.vpl_active == m_vpl_loaded &&
 			(!m_vpl_loaded || m_vxl_splat.vpl_lighting_version == splat_lighting_version_now) &&
+			(!m_vpl_loaded || m_vxl_splat.vpl_pal_version == m_player_bgra_version) &&
 			m_vxl_splat.cx_s == vxl_ss_cx &&
 			m_vxl_splat.cy_s == vxl_ss_cy &&
 			m_vxl_splat.buf.size() == static_cast<size_t>(vxl_ss_cx) * vxl_ss_cy;
@@ -4319,6 +4344,28 @@ void CXCCFileView::player_draw(CDC* pDC)
 			const double sinY = std::sin(m_vxl_yaw);
 			const double cosP = std::cos(m_vxl_pitch);
 			const double sinP = std::sin(m_vxl_pitch);
+			// World-fixed light: the engine's VoxelLightSource is fixed to the
+			// model, not the camera. theme::vxl_light_direction() returns a
+			// world-space vector; rotate it into camera space by the SAME
+			// yaw+pitch+Y-flip the voxel normals get (cam_normal = (nrx,
+			// -nry_p, nrz_p), see ~line 4455). Since dot(R*n, R*L) = dot(n, L),
+			// dotting the camera-space light against the camera-space normal
+			// reproduces a model-fixed light regardless of orbit. Computed once
+			// per splat (same for every voxel) and shared by both the VPL
+			// section pick and the synthetic shade pass.
+			float cam_lx, cam_ly, cam_lz;
+			{
+				float lwx, lwy, lwz;
+				theme::vxl_light_direction(lwx, lwy, lwz);
+				float lrx = static_cast<float>(lwx * cosY - lwy * sinY);
+				float lry = static_cast<float>(lwx * sinY + lwy * cosY);
+				float lrz = lwz;
+				float lry_p = static_cast<float>(lry * cosP - lrz * sinP);
+				float lrz_p = static_cast<float>(lry * sinP + lrz * cosP);
+				cam_lx = lrx;
+				cam_ly = -lry_p;	// match cam_normal's Y flip
+				cam_lz = lrz_p;
+			}
 			// Each voxel projects to a parallelogram (the rotated unit cube),
 			// not an axis-aligned square. Fixed ss x ss splats leave diagonal
 			// gaps under arbitrary rotation. Compute the screen-space bounding
@@ -4335,8 +4382,24 @@ void CXCCFileView::player_draw(CDC* pDC)
 			const double ez_y = absd(-cosP);                   // z-edge -> py (rz=z, so -z*sinP... wait sign: py = ry*cosP - rz*sinP; z-edge: rz=1 -> py contribution = -sinP). Use abs.
 			const double fpx_d = (ex_x + ey_x) * ss;
 			const double fpy_d = (ex_y + ey_y + ez_y) * ss;
-			const int fp_x = static_cast<int>(fpx_d) + 2;
-			const int fp_y = static_cast<int>(fpy_d) + 2;
+			// Use ceil (not truncate) on the projected-cube extent, and grow the
+			// safety pad with ss. At yaw=45°, fpx_d=√2·ss; truncate+2 was fine at
+			// ss=4 (gap≤1 ss-pixel = visually negligible after downscale) but at
+			// ss=8/16 (now reachable via zoom-aware SS) integer rounding on adjacent
+			// voxel centers can open 1-2 ss-pixel seams that survive the stretch.
+			// pad = max(2, ss/2) keeps the original behavior at ss≤4 and adds just
+			// enough overlap at ss=8/16 to close those seams. The user can shrink
+			// the pad above/below this baseline from the VXL Lighting dialog
+			// (Seam pad -64..+64, default 0) for debugging — negative exposes
+			// seams (useful to confirm what's causing them), positive grows
+			// the footprint. A pad ≤ 0 may yield a 0-or-negative footprint,
+			// which the dy/dx splat loops handle as "don't write" (harmless).
+			// The user delta is ignored at ss=1 (Supersampling=Off): there's
+			// no SS to debug, and a negative delta would blank the view.
+			const int pad = std::max(2, ss / 2)
+				+ (ss > 1 ? theme::vxl_splat_pad_extra() : 0);
+			const int fp_x = static_cast<int>(std::ceil(fpx_d)) + pad;
+			const int fp_y = static_cast<int>(std::ceil(fpy_d)) + pad;
 			// Center the footprint on the projected voxel so the splat is
 			// symmetric instead of biased toward +x/+y.
 			const int fp_x_off = fp_x / 2;
@@ -4379,7 +4442,8 @@ void CXCCFileView::player_draw(CDC* pDC)
 			float vpl_l2x = 0, vpl_l2y = 0, vpl_l2z = 0;
 			if (m_vpl_loaded)
 			{
-				theme::vxl_light_direction(vpl_lx, vpl_ly, vpl_lz);
+				// Camera-space (world-fixed) light, computed once above.
+				vpl_lx = cam_lx; vpl_ly = cam_ly; vpl_lz = cam_lz;
 				// l + (0,0,1), normalized. Degenerate when l == (0,0,-1) (light
 				// pointing straight down through the model from above-camera);
 				// fall back to zero so f2 contributes nothing in that case.
@@ -4540,6 +4604,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			m_vxl_splat.shading = shading;
 			m_vxl_splat.vpl_active = m_vpl_loaded;
 			m_vxl_splat.vpl_lighting_version = m_vpl_loaded ? splat_lighting_version_now : -1;
+			m_vxl_splat.vpl_pal_version = m_vpl_loaded ? m_player_bgra_version : -1;
 			m_vxl_splat.cx_s = vxl_ss_cx;
 			m_vxl_splat.cy_s = vxl_ss_cy;
 			// Force the shading pass to run on the fresh cam_normal buffer.
@@ -4575,7 +4640,26 @@ void CXCCFileView::player_draw(CDC* pDC)
 			float ambient_pass = 0, diffuse_pass = 0;
 			if (synth_pass_active)
 			{
-				theme::vxl_light_direction(light_x_pass, light_y_pass, light_z_pass);
+				// World-fixed light: rotate the world-space light into camera
+				// space by the splat's yaw+pitch+Y-flip (same transform the
+				// cam_normal underwent), so the lit side stays fixed to the
+				// model as the camera orbits. This pass can run without a splat
+				// rebuild (keyed on shade_lighting_version), so recompute from
+				// the splat's stored angles rather than relying on the splat
+				// block's locals. Matches the camera-space light derived above.
+				float lwx, lwy, lwz;
+				theme::vxl_light_direction(lwx, lwy, lwz);
+				const double cY = std::cos(m_vxl_splat.yaw);
+				const double sY = std::sin(m_vxl_splat.yaw);
+				const double cP = std::cos(m_vxl_splat.pitch);
+				const double sP = std::sin(m_vxl_splat.pitch);
+				float lrx = static_cast<float>(lwx * cY - lwy * sY);
+				float lry = static_cast<float>(lwx * sY + lwy * cY);
+				float lry_p = static_cast<float>(lry * cP - lwz * sP);
+				float lrz_p = static_cast<float>(lry * sP + lwz * cP);
+				light_x_pass = lrx;
+				light_y_pass = -lry_p;	// match cam_normal's Y flip
+				light_z_pass = lrz_p;
 				ambient_pass = theme::vxl_light_ambient();
 				diffuse_pass = theme::vxl_light_diffuse();
 			}
@@ -5056,8 +5140,26 @@ void CXCCFileView::player_draw(CDC* pDC)
 	//   so the sun should *shrink*, not grow. Modulate radius by (1 - 0.3*lz).
 	if (is_vxl_view() && theme::vxl_light_indicator_visible())
 	{
+		// World-fixed light: rotate the world-space light into camera space
+		// (same yaw+pitch+Y-flip the shading uses) so the indicator points at
+		// the side that's actually lit, tracking the model as the camera
+		// orbits. Uses the live m_vxl_yaw/m_vxl_pitch.
 		float lx, ly, lz;
-		theme::vxl_light_direction(lx, ly, lz);
+		{
+			float lwx, lwy, lwz;
+			theme::vxl_light_direction(lwx, lwy, lwz);
+			const double cY = std::cos(m_vxl_yaw);
+			const double sY = std::sin(m_vxl_yaw);
+			const double cP = std::cos(m_vxl_pitch);
+			const double sP = std::sin(m_vxl_pitch);
+			float lrx = static_cast<float>(lwx * cY - lwy * sY);
+			float lry = static_cast<float>(lwx * sY + lwy * cY);
+			float lry_p = static_cast<float>(lry * cP - lwz * sP);
+			float lrz_p = static_cast<float>(lry * sP + lwz * cP);
+			lx = lrx;
+			ly = -lry_p;	// match cam_normal's Y flip / shading axis mapping
+			lz = lrz_p;
+		}
 
 		int center_x, center_y, radius;
 		if (theme::vxl_light_indicator_mode() == theme::vxl_light_indicator_corner)
@@ -6823,19 +6925,40 @@ void CXCCFileView::OnPlayerSideCustom()
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
+	// Live preview: snapshot pre-picker state, activate slot 8 + bump the
+	// BGRA cache version on every picker change so the player frame retints
+	// in real time. Cancel restores the snapshot. See OnVxlSideCustom for the
+	// matching VXL-side flow.
+	const COLORREF saved_color = m_player_side_custom_color;
+	const int      saved_idx   = m_player_side_idx;
 	CColorPickerDlg dlg(m_player_side_custom_color, this);
+	dlg.set_on_color_change([this](COLORREF c) {
+		m_player_side_custom_color = c;
+		m_player_side_idx = 8;
+		m_player_bgra_version++;
+		if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
+		for (int k = 0; k < 8; k++)
+			m_player_side[k].Invalidate();
+		m_player_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		UpdateWindow();
+	});
 	if (dlg.DoModal() != IDOK)
+	{
+		m_player_side_custom_color = saved_color;
+		m_player_side_idx = saved_idx;
+		m_player_bgra_version++;
+		if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
+		for (int k = 0; k < 8; k++)
+			m_player_side[k].Invalidate();
+		m_player_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
 		return;
-	m_player_side_custom_color = dlg.color();
-	m_player_side_idx = 8;
-	m_player_bgra_version++;
-	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
-	for (int k = 0; k < 8; k++)
-		m_player_side[k].Invalidate();
-	m_player_side_custom.Invalidate();
-	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
-	if (cr.bottom < cr.top) cr.bottom = cr.top;
-	InvalidateRect(&cr, FALSE);
+	}
 }
 
 void CXCCFileView::OnVxlSide(UINT id)
@@ -6864,17 +6987,40 @@ void CXCCFileView::OnVxlSideCustom()
 		InvalidateRect(&cr, FALSE);
 		return;
 	}
+	// Live preview: snapshot the pre-picker state, activate slot 8 immediately,
+	// and wire a callback that pushes every picker change into the splat
+	// (cache key includes vxl_side_custom_color so the next paint rebuilds the
+	// tinted view). On Cancel we restore the snapshot so nothing is committed.
+	const COLORREF saved_color = m_vxl_side_custom_color;
+	const int      saved_idx   = m_vxl_side_idx;
 	CColorPickerDlg dlg(m_vxl_side_custom_color, this);
+	dlg.set_on_color_change([this](COLORREF c) {
+		m_vxl_side_custom_color = c;
+		m_vxl_side_idx = 8;
+		for (int k = 0; k < 8; k++)
+			m_vxl_side[k].Invalidate();
+		m_vxl_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
+		UpdateWindow();	// drive the live repaint while the modal is up
+	});
 	if (dlg.DoModal() != IDOK)
+	{
+		// Revert: restore color + previous side index, repaint.
+		m_vxl_side_custom_color = saved_color;
+		m_vxl_side_idx = saved_idx;
+		for (int k = 0; k < 8; k++)
+			m_vxl_side[k].Invalidate();
+		m_vxl_side_custom.Invalidate();
+		CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
+		if (cr.bottom < cr.top) cr.bottom = cr.top;
+		InvalidateRect(&cr, FALSE);
 		return;
-	m_vxl_side_custom_color = dlg.color();
-	m_vxl_side_idx = 8;
-	for (int k = 0; k < 8; k++)
-		m_vxl_side[k].Invalidate();
-	m_vxl_side_custom.Invalidate();
-	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
-	if (cr.bottom < cr.top) cr.bottom = cr.top;
-	InvalidateRect(&cr, FALSE);
+	}
+	// OK path: the callback already pushed the final color + activated slot 8.
+	// Nothing else to do — the registry save lives in close_f() / app exit,
+	// just like before this change.
 }
 
 Cvirtual_binary CXCCFileView::find_in_sources(const string& name)
@@ -7200,9 +7346,20 @@ void CXCCFileView::rebuild_baked_vpl()
 			int tr = static_cast<int>(std::clamp(ct[i].r * eff, 0.0, 255.0));
 			int tg = static_cast<int>(std::clamp(ct[i].g * eff, 0.0, 255.0));
 			int tb = static_cast<int>(std::clamp(ct[i].b * eff, 0.0, 255.0));
+			// Preserve Westwood remap membership: a house-color input (16-31)
+			// must bake to a house-color output, else the side-color retint in
+			// the composite loop (which gates on the *baked* index 16-31) can't
+			// see it and recoloring silently no-ops under a loaded VPL. Mirrors
+			// vxl-renderer update_vpl()'s colorset.color_selection mask
+			// (mainwindow.cpp:571-586), which restricts the nearest search to
+			// 16-31 for the house-color set. Non-remap inputs search 1-255 as
+			// before (the renderer's all-inputs path does the same).
+			const bool remap = (i >= 16 && i <= 31);
+			const int f_lo = remap ? 16 : 1;
+			const int f_hi = remap ? 31 : 255;
 			long best = LONG_MAX;
-			int best_i = 1;
-			for (int f = 1; f < 256; f++)
+			int best_i = f_lo;
+			for (int f = f_lo; f <= f_hi; f++)
 			{
 				long d = sqdist(ct[f].r, ct[f].g, ct[f].b, tr, tg, tb);
 				if (d < best) { best = d; best_i = f; }

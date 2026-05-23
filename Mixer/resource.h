@@ -227,6 +227,13 @@
 #define IDC_VXL_AO_METHOD               1243
 #define IDC_VXL_AO_FALLOFF_LABEL        1244
 #define IDC_VXL_AO_FALLOFF              1245
+#define IDC_VXL_LIGHT_PRESET_RA2        1246
+#define IDC_VXL_LIGHT_PRESET_TS         1247
+#define IDC_VXL_ZOOM_AWARE_SS           1248
+#define IDC_VXL_SPLAT_PAD_LABEL         1249
+#define IDC_VXL_SPLAT_PAD_SLIDER        1250
+#define IDC_VXL_SPLAT_PAD_VALUE         1251
+#define IDC_VXL_DEBUG_GROUP             1252
 #define IDC_LOADPAL_FILTER_LABEL        1217
 #define IDC_LOADPAL_FILTER              1218
 #define IDC_LOADPAL_LIST                1219

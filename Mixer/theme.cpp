@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "theme.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -61,6 +62,18 @@ namespace theme
 		// (-0.40825,-0.40825,+0.81650).)
 		const float k_default_az = 282.4721f;
 		const float k_default_el = 21.2336f;
+		// Engine-faithful light vectors (WORLD space), derived from the
+		// TS/RA2 Set_Voxel_Light_Angle(45°) source: mtx.Rotate_Y(45°) * input.
+		//   TS:  input (-1,0,0)            -> (-0.70711, 0,        +0.70711)
+		//   RA2: input (-cos45,-cos45,0)   -> (-0.5,     -0.70711, +0.5)
+		// (RA2's source literally passes DEG_TO_RAD(-40.51419) ~= -0.70711 as
+		// the X/Y components — a radian-value-as-component quirk that equals
+		// -cos45°.) az/el are the inverse of vxl_light_direction():
+		//   az = atan2(y, x) (deg, wrapped 0..360);  el = -asin(z) (deg).
+		const float k_ra2_az = 234.7356f;   // atan2(-0.70711, -0.5)
+		const float k_ra2_el = -30.0f;       // -asin(0.5)
+		const float k_ts_az  = 180.0f;       // atan2(0, -0.70711)
+		const float k_ts_el  = -45.0f;       // -asin(0.70711)
 		const float k_default_ambient = 0.55f;
 		const float k_default_diffuse = 0.85f;
 		// Specular default matches vxl-renderer's colorset_desc::specular
@@ -84,6 +97,8 @@ namespace theme
 		vxl_light_indicator_placement g_vxl_light_indicator_mode = vxl_light_indicator_overlay;
 		bool g_limit_vxl_cpu = false;
 		bool g_vxl_full_hierarchy = true;
+		bool g_vxl_zoom_aware_ss = true;
+		int g_vxl_splat_pad_extra = 0;
 		bool g_parallel_extract = true;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
@@ -281,6 +296,8 @@ namespace theme
 		}
 		g_limit_vxl_cpu = AfxGetApp()->GetProfileInt("Theme", "limit_vxl_cpu", 0) != 0;
 		g_vxl_full_hierarchy = AfxGetApp()->GetProfileInt("Theme", "vxl_full_hierarchy", 1) != 0;
+		g_vxl_zoom_aware_ss = AfxGetApp()->GetProfileInt("Theme", "vxl_zoom_aware_ss", 1) != 0;
+		g_vxl_splat_pad_extra = std::clamp(static_cast<int>(AfxGetApp()->GetProfileInt("Theme", "vxl_splat_pad_extra", 0)), -64, 64);
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
 		create_brushes();
 	}
@@ -319,6 +336,8 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_indicator_mode", static_cast<int>(g_vxl_light_indicator_mode));
 		AfxGetApp()->WriteProfileInt("Theme", "limit_vxl_cpu", g_limit_vxl_cpu ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_full_hierarchy", g_vxl_full_hierarchy ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_zoom_aware_ss", g_vxl_zoom_aware_ss ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "vxl_splat_pad_extra", g_vxl_splat_pad_extra);
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
 	}
 
@@ -570,6 +589,17 @@ namespace theme
 		g_vxl_lighting_version++;
 		save();
 	}
+	void set_vxl_light_preset(vxl_light_preset p)
+	{
+		switch (p)
+		{
+		case vlp_ra2: g_vxl_light_az = k_ra2_az; g_vxl_light_el = k_ra2_el; break;
+		case vlp_ts:  g_vxl_light_az = k_ts_az;  g_vxl_light_el = k_ts_el;  break;
+		default: return;	// vlp_custom: nothing to set
+		}
+		g_vxl_lighting_version++;
+		save();
+	}
 	void vxl_light_direction(float& x, float& y, float& z)
 	{
 		const float pi = 3.14159265358979323846f;
@@ -577,8 +607,11 @@ namespace theme
 		float el_rad = g_vxl_light_el * pi / 180.0f;
 		float ce = std::cos(el_rad);
 		// Convention: az=0 → +X, az=90° → +Y; +elevation = light above the
-		// horizon (RA2 [Lighting] convention). After the splat's post-transform
-		// Y-flip on normals, +elevation correctly lights the *top* of the model.
+		// horizon (RA2 [Lighting] convention). This returns a WORLD-space
+		// (model-fixed) light vector — the splat rotates it into camera space
+		// (by the same yaw+pitch+Y-flip the voxel normals get) before dotting,
+		// so the lit side stays fixed to the model as the camera orbits, exactly
+		// like the engine's world-fixed VoxelLightSource.
 		// Default az=225°, el=-54.7356° → x=-0.40825, y=-0.40825, z=+0.81650
 		// (matches the original hand-tuned constants).
 		x = ce * std::cos(az_rad);
@@ -635,6 +668,27 @@ namespace theme
 		if (g_vxl_full_hierarchy == v)
 			return;
 		g_vxl_full_hierarchy = v;
+		save();
+	}
+
+	bool vxl_zoom_aware_ss() { return g_vxl_zoom_aware_ss; }
+
+	void set_vxl_zoom_aware_ss(bool v)
+	{
+		if (g_vxl_zoom_aware_ss == v)
+			return;
+		g_vxl_zoom_aware_ss = v;
+		save();
+	}
+
+	int vxl_splat_pad_extra() { return g_vxl_splat_pad_extra; }
+
+	void set_vxl_splat_pad_extra(int v)
+	{
+		v = std::clamp(v, -64, 64);
+		if (g_vxl_splat_pad_extra == v)
+			return;
+		g_vxl_splat_pad_extra = v;
 		save();
 	}
 
