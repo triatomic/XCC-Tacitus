@@ -4371,23 +4371,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// Light direction for VPL section selection. Fetched once per
 			// rebuild — same for every voxel in this splat.
 			float vpl_lx = 0, vpl_ly = 0, vpl_lz = 1;
-			float vpl_ambient = 0.0f;
-			float vpl_diffuse = 1.0f;
-			float vpl_specular = 0.0f;
 			// Secondary fresnel-like light: l2 = normalize(l + (0,0,1)) per
 			// vxl-renderer's shaders.hlsl:131. Adds a vertical bias so
 			// top-facing surfaces pick up extra brightness (a cheap stand-in
 			// for view-dependent fresnel — view direction is implicit since the
 			// camera looks down +z in our cam space). Same for every voxel.
 			float vpl_l2x = 0, vpl_l2y = 0, vpl_l2z = 0;
-			bool vpl_faithful = true;
 			if (m_vpl_loaded)
 			{
 				theme::vxl_light_direction(vpl_lx, vpl_ly, vpl_lz);
-				vpl_ambient = theme::vxl_light_ambient();
-				vpl_diffuse = theme::vxl_light_diffuse();
-				vpl_specular = theme::vxl_light_specular();
-				vpl_faithful = theme::vxl_vpl_engine_faithful();
 				// l + (0,0,1), normalized. Degenerate when l == (0,0,-1) (light
 				// pointing straight down through the model from above-camera);
 				// fall back to zero so f2 contributes nothing in that case.
@@ -4399,20 +4391,15 @@ void CXCCFileView::player_draw(CDC* pDC)
 					vpl_l2y = sy / slen;
 					vpl_l2z = sz / slen;
 				}
+				// Re-bake the section table if the lighting (amb/dif/spec) or
+				// the display palette changed since the last bake. Cheap
+				// (32*255 nearest-color searches) and only runs on actual
+				// change, not every splat.
+				if (m_vpl_baked.empty()
+					|| m_vpl_baked_lighting_version != theme::vxl_lighting_version()
+					|| m_vpl_baked_pal_version != m_player_bgra_version)
+					rebuild_baked_vpl();
 			}
-			// Pre-compute the maximum value of vxl-renderer's VPL curve at f=2
-			// (both lights fully saturated). Used to normalize the selected
-			// brightness back into the stock VPL's [0..31] section range
-			// without re-baking the VPL itself. The curve (mainwindow.cpp:543):
-			//   f<1 ? amb + f*dif : amb + dif + (f-1)*(dif + spec)
-			// At f=2: amb + dif + (dif + spec) = amb + 2*dif + spec.
-			// In faithful mode amb/dif are ignored — we use 1.0 placeholders
-			// so the brightness still spans [0..1+spec/(1+spec)*..]. Keeping
-			// the same constants the engine bakes its VPL with (1.0 / 1.0)
-			// preserves the ratio between sections at spec=0.
-			const float curve_amb = vpl_faithful ? 1.0f : vpl_ambient;
-			const float curve_dif = vpl_faithful ? 1.0f : vpl_diffuse;
-			const float curve_max = curve_amb + 2.0f * curve_dif + vpl_specular;
 			// Parallelize the splat by partitioning *output rows*: each thread
 			// owns a contiguous row band [y_lo, y_hi) of the supersample
 			// framebuffer and iterates the entire voxel cloud, writing only when
@@ -4477,29 +4464,18 @@ void CXCCFileView::player_draw(CDC* pDC)
 					ni8z = q(nrz_p);
 					if (m_vpl_loaded && voxel_pal != 0)
 					{
-						// Section index in [0..31] for Mixer's stock-VPL convention:
-						// 0 = brightest (n·L = +1, normal facing the light), 31 =
-						// darkest. Verified empirically against a real voxels.vpl.
-						//
-						// Two-light shading model ported from vxl-renderer
-						// (shaders.hlsl:127-135 + mainwindow.cpp:543):
-						//   f1 = clamp0(n . L)              primary directional light
-						//   f2 = clamp0((n . L2) / (d - (d-1) (n . L2)))   fresnel-like
-						//   f  = f1 + f2                    range [0..2]
-						// Then vxl-renderer's per-section VPL curve maps f to a
-						// brightness:
-						//   f<1 ? amb + f*dif : amb + dif + (f-1)*(dif + spec)
-						// vxl-renderer bakes that brightness into its own VPL. We
-						// don't re-bake — instead we normalize the brightness against
-						// curve_max and pick the stock-VPL section closest to that
-						// brightness, treating Mixer's section index as an inverse
-						// brightness scale (sec/31 = darkness; 1 - sec/31 = brightness).
-						//
-						// At specular = 0 with faithful constants, this collapses to
-						// the same per-voxel section the previous (1 - N.L)/2 * 31
-						// formula produced (within rounding) when l2 == 0; non-zero
-						// l2 always lifts top-facing brightness, which is the
-						// vxl-renderer behavior we're matching.
+						// Two-light shading model ported verbatim from vxl-renderer
+						// (shaders.hlsl:127-135 / gdi.cpp:286-307):
+						//   f1 = clamp0(n . L)             primary directional light
+						//   f2 = clamp0((n . L2)/(d-(d-1)(n . L2)))  fresnel-like
+						//   f  = f1 + f2                   range [0..2]
+						// The section index is then f scaled by 16 and truncated,
+						// indexing the (re-baked) VPL table directly -- no brightness
+						// curve here, no normalize, no inversion. Convention: more
+						// light => higher section (sec0 = darkest). Ambient/Diffuse/
+						// Specular are baked into m_vpl_baked by rebuild_baked_vpl()
+						// (vxl-renderer's two-stage model: bake amb/dif/spec into the
+						// table, then index it), so the knobs are live in VPL mode.
 						const float d2 = 3.0f;
 						float nL  = (ni8x * vpl_lx  + ni8y * vpl_ly  + ni8z * vpl_lz)  / 127.0f;
 						float nL2 = (ni8x * vpl_l2x + ni8y * vpl_l2y + ni8z * vpl_l2z) / 127.0f;
@@ -4512,23 +4488,21 @@ void CXCCFileView::player_draw(CDC* pDC)
 						if (f2 < 0.0f) f2 = 0.0f;
 						float f = f1 + f2;
 						if (f > 2.0f) f = 2.0f;
-						float brightness = f < 1.0f
-							? curve_amb + f * curve_dif
-							: curve_amb + curve_dif + (f - 1.0f) * (curve_dif + vpl_specular);
-						// Modulated branch additionally rescales by ambient/diffuse
-						// the same way the previous floor-lift did, so the "Use VPL
-						// engine formula" checkbox keeps its existing meaning: when
-						// unchecked, ambient acts as a brightness floor for back-faces.
-						if (!vpl_faithful)
-						{
-							float floor_b = vpl_ambient;
-							if (brightness < floor_b) brightness = floor_b;
-						}
-						float norm = brightness / (curve_max > 1e-4f ? curve_max : 1.0f);
-						if (norm < 0.0f) norm = 0.0f; else if (norm > 1.0f) norm = 1.0f;
-						int sec = static_cast<int>((1.0f - norm) * 31.0f + 0.5f);
+						// vxl-renderer's exact VPL section index
+						// (shaders.hlsl:134 / gdi.cpp:305):
+						//   i = 16 * (clamp0(f1) + clamp0(f2))  integer truncation.
+						// f spans [0..2] so i spans [0..32]; the renderer over-reads
+						// vpl_data[32] at f==2.0 exactly (a latent OOB in its own
+						// 32-section array). We clamp to [0,31]: in-bounds and faithful
+						// everywhere except that degenerate saturation corner.
+						int sec = static_cast<int>(16.0f * f);
 						if (sec < 0) sec = 0; else if (sec > 31) sec = 31;
-						voxel_pal = m_vpl_file.get_section(sec)[v.color];
+						// Index the re-baked table; fall back to the on-disk VPL if
+						// the bake is somehow unavailable (shouldn't happen -- the
+						// rebuild ran above when m_vpl_loaded).
+						voxel_pal = m_vpl_baked.empty()
+							? m_vpl_file.get_section(sec)[v.color]
+							: m_vpl_baked[static_cast<size_t>(sec) * 256 + v.color];
 					}
 				}
 				// Splat the rotation-aware footprint (computed above) centered
@@ -7116,11 +7090,7 @@ void CXCCFileView::OnVxlVplLoad()
 
 	if (chosen == k_clear_cmd)
 	{
-		m_vpl_loaded = false;
-		m_vpl_data.clear();
-		m_vpl_name.clear();
-		m_open_token++;	// invalidate splat cache (key includes m_vpl_loaded)
-		Invalidate();
+		clear_vpl();
 		return;
 	}
 
@@ -7128,17 +7098,8 @@ void CXCCFileView::OnVxlVplLoad()
 	{
 		// Re-run the same auto-detection used on file open. Searches
 		// m_source_mix → opposite pane's MIX → m_disk_dir for "voxels.vpl".
-		m_vpl_loaded = false;
-		m_vpl_data.clear();
-		m_vpl_name.clear();
-		try_auto_load_vpl();
-		if (!m_vpl_loaded)
-		{
+		if (!reload_vpl())
 			AfxMessageBox("No voxels.vpl found in this MIX, the opposite pane, or the source folder.", MB_ICONINFORMATION);
-			return;
-		}
-		m_open_token++;
-		Invalidate();
 		return;
 	}
 
@@ -7182,8 +7143,89 @@ void CXCCFileView::OnVxlVplLoad()
 	m_vpl_file.load(m_vpl_data);
 	m_vpl_loaded = true;
 	m_vpl_name = source_label;
+	m_vpl_baked_lighting_version = -1;	// force re-bake against the new VPL
 	m_open_token++;	// invalidate splat cache
 	Invalidate();
+}
+
+void CXCCFileView::clear_vpl()
+{
+	if (!m_vpl_loaded && m_vpl_data.size() == 0)
+		return;	// already synthetic; nothing to drop or repaint
+	m_vpl_loaded = false;
+	m_vpl_data.clear();
+	m_vpl_name.clear();
+	m_vpl_baked.clear();
+	m_vpl_baked_lighting_version = -1;
+	m_open_token++;	// invalidate splat cache (key includes m_vpl_loaded)
+	Invalidate();
+}
+
+// Re-bake the VPL section table from its internal palette + the current
+// Ambient/Diffuse/Specular sliders, exactly as vxl-renderer's editor does
+// (mainwindow.cpp:530 update_vpl). For each section s (0..31) and palette index
+// i (1..255): multiply the display color by vpl_curve(s) and remap to the
+// nearest palette entry (redmean distance). The splat then indexes m_vpl_baked
+// with sec = (int)(16*f), so amb/dif/spec become live in VPL mode without
+// touching the on-disk VPL. Baked against m_color_table (the 24-bit RGB we
+// actually render through), so the nearest-color search is in display space.
+void CXCCFileView::rebuild_baked_vpl()
+{
+	if (!m_vpl_loaded)
+		return;
+	const float amb = theme::vxl_light_ambient();
+	const float dif = theme::vxl_light_diffuse();
+	const float spec = theme::vxl_light_specular();
+	// vxl-renderer's per-section brightness curve (mainwindow.cpp:543):
+	//   f = s/16 ; f<1 ? amb + f*dif : amb + dif + (f-1)*(dif + spec)
+	auto vpl_curve = [&](int s) -> double {
+		double f = s / 16.0;
+		return f < 1.0 ? (amb + f * dif) : (amb + dif + (f - 1.0) * (dif + spec));
+	};
+	// Redmean color distance (mainwindow.cpp:546 color_sqdistance).
+	auto sqdist = [](int r1, int g1, int b1, int r2, int g2, int b2) -> long {
+		int dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+		int rmean = (r1 + r2) / 2;
+		return (((512 + rmean) * dr * dr) >> 8) + 4 * dg * dg + (((767 - rmean) * db * db) >> 8);
+	};
+	// Source colors = the 24-bit display palette (BGRA in m_color_table).
+	const t_palette32bgr_entry* ct = reinterpret_cast<const t_palette32bgr_entry*>(m_color_table);
+	m_vpl_baked.assign(static_cast<size_t>(32) * 256, 0);
+	for (int s = 0; s < 32; s++)
+	{
+		const double eff = vpl_curve(s);
+		byte* row = m_vpl_baked.data() + static_cast<size_t>(s) * 256;
+		for (int i = 1; i < 256; i++)
+		{
+			int tr = static_cast<int>(std::clamp(ct[i].r * eff, 0.0, 255.0));
+			int tg = static_cast<int>(std::clamp(ct[i].g * eff, 0.0, 255.0));
+			int tb = static_cast<int>(std::clamp(ct[i].b * eff, 0.0, 255.0));
+			long best = LONG_MAX;
+			int best_i = 1;
+			for (int f = 1; f < 256; f++)
+			{
+				long d = sqdist(ct[f].r, ct[f].g, ct[f].b, tr, tg, tb);
+				if (d < best) { best = d; best_i = f; }
+			}
+			row[i] = static_cast<byte>(best_i);
+		}
+	}
+	m_vpl_baked_lighting_version = theme::vxl_lighting_version();
+	m_vpl_baked_pal_version = m_player_bgra_version;
+}
+
+bool CXCCFileView::reload_vpl()
+{
+	// Re-run the same auto-detection used on file open. Searches
+	// m_source_mix -> opposite pane's MIX -> m_disk_dir for "voxels.vpl".
+	m_vpl_loaded = false;
+	m_vpl_data.clear();
+	m_vpl_name.clear();
+	try_auto_load_vpl();
+	m_vpl_baked_lighting_version = -1;	// force re-bake against the (re)loaded VPL
+	m_open_token++;	// invalidate splat cache regardless of outcome
+	Invalidate();
+	return m_vpl_loaded;
 }
 
 void CXCCFileView::OnVxlHvaLoad()

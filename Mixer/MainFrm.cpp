@@ -2299,6 +2299,19 @@ void CMainFrame::invalidate_vxl_cloud_in_file_view()
 		m_file_info_pane->invalidate_vxl_cloud();
 }
 
+void CMainFrame::clear_vpl_in_file_view()
+{
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		m_file_info_pane->clear_vpl();
+}
+
+bool CMainFrame::reload_vpl_in_file_view()
+{
+	if (m_file_info_pane && m_file_info_pane->GetSafeHwnd())
+		return m_file_info_pane->reload_vpl();
+	return false;
+}
+
 void CMainFrame::OnThemeParallelExtract()
 {
 	theme::set_parallel_extract(!theme::parallel_extract());

@@ -49,12 +49,18 @@ namespace theme
 		vxl_ao_method g_vxl_ao_method = ao_method_contact;
 		// Only consulted in contact mode; ignored by the hemisphere path.
 		vxl_ao_contact_falloff g_vxl_ao_contact_falloff = ao_contact_soft;
-		// Defaults below match the original hand-tuned constants in
-		// CXCCFileView's splat path: light_x=-0.40825, light_y=-0.40825,
-		// light_z=+0.81650 corresponds to az=225°, el≈54.7356° (atan2 of
-		// 0.81650 vs sqrt(0.40825^2*2)). Ambient/diffuse are unchanged.
-		const float k_default_az = 225.0f;
-		const float k_default_el = -54.7356f;
+		// Defaults below are aligned to vxl-renderer's default light direction.
+		// The renderer's D3D path uses light_direction = (0.2013022, -0.9101138,
+		// -0.3621709) (d3d.h:139); its GDI software path uses the same vector with
+		// +Y (gdi.h:78). Our splat dots the light against a Y-flipped stored normal
+		// (cam_normal = (nrx, -nry_p, nrz_p)), so to reproduce the GDI reference's
+		// dot product our light's Y must carry the opposite sign -> the D3D-signed
+		// vector. Solving vxl_light_direction() (x=cos el cos az, y=cos el sin az,
+		// z=-sin el) for that vector gives az=282.4721°, el=21.2336°.
+		// (Previous hand-tuned default was az=225°, el=-54.7356° ->
+		// (-0.40825,-0.40825,+0.81650).)
+		const float k_default_az = 282.4721f;
+		const float k_default_el = 21.2336f;
 		const float k_default_ambient = 0.55f;
 		const float k_default_diffuse = 0.85f;
 		// Specular default matches vxl-renderer's colorset_desc::specular

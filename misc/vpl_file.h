@@ -12,11 +12,13 @@
 // Total file size: 8976 bytes.
 //
 // section[s][c] is the palette index to use when palette color `c` is rendered
-// at brightness section `s` (0 = brightest / normal facing the light,
-// 31 = darkest / normal opposite the light). Some third-party docs describe
-// the order inverted; the layout above was verified empirically by tracing
-// remap entries in real voxels.vpl files. TS only meaningfully uses sections
-// 0..15; RA2/YR uses all 32.
+// at brightness section `s`. The section index follows the Westwood /
+// vxl-renderer convention: the engine computes a light factor and selects
+//   s = (int)(16 * (clamp0(n.L) + clamp0(n.L2/(d-(d-1)n.L2))))
+// so MORE light => HIGHER section. Thus s=0 is darkest (normal facing away
+// from the light) and higher sections are brighter. The factor can reach 32
+// at full saturation but only sections 0..31 are stored; callers clamp to 31.
+// TS only meaningfully uses the lower sections; RA2/YR uses all 32.
 // The "unknown" dword and remap_start/remap_end are not consistently set by
 // every generator (vxl-renderer leaves them as 0xffffffff / uninitialized),
 // so is_valid() does not constrain them.

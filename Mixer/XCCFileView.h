@@ -149,6 +149,13 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
+	// VPL master on/off, shared by the Load VPL popup's "Clear" item and the
+	// VXL Lighting dialog's "Use VPL engine formula" checkbox. clear_vpl()
+	// drops the active VPL and falls back to synthetic shading; reload_vpl()
+	// re-runs auto-detection (returns whether a VPL was found). Both invalidate
+	// the splat cache + repaint.
+	void clear_vpl();
+	bool reload_vpl();
 	bool m_show_alpha_only = false;
 	int m_zoom_pct = 100;
 	// Frame-rate limiter state. m_last_paint_ms is GetTickCount() at the
@@ -367,6 +374,17 @@ protected:
 	Cvpl_file m_vpl_file;
 	bool m_vpl_loaded = false;
 	string m_vpl_name;
+	// Re-baked VPL section table (32 sections x 256 indices), regenerated from
+	// m_vpl_file's internal palette + the Ambient/Diffuse/Specular sliders via
+	// vxl-renderer's vpl_curve (mainwindow.cpp:536). This mirrors the renderer's
+	// two-stage model: its editor BAKES amb/dif/spec into the VPL table, then the
+	// renderer just indexes it. Indexing m_vpl_baked (not m_vpl_file directly)
+	// makes the Specular knob live in VPL mode. Rebuilt lazily by
+	// rebuild_baked_vpl() when the lighting version or VPL/palette changes.
+	std::vector<byte> m_vpl_baked;
+	int m_vpl_baked_lighting_version = -1;
+	int m_vpl_baked_pal_version = -1;	// matches m_player_bgra_version at bake time
+	void rebuild_baked_vpl();
 	CButton m_vxl_vpl_load;
 	// Non-owning pointer to the MIX the current file came from (NULL when
 	// browsing the filesystem). Set by open_f(int, Cmix_file&) and cleared by

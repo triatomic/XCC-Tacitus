@@ -219,6 +219,12 @@ public:
 	// Drop+rebuild the VXL point cloud in the file-info pane. Used by the
 	// VXL Lighting dialog when normal source flips between Computed/File.
 	void invalidate_vxl_cloud_in_file_view();
+	// VPL master on/off routed to the file-info pane. Used by the VXL Lighting
+	// dialog's "Use VPL engine formula" checkbox: unchecking clears the VPL
+	// (synthetic shading), re-checking re-runs auto-detection. clear_vpl_in_file_view
+	// returns whether anything was using a VPL; reload returns whether one was found.
+	void clear_vpl_in_file_view();
+	bool reload_vpl_in_file_view();
 
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);

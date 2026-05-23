@@ -128,23 +128,26 @@ BOOL CVxlLightingDlg::OnInitDialog()
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_AZ_SLIDER),
 		"Direction the light comes from, around the screen. "
 		"0\xB0 = right, 90\xB0 = down, 180\xB0 = left, 270\xB0 = up. "
-		"Default: 225\xB0 (upper-left).");
+		"Default: 282\xB0 (matches vxl-renderer).");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_EL_SLIDER),
 		"How high the light sits above the screen plane. "
 		"-90\xB0 = behind the model, 0\xB0 = level with the camera, "
-		"+90\xB0 = directly in front. Default: 54.7\xB0.");
+		"+90\xB0 = directly in front. Default: 21.2\xB0 (matches vxl-renderer).");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_AMBIENT_SLIDER),
 		"Floor brightness \x97 how lit a surface is when fully turned away "
 		"from the light. 0 = pitch black on the dark side, 1 = no shading at "
-		"all. Default: 0.55.");
+		"all. Default: 0.55. With a VPL loaded this re-bakes the VPL table "
+		"(like vxl-renderer's editor); without one it drives synthetic shading.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_DIFFUSE_SLIDER),
 		"Shading range above ambient. Higher values = brighter highlights on "
 		"faces pointing at the light, more contrast. Final brightness peaks "
-		"at ambient + diffuse. Default: 0.85.");
+		"at ambient + diffuse. Default: 0.85. With a VPL loaded this re-bakes "
+		"the VPL table; without one it drives synthetic shading.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_SPECULAR_SLIDER),
-		"Specular peak above ambient + diffuse on fully-lit faces. Ported "
-		"from vxl-renderer's per-colorset VPL curve. 0 = strict Lambertian "
-		"(no specular bump), 1.2 = vxl-renderer default. Range 0..5.");
+		"Specular peak above ambient + diffuse on fully-lit faces. 0 = strict "
+		"Lambertian (no specular bump), 1.2 = vxl-renderer default. Range 0..5. "
+		"With a VPL loaded this re-bakes the VPL table (the engine bakes spec "
+		"into the table at generation time); without one it drives synthetic shading.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_LIGHT_RESET),
 		"Restore all four sliders to their default values.");
 	m_tooltips.AddTool(GetDlgItem(IDC_VXL_NORMAL_SRC_COMPUTED),
@@ -249,17 +252,18 @@ void CVxlLightingDlg::load_from_theme()
 
 void CVxlLightingDlg::update_ambient_diffuse_enable()
 {
-	// Engine-faithful VPL ignores both sliders. Gray them + their edit boxes
-	// so it's visually obvious the values aren't doing anything.
-	const bool ena = !theme::vxl_vpl_engine_faithful();
-	if (HWND h = m_ambient.GetSafeHwnd())          ::EnableWindow(h, ena ? TRUE : FALSE);
-	if (HWND h = m_diffuse.GetSafeHwnd())          ::EnableWindow(h, ena ? TRUE : FALSE);
-	if (HWND h = m_ambient_value.GetSafeHwnd())    ::EnableWindow(h, ena ? TRUE : FALSE);
-	if (HWND h = m_diffuse_value.GetSafeHwnd())    ::EnableWindow(h, ena ? TRUE : FALSE);
-	if (HWND h = GetDlgItem(IDC_VXL_LIGHT_AMBIENT_LABEL)->GetSafeHwnd())
-		::EnableWindow(h, ena ? TRUE : FALSE);
-	if (HWND h = GetDlgItem(IDC_VXL_LIGHT_DIFFUSE_LABEL)->GetSafeHwnd())
-		::EnableWindow(h, ena ? TRUE : FALSE);
+	// Ambient/Diffuse/Specular are always live now. In VPL mode they re-bake
+	// the VPL section table via vxl-renderer's vpl_curve (the editor's two-stage
+	// model: bake amb/dif/spec into the table, then index it); in synthetic mode
+	// they drive ambient + diffuse*max(0,n.L) directly. So nothing is greyed.
+	for (HWND h : { m_ambient.GetSafeHwnd(), m_diffuse.GetSafeHwnd(), m_specular.GetSafeHwnd(),
+		m_ambient_value.GetSafeHwnd(), m_diffuse_value.GetSafeHwnd(), m_specular_value.GetSafeHwnd(),
+		GetDlgItem(IDC_VXL_LIGHT_AMBIENT_LABEL)->GetSafeHwnd(),
+		GetDlgItem(IDC_VXL_LIGHT_DIFFUSE_LABEL)->GetSafeHwnd(),
+		GetDlgItem(IDC_VXL_LIGHT_SPECULAR_LABEL)->GetSafeHwnd() })
+	{
+		if (h) ::EnableWindow(h, TRUE);
+	}
 }
 
 void CVxlLightingDlg::update_computed_combos_enable()
@@ -633,6 +637,19 @@ void CVxlLightingDlg::OnVplFaithfulToggle()
 	const bool checked = IsDlgButtonChecked(IDC_VXL_LIGHT_VPL_FAITHFUL) == BST_CHECKED;
 	theme::set_vxl_vpl_engine_faithful(checked);
 	update_ambient_diffuse_enable();
+	// This checkbox doubles as the VPL master switch. Unchecking it drops the
+	// active VPL and falls back to synthetic shading (same as the Load VPL
+	// popup's "Clear" item); re-checking re-runs auto-detection so the action
+	// is reversible. If no voxels.vpl can be found on re-check, the view stays
+	// synthetic -- but the "engine formula" preference is still recorded, so a
+	// later manual Load VPL... will use the faithful path.
+	if (CMainFrame* mf = GetMainFrame())
+	{
+		if (!checked)
+			mf->clear_vpl_in_file_view();
+		else
+			mf->reload_vpl_in_file_view();
+	}
 	invalidate_vxl_view();
 	theme::flush_lighting_save();
 }
