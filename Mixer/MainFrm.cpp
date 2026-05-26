@@ -636,6 +636,12 @@ bool CMainFrame::is_active_pane(const CXCCMixerView* pane) const
 {
 	if (!pane)
 		return false;
+	// One-pane mode: the middle pane is hidden, so there's nothing to
+	// distinguish between. Treat no pane as active so the border doesn't
+	// paint. The menu update handler also greys ID_THEME_ACTIVE_PANE_BORDER
+	// in this mode; this is the runtime gate that backs it.
+	if (!m_two_panes)
+		return false;
 	// Default to the left pane until something gains focus, so a border shows
 	// from startup instead of neither pane being marked.
 	const CXCCMixerView* active = m_active_pane ? m_active_pane : m_left_mix_pane;
@@ -2380,6 +2386,10 @@ void CMainFrame::OnThemeActivePaneBorder()
 void CMainFrame::OnUpdateThemeActivePaneBorder(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::active_pane_border() ? 1 : 0);
+	// Indicator is meaningless with a single pane visible. Grey the menu item
+	// so the checkmark + state are obviously inert (is_active_pane already
+	// returns false in this mode, so the border doesn't paint either way).
+	pCmdUI->Enable(m_two_panes);
 }
 
 // Sync the two top-strip children's visibility to the current settings, re-lay
@@ -2752,6 +2762,14 @@ void CMainFrame::set_pane_layout(bool two)
 	m_wndSplitter.RedrawWindow(NULL, NULL,
 		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	m_two_panes = two;
+	// The active-pane border is painted in WM_NCPAINT; toggling layout flips
+	// what is_active_pane() returns, so each pane needs an NC repaint to drop
+	// (one-pane) or restore (two-pane) the accent strip.
+	const UINT nc = RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW;
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		m_left_mix_pane->RedrawWindow(NULL, NULL, nc);
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		m_right_mix_pane->RedrawWindow(NULL, NULL, nc);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "two_panes", two ? 1 : 0);
 }
 
