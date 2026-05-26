@@ -2191,6 +2191,13 @@ void CMainFrame::OnThemeShowFilterBox()
 		m_filter_edit.ShowWindow(theme::show_filter_box() ? SW_SHOW : SW_HIDE);
 	// Re-flow: layout_filter_bar reclaims the strip for the panes when hidden.
 	layout_filter_bar();
+	// SetWindowPos shifts the splitter but doesn't force its children to repaint,
+	// so the listviews keep stale pixels (garbage colors) until the next real
+	// WM_PAINT (maximize / hover). Invalidate the splitter subtree now — same fix
+	// as set_pane_layout after its RecalcLayout.
+	if (m_wndSplitter.GetSafeHwnd())
+		m_wndSplitter.RedrawWindow(NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void CMainFrame::OnUpdateThemeShowFilterBox(CCmdUI* pCmdUI)
