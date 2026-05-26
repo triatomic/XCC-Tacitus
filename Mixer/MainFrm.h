@@ -74,6 +74,7 @@ public:
 	protected:
 	virtual BOOL OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext);
 	//}}AFX_VIRTUAL
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 // Implementation
 public:
@@ -193,7 +194,17 @@ protected:
 	CXCCMixerView* m_left_mix_pane;
 	CXCCMixerView* m_right_mix_pane;
 	CXCCFileView* m_file_info_pane;
+	// Sticky "active pane": the last mix list to hold focus. Drives the
+	// accent-border indicator and which pane the shared filter box acts on.
+	// Set via set_active_pane() from CXCCMixerView::OnSetFocus; NOT changed
+	// when focus moves to the filter box, so the border persists while typing.
+	CXCCMixerView* m_active_pane = nullptr;
 	CThemedSplitterWnd m_wndSplitter;
+	// Single filter bar spanning the top of the client area, between the menu
+	// bar and the panes. Child of the frame; filters whichever mix pane is
+	// active (focused, else left). The frame owns layout (OnSize reserves a
+	// top strip for it and shrinks the splitter below).
+	CEdit m_filter_edit;
 	CThemedStatusBar m_wndStatusBar;
 	CThemedHeaderCtrl m_left_header;
 	CThemedHeaderCtrl m_right_header;
@@ -211,6 +222,16 @@ public:
 	// SHOpenWithDialog returns — the picker invalidates our process-wide
 	// theme cache and we need to put dark mode back together.
 	void apply_theme_to_children();
+	// Refresh the shared filter edit from the active pane's filter text (e.g.
+	// after a pane navigates and clears its filter). Public: the mix view calls
+	// it from update_list. Safe before the edit exists.
+	void sync_filter_ui();
+	// Mark a mix pane as the active one (called when a list gains focus). Repaints
+	// both panes' borders so the indicator moves. Ignores null / no-op repeats.
+	void set_active_pane(CXCCMixerView* pane);
+	// True if the given pane is the sticky active pane. Used by the pane's
+	// non-client border paint. Defaults to the left pane until one gains focus.
+	bool is_active_pane(const CXCCMixerView* pane) const;
 	// Trigger a repaint of the right-hand file-info pane. Used by the VXL
 	// Lighting dialog to refresh the splat after sliders change.
 	void invalidate_file_info_pane();
@@ -227,7 +248,14 @@ public:
 	bool reload_vpl_in_file_view();
 
 protected:
+	// Filter-bar plumbing. layout_filter_bar() positions the edit + shrinks the
+	// splitter; active_mix_pane() picks the focused pane (left fallback).
+	// sync_filter_ui() is declared public above (the mix view calls it).
+	void layout_filter_bar();
+	CXCCMixerView* active_mix_pane() const;
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnFilterChange();
 	afx_msg void OnViewGameTD();
 	afx_msg void OnViewGameRA();
 	afx_msg void OnViewGameTS();
@@ -337,6 +365,8 @@ protected:
 	afx_msg void OnThemeShowGrid();
 	afx_msg void OnThemeShowColumnHeaders();
 	afx_msg void OnThemeHideEmptyResults();
+	afx_msg void OnThemeActivePaneBorder();
+	afx_msg void OnThemeShowFilterBox();
 	afx_msg void OnThemeAlphaColor();
 	afx_msg void OnThemeShpTransparency();
 	afx_msg void OnUpdateThemeShpTransparency(CCmdUI* pCmdUI);
@@ -349,6 +379,8 @@ protected:
 	afx_msg void OnUpdateThemeShowGrid(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeShowColumnHeaders(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeHideEmptyResults(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeActivePaneBorder(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeShowFilterBox(CCmdUI* pCmdUI);
 	afx_msg void OnThemeInterpNearest();
 	afx_msg void OnThemeInterpBilinear();
 	afx_msg void OnThemeInterpBicubic();

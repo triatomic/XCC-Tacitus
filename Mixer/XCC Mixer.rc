@@ -182,12 +182,15 @@ BEGIN
         BEGIN
             MENUITEM "&One Pane",                   ID_THEME_PANES_ONE
             MENUITEM "&Two Panes",                  ID_THEME_PANES_TWO
+            MENUITEM SEPARATOR
+            MENUITEM "Active Pane &Border",         ID_THEME_ACTIVE_PANE_BORDER
         END
         POPUP "&Size Format"
         BEGIN
             MENUITEM "&Auto",                       ID_THEME_SIZE_FORMAT_AUTO
             MENUITEM "&Bytes",                      ID_THEME_SIZE_FORMAT_BYTES
         END
+        MENUITEM "Show &Filter Box",            ID_THEME_SHOW_FILTER_BOX
         MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
         MENUITEM "Show Column &Headers",        ID_THEME_SHOW_COLUMN_HEADERS
         MENUITEM "Hide Results When Search Is &Empty", ID_THEME_HIDE_EMPTY_RESULTS
@@ -819,6 +822,8 @@ BEGIN
                             "Open files in registered external programs when launched from XCC"
     ID_THEME_PANES_ONE      "Hide the middle MIX pane (file-info takes the slack)"
     ID_THEME_PANES_TWO      "Show both MIX panes side-by-side"
+    ID_THEME_ACTIVE_PANE_BORDER "Frame the active MIX pane with an accent border"
+    ID_THEME_SHOW_FILTER_BOX "Show the filter box above the MIX panes"
     ID_THEME_SIZE_FORMAT_AUTO "Display file sizes scaled (e.g. 1.5 MB)"
     ID_THEME_SIZE_FORMAT_BYTES "Display file sizes as raw byte counts"
     ID_THEME_VXL_SS_OFF     "No supersampling (1x). Fastest, aliased edges."

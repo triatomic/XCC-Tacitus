@@ -82,6 +82,17 @@ namespace theme
 	bool hide_empty_results();
 	void set_hide_empty_results(bool v);
 
+	// When on (default), the active (last-focused) MIX pane is framed with a
+	// 1px accent border so it's easy to tell which pane the filter / copy ops
+	// act on. Off removes the indicator entirely.
+	bool active_pane_border();
+	void set_active_pane_border(bool v);
+
+	// When on (default), the filter box is shown above the MIX panes. Off hides
+	// it and the panes reclaim that strip. CMainFrame re-lays-out on change.
+	bool show_filter_box();
+	void set_show_filter_box(bool v);
+
 	// Size column format: Auto = "1.5 MB" via totalSize(); Bytes = grouped
 	// raw byte count "1,572,864". Applies to the listview panes and to the
 	// right-pane MIX/PAK/BIG/RG-MIX content listings.
@@ -549,6 +560,15 @@ namespace theme
 	// ComboBox that also has CBS_HASSTRINGS — must NOT be combined with
 	// CBS_OWNERDRAWFIXED/VARIABLE (the subclass owns WM_PAINT itself).
 	void subclass_combobox(HWND h_combo);
+
+	// Apply dark-mode treatment to a standalone Edit control that is NOT a
+	// child of a themed dialog (e.g. the inline filter bar parented directly
+	// to a CListView pane). apply_dialog's EnumChildWindows never reaches such
+	// edits, so call this at creation and on every theme switch. Mirrors the
+	// Edit branch of the internal theme_child_proc: in dark mode installs the
+	// 1px border subclass (subclass-first, then sync) and strips/restores the
+	// uxtheme WS_EX_CLIENTEDGE frame to match the resolved mode. Idempotent.
+	void apply_edit(HWND h_edit);
 
 	// Bilinear resample of a 32bpp BGRA top-down image. The same routine
 	// the splat path uses internally; exposed so the turntable Record

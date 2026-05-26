@@ -290,6 +290,9 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	//}}AFX_MSG_MAP
 	ON_WM_XBUTTONUP()
 	ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
+	ON_WM_SETFOCUS()
+	ON_WM_NCCALCSIZE()
+	ON_WM_NCPAINT()
 END_MESSAGE_MAP()
 
 enum t_error_message
@@ -369,6 +372,58 @@ static CXCCMixerApp* GetApp()
 static CMainFrame* GetMainFrame()
 {
 	return static_cast<CMainFrame*>(AfxGetMainWnd());
+}
+
+// Width (px) of the active-pane accent border, reserved in the non-client area
+// by OnNcCalcSize and painted by OnNcPaint.
+static const int kPaneFocusBorder = 1;
+
+void CXCCMixerView::OnSetFocus(CWnd* pOldWnd)
+{
+	CListView::OnSetFocus(pOldWnd);
+	// Become the sticky active pane; the frame repaints both panes' borders.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->set_active_pane(this);
+}
+
+void CXCCMixerView::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
+{
+	CListView::OnNcCalcSize(bCalcValidRects, lpncsp);
+	// Steal a kPaneFocusBorder strip on every edge from the client area so the
+	// border has somewhere to paint without covering row pixels. Same idea as
+	// dark_edit_proc's WM_NCCALCSIZE (theme.cpp). Always reserve it (not only
+	// when active) so toggling focus doesn't reflow the list.
+	if (lpncsp)
+		::InflateRect(&lpncsp->rgrc[0], -kPaneFocusBorder, -kPaneFocusBorder);
+}
+
+void CXCCMixerView::OnNcPaint()
+{
+	// Let the base paint scrollbars / any system NC widgets first.
+	CListView::OnNcPaint();
+	CMainFrame* mf = GetMainFrame();
+	// Indicator can be toggled off (Theme > Pane Layout > Active Pane Border).
+	// When off, treat no pane as active so the strip paints with the plain bg.
+	const bool active = theme::active_pane_border()
+		&& mf && mf->is_active_pane(this);
+	HDC hdc = ::GetWindowDC(GetSafeHwnd());
+	if (!hdc)
+		return;
+	CRect rc;
+	GetWindowRect(rc);
+	rc.OffsetRect(-rc.left, -rc.top);   // window DC coords are window-relative
+	// Active: accent frame. Inactive: paint the strip with the surrounding bg
+	// (theme bg in dark, window color in light) so no stale border lingers.
+	const COLORREF c = active ? theme::accent()
+		: (theme::is_dark() ? theme::bg() : ::GetSysColor(COLOR_WINDOW));
+	HPEN pen = ::CreatePen(PS_INSIDEFRAME, kPaneFocusBorder, c);
+	HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+	HGDIOBJ old_brush = ::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+	::Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+	::SelectObject(hdc, old_brush);
+	::SelectObject(hdc, old_pen);
+	::DeleteObject(pen);
+	::ReleaseDC(GetSafeHwnd(), hdc);
 }
 
 CXCCMixerView::CXCCMixerView()
@@ -751,6 +806,11 @@ void CXCCMixerView::update_list()
 {
 	DragAcceptFiles(can_edit());
 	clear_list();
+	// Navigation resets the filter: every location change funnels through
+	// update_list, so each new MIX/folder starts showing all files. The frame
+	// owns the filter edit; it re-syncs the edit's text to this pane's (now
+	// empty) filter when the active pane changes or after a nav (sync_filter_ui).
+	m_filter_text.clear();
 	t_index_entry e;
 	m_palette_loaded = false;
 
@@ -837,13 +897,61 @@ void CXCCMixerView::update_list()
 		}
 	}
 	SetRedraw(false);
-	CListCtrl& lc = GetListCtrl();
-	for (auto& i : m_index)
-		lc.SetItemData(lc.InsertItem(lc.GetItemCount(), LPSTR_TEXTCALLBACK), i.first);
+	insert_filtered_rows();
 	sort_list(1, false);
 	SetRedraw(true);
 	autosize_colums();
 	m_reading = true;
+	// Navigation cleared m_filter_text above; tell the frame to refresh the
+	// shared filter edit so it doesn't keep showing the stale text. Safe before
+	// the edit exists (guarded) and non-recursive (empty text => set_filter
+	// no-ops). Only for the active pane, so a background pane's update_list
+	// doesn't stomp the focused pane's edit.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->sync_filter_ui();
+}
+
+void CXCCMixerView::insert_filtered_rows()
+{
+	CListCtrl& lc = GetListCtrl();
+	for (auto& i : m_index)
+	{
+		// id 0 is the pinned anchor row (".." inside a MIX, "Browse..." on
+		// disk) — always shown so the user can still navigate while filtering.
+		if (i.first != 0 && !m_filter_text.empty()
+			&& !fname_filter(i.second.name, m_filter_text))
+			continue;
+		lc.SetItemData(lc.InsertItem(lc.GetItemCount(), LPSTR_TEXTCALLBACK), i.first);
+	}
+}
+
+void CXCCMixerView::move_selection(int step)
+{
+	CListCtrl& lc = GetListCtrl();
+	if (lc.GetItemCount() <= 0)
+		return;
+	int sel = lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+	if (sel < 0)
+		sel = 0;
+	else
+		sel = max(0, min(sel + step, lc.GetItemCount() - 1));
+	lc.SetItemState(sel, LVIS_SELECTED | LVIS_FOCUSED,
+		LVIS_SELECTED | LVIS_FOCUSED);
+	lc.EnsureVisible(sel, FALSE);
+}
+
+void CXCCMixerView::set_filter(const string& filter)
+{
+	if (filter == m_filter_text)
+		return;
+	m_filter_text = filter;
+	CListCtrl& lc = GetListCtrl();
+	SetRedraw(false);
+	lc.DeleteAllItems();
+	insert_filtered_rows();
+	sort_list(m_sort_column, m_sort_reverse);
+	SetRedraw(true);
+	lc.Invalidate();
 }
 
 void CXCCMixerView::autosize_colums()

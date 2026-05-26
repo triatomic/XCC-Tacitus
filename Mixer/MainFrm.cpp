@@ -80,6 +80,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnViewPalette)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnUpdateViewPalette)
 	ON_WM_CREATE()
+	ON_WM_SIZE()
+	ON_EN_CHANGE(IDC_PANE_FILTER, OnFilterChange)
 	ON_COMMAND(ID_VIEW_GAME_TD, OnViewGameTD)
 	ON_COMMAND(ID_VIEW_GAME_RA, OnViewGameRA)
 	ON_COMMAND(ID_VIEW_GAME_TS, OnViewGameTS)
@@ -172,6 +174,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_COLUMN_HEADERS, OnUpdateThemeShowColumnHeaders)
 	ON_COMMAND(ID_THEME_HIDE_EMPTY_RESULTS, OnThemeHideEmptyResults)
 	ON_UPDATE_COMMAND_UI(ID_THEME_HIDE_EMPTY_RESULTS, OnUpdateThemeHideEmptyResults)
+	ON_COMMAND(ID_THEME_ACTIVE_PANE_BORDER, OnThemeActivePaneBorder)
+	ON_UPDATE_COMMAND_UI(ID_THEME_ACTIVE_PANE_BORDER, OnUpdateThemeActivePaneBorder)
+	ON_COMMAND(ID_THEME_SHOW_FILTER_BOX, OnThemeShowFilterBox)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_FILTER_BOX, OnUpdateThemeShowFilterBox)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
 	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHP_TRANSPARENCY, OnUpdateThemeShpTransparency)
@@ -396,13 +402,178 @@ BOOL CMainFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext)
 
 	SetActiveView(reinterpret_cast<CView*>(m_left_mix_pane));
 
+	// Single filter bar across the top of the client area (child of the frame,
+	// sibling of the splitter). OnSize lays it out; created with a dummy rect.
+	m_filter_edit.CreateEx(0, _T("EDIT"), NULL,
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+		CRect(0, 0, 0, 0), this, IDC_PANE_FILTER);
+	m_filter_edit.SetFont(GetFont() ? GetFont() : CFont::FromHandle(
+		(HFONT)::GetStockObject(DEFAULT_GUI_FONT)));
+	::SendMessageW(m_filter_edit.GetSafeHwnd(), EM_SETCUEBANNER, TRUE,
+		reinterpret_cast<LPARAM>(L"Filter files in active pane..."));
+	theme::apply_edit(m_filter_edit.GetSafeHwnd());
+	// Honor the persisted Show Filter Box setting (default on). layout_filter_bar
+	// reserves no strip when hidden.
+	if (!theme::show_filter_box())
+		m_filter_edit.ShowWindow(SW_HIDE);
+
 	apply_theme_to_children();
 	if (!m_two_panes)
 		set_pane_layout(false);
 	return true;
 }
 
-void CMainFrame::OnViewGameAuto() 
+// Reserve a top strip for the filter edit and shrink the splitter below it.
+// Called after every frame resize / RecalcLayout (the base lays the splitter
+// out to the full client first; we then carve the strip back out).
+void CMainFrame::layout_filter_bar()
+{
+	if (!m_filter_edit.GetSafeHwnd() || !m_wndSplitter.GetSafeHwnd())
+		return;
+	CRect rc;
+	GetClientRect(rc);
+	// Subtract the status-bar height so the splitter doesn't overlap it (the
+	// base already positioned the status bar at the bottom).
+	if (m_wndStatusBar.GetSafeHwnd())
+	{
+		CRect sb;
+		m_wndStatusBar.GetWindowRect(sb);
+		rc.bottom -= sb.Height();
+	}
+	// When the filter box is hidden (Theme > Pane Layout > Show Filter Box off),
+	// reserve no strip — the splitter fills the whole client area.
+	int bar = 0;
+	if (theme::show_filter_box())
+	{
+		TEXTMETRIC tm = {};
+		{
+			CClientDC dc(&m_filter_edit);
+			CFont* f = m_filter_edit.GetFont();
+			CFont* old = f ? dc.SelectObject(f) : nullptr;
+			dc.GetTextMetrics(&tm);
+			if (old) dc.SelectObject(old);
+		}
+		// Small 2px left/right margin so the filter box doesn't sit flush
+		// against the side window edges. Top stays flush; panes start below it.
+		const int pad = 2;
+		bar = tm.tmHeight + 8;
+		m_filter_edit.SetWindowPos(NULL, rc.left + pad, rc.top,
+			rc.Width() - 2 * pad, bar,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	m_wndSplitter.SetWindowPos(NULL, rc.left, rc.top + bar,
+		rc.Width(), rc.bottom - (rc.top + bar) > 0 ? rc.bottom - (rc.top + bar) : 0,
+		SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+CXCCMixerView* CMainFrame::active_mix_pane() const
+{
+	// Sticky: the last list to hold focus (set in CXCCMixerView::OnSetFocus).
+	// The filter box does not change it, so typing keeps acting on this pane.
+	// Falls back to the live-focus check, then the left pane, before one is set.
+	if (m_active_pane)
+		return m_active_pane;
+	HWND f = ::GetFocus();
+	if (f && m_right_mix_pane && (f == m_right_mix_pane->GetSafeHwnd()
+		|| ::IsChild(m_right_mix_pane->GetSafeHwnd(), f)))
+		return m_right_mix_pane;
+	return m_left_mix_pane;
+}
+
+void CMainFrame::set_active_pane(CXCCMixerView* pane)
+{
+	if (!pane || pane == m_active_pane)
+		return;
+	CXCCMixerView* prev = m_active_pane;
+	m_active_pane = pane;
+	// Repaint both panes' non-client borders so the indicator moves off the old
+	// pane and onto the new one. RDW_FRAME limits the work to the NC area.
+	const UINT f = RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW;
+	if (prev && prev->GetSafeHwnd())
+		prev->RedrawWindow(NULL, NULL, f);
+	if (pane->GetSafeHwnd())
+		pane->RedrawWindow(NULL, NULL, f);
+}
+
+bool CMainFrame::is_active_pane(const CXCCMixerView* pane) const
+{
+	if (!pane)
+		return false;
+	// Default to the left pane until something gains focus, so a border shows
+	// from startup instead of neither pane being marked.
+	const CXCCMixerView* active = m_active_pane ? m_active_pane : m_left_mix_pane;
+	return pane == active;
+}
+
+void CMainFrame::sync_filter_ui()
+{
+	if (!m_filter_edit.GetSafeHwnd())
+		return;
+	CXCCMixerView* pane = active_mix_pane();
+	CString cur;
+	m_filter_edit.GetWindowText(cur);
+	const CString want(pane ? pane->filter_text().c_str() : "");
+	if (cur != want)
+		m_filter_edit.SetWindowText(want);
+}
+
+void CMainFrame::OnSize(UINT nType, int cx, int cy)
+{
+	CFrameWnd::OnSize(nType, cx, cy);
+	layout_filter_bar();
+}
+
+BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
+{
+	// Filter edit has focus: keep keystrokes away from the frame's accelerator
+	// table. CFrameWnd::PreTranslateMessage runs TranslateAccelerator, which
+	// would consume editing keys bound as accelerators (e.g. Backspace =
+	// file_close "go up", Delete, etc.) before the edit ever sees them — so
+	// typing/Backspace appeared dead. We intercept our own niceties (Esc /
+	// arrows) and route everything else through CWnd::PreTranslateMessage,
+	// which does NOT translate accelerators, so the edit gets normal input.
+	if (m_filter_edit.GetSafeHwnd() && pMsg->hwnd == m_filter_edit.GetSafeHwnd())
+	{
+		if (pMsg->message == WM_KEYDOWN)
+		{
+			if (pMsg->wParam == VK_ESCAPE)
+			{
+				CString s;
+				m_filter_edit.GetWindowText(s);
+				if (!s.IsEmpty())
+				{
+					m_filter_edit.SetWindowText("");   // EN_CHANGE -> set_filter("")
+					return TRUE;
+				}
+			}
+			else if (pMsg->wParam == VK_DOWN || pMsg->wParam == VK_UP
+				|| pMsg->wParam == VK_PRIOR || pMsg->wParam == VK_NEXT)
+			{
+				if (CXCCMixerView* pane = active_mix_pane())
+				{
+					const bool down = (pMsg->wParam == VK_DOWN || pMsg->wParam == VK_NEXT);
+					pane->move_selection(down ? 1 : -1);
+					return TRUE;
+				}
+			}
+		}
+		// Bypass accelerator translation; let the edit handle the key normally.
+		return CWnd::PreTranslateMessage(pMsg);
+	}
+	return CFrameWnd::PreTranslateMessage(pMsg);
+}
+
+void CMainFrame::OnFilterChange()
+{
+	if (CXCCMixerView* pane = active_mix_pane())
+	{
+		CString s;
+		m_filter_edit.GetWindowText(s);
+		pane->set_filter(static_cast<const char*>(s));
+	}
+}
+
+void CMainFrame::OnViewGameAuto()
 {
 	m_game = static_cast<t_game>(-1);
 }
@@ -1997,6 +2168,36 @@ void CMainFrame::OnUpdateThemeHideEmptyResults(CCmdUI* pCmdUI)
 	pCmdUI->SetCheck(theme::hide_empty_results() ? 1 : 0);
 }
 
+void CMainFrame::OnThemeActivePaneBorder()
+{
+	theme::set_active_pane_border(!theme::active_pane_border());
+	// Repaint both panes' non-client borders to reflect the new state.
+	const UINT f = RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW;
+	if (m_left_mix_pane && m_left_mix_pane->GetSafeHwnd())
+		m_left_mix_pane->RedrawWindow(NULL, NULL, f);
+	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
+		m_right_mix_pane->RedrawWindow(NULL, NULL, f);
+}
+
+void CMainFrame::OnUpdateThemeActivePaneBorder(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::active_pane_border() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeShowFilterBox()
+{
+	theme::set_show_filter_box(!theme::show_filter_box());
+	if (m_filter_edit.GetSafeHwnd())
+		m_filter_edit.ShowWindow(theme::show_filter_box() ? SW_SHOW : SW_HIDE);
+	// Re-flow: layout_filter_bar reclaims the strip for the panes when hidden.
+	layout_filter_bar();
+}
+
+void CMainFrame::OnUpdateThemeShowFilterBox(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::show_filter_box() ? 1 : 0);
+}
+
 void CMainFrame::OnThemeAlphaColor()
 {
 	CColorPickerDlg dlg(theme::alpha_color(), this);
@@ -2542,6 +2743,13 @@ void CMainFrame::apply_theme_to_children()
 		// they were created with and don't follow a Light <-> Dark toggle.
 		m_file_info_pane->reapply_player_theme();
 		::RedrawWindow(m_file_info_pane->GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
+	if (m_filter_edit.GetSafeHwnd())
+	{
+		// The filter edit is a child of the frame (not a themed dialog), so the
+		// dialog child-walk never reaches it; re-theme it here on every flip.
+		theme::apply_edit(m_filter_edit.GetSafeHwnd());
+		::RedrawWindow(m_filter_edit.GetSafeHwnd(), NULL, NULL, inv_flags);
 	}
 	if (m_wndStatusBar.GetSafeHwnd())
 	{

@@ -81,6 +81,20 @@ public:
 	void set_other_panes(CXCCFileView* file_view_pane, CXCCMixerView* other_pane);
 	void sort_list(int i, bool reverse);
 	void update_list();
+	// Re-insert listview rows from m_index honoring m_filter_text. The single
+	// row-visibility choke point: the anchor row (id 0, ".."/"Browse...") is
+	// always kept; every other entry passes only when the filter is empty or
+	// fname_filter(name, filter) matches. Callers wrap SetRedraw + sort.
+	void insert_filtered_rows();
+	// Set this pane's name filter (fname_filter syntax) and rebuild the rows.
+	// No-op if unchanged. The filter UI (a single edit above the panes) lives
+	// on CMainFrame, which calls this on the active pane as the user types.
+	void set_filter(const string& filter);
+	const string& filter_text() const { return m_filter_text; }
+	// Move the list selection by one row (or page) without giving the list
+	// focus — used by the frame's filter edit so arrow keys browse results
+	// while the user keeps typing. step: +1 down, -1 up (PgUp/PgDn reuse ±1).
+	void move_selection(int step);
 
 	const map<int, t_index_entry>& t_index_list() const
 	{
@@ -225,6 +239,11 @@ protected:
 	//}}AFX_MSG
 	afx_msg void OnXButtonUp(UINT nFlags, UINT nButton, CPoint point);
 	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
+	// Active-pane accent border (drawn in the non-client area when this pane is
+	// the frame's sticky active pane). OnSetFocus marks this pane active.
+	afx_msg void OnSetFocus(CWnd* pOldWnd);
+	afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
+	afx_msg void OnNcPaint();
 	DECLARE_MESSAGE_MAP()
 public:
 	bool nav_go_up();
@@ -246,6 +265,11 @@ private:
 	stack<t_nav_entry> m_nav_forward;
 	stack<int> m_entered_ids;
 	bool m_nav_replaying = false;
+
+	// Current name filter for this pane (fname_filter syntax). Consulted by
+	// insert_filtered_rows; set via set_filter() from the frame's filter edit;
+	// cleared on every navigation (in update_list). Empty = show all.
+	string m_filter_text;
 
 	string m_dir;
 	map<int, t_index_entry> m_index;

@@ -31,6 +31,8 @@ namespace theme
 		bool g_show_grid = true;
 		bool g_show_column_headers = true;
 		bool g_hide_empty_results = false;
+		bool g_active_pane_border = true;
+		bool g_show_filter_box = true;
 		size_format g_size_fmt = size_auto;
 		clipboard_format g_clipboard_fmt = clipboard_indexed;
 		vxl_ss g_vxl_ss = vxl_ss_4;
@@ -217,6 +219,8 @@ namespace theme
 		g_show_grid = AfxGetApp()->GetProfileInt("Theme", "show_grid", 1) != 0;
 		g_show_column_headers = AfxGetApp()->GetProfileInt("Theme", "show_column_headers", 1) != 0;
 		g_hide_empty_results = AfxGetApp()->GetProfileInt("Theme", "hide_empty_results", 0) != 0;
+		g_active_pane_border = AfxGetApp()->GetProfileInt("Theme", "active_pane_border", 1) != 0;
+		g_show_filter_box = AfxGetApp()->GetProfileInt("Theme", "show_filter_box", 1) != 0;
 		g_shp_transparency = AfxGetApp()->GetProfileInt("Theme", "shp_transparency", 0) != 0;
 		g_alpha_color = static_cast<COLORREF>(AfxGetApp()->GetProfileInt("Theme", "alpha_color", RGB(0, 255, 0)));
 		g_use_checkerboard = AfxGetApp()->GetProfileInt("Theme", "use_checkerboard", 1) != 0;
@@ -313,6 +317,8 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "show_grid", g_show_grid ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "show_column_headers", g_show_column_headers ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "hide_empty_results", g_hide_empty_results ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "active_pane_border", g_active_pane_border ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "show_filter_box", g_show_filter_box ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "shp_transparency", g_shp_transparency ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "alpha_color", static_cast<int>(g_alpha_color));
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
@@ -388,6 +394,26 @@ namespace theme
 		if (g_hide_empty_results == v)
 			return;
 		g_hide_empty_results = v;
+		save();
+	}
+
+	bool active_pane_border() { return g_active_pane_border; }
+
+	void set_active_pane_border(bool v)
+	{
+		if (g_active_pane_border == v)
+			return;
+		g_active_pane_border = v;
+		save();
+	}
+
+	bool show_filter_box() { return g_show_filter_box; }
+
+	void set_show_filter_box(bool v)
+	{
+		if (g_show_filter_box == v)
+			return;
+		g_show_filter_box = v;
 		save();
 	}
 
@@ -2466,6 +2492,21 @@ namespace theme
 		::SetWindowPos(h, NULL, 0, 0, 0, 0,
 			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED |
 			SWP_NOACTIVATE);
+	}
+
+	// Public wrapper: theme a standalone Edit (one not reached by
+	// apply_dialog's child walk). Same order as theme_child_proc's Edit
+	// branch — subclass first so the SWP_FRAMECHANGED from sync routes through
+	// our wndproc — plus apply_window for dark scrollbars/consistency.
+	void apply_edit(HWND h_edit)
+	{
+		if (!h_edit)
+			return;
+		apply_window(h_edit);
+		if (is_dark())
+			install_dark_edit_subclass(h_edit);
+		sync_edit_client_edge(h_edit);
+		::InvalidateRect(h_edit, NULL, TRUE);
 	}
 
 	// ---------- Trackbar (msctls_trackbar32) dark custom-draw ----------
