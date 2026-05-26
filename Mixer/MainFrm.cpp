@@ -635,6 +635,15 @@ bool CMainFrame::is_active_pane(const CXCCMixerView* pane) const
 	return pane == active;
 }
 
+bool CMainFrame::focus_filter_box()
+{
+	if (!theme::show_filter_box() || !m_filter_edit.GetSafeHwnd())
+		return false;
+	m_filter_edit.SetFocus();
+	m_filter_edit.SetSel(0, -1);   // select all so typing replaces
+	return true;
+}
+
 void CMainFrame::sync_filter_ui()
 {
 	if (!m_filter_edit.GetSafeHwnd())
@@ -669,7 +678,23 @@ BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 	{
 		if (pMsg->message == WM_KEYDOWN)
 		{
-			if (pMsg->wParam == VK_ESCAPE)
+			if (pMsg->wParam == VK_TAB)
+			{
+				// Tab back from the filter edit returns focus to the active pane
+				// (mirrors Tab from the pane into the filter — see
+				// CXCCMixerView::PreTranslateMessage). Plain Tab only.
+				const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+				const bool alt  = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+				if (!ctrl && !alt)
+				{
+					if (CXCCMixerView* pane = active_mix_pane())
+					{
+						pane->SetFocus();
+						return TRUE;
+					}
+				}
+			}
+			else if (pMsg->wParam == VK_ESCAPE)
 			{
 				CString s;
 				m_filter_edit.GetWindowText(s);

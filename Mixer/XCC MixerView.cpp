@@ -4204,6 +4204,16 @@ BOOL CXCCMixerView::PreTranslateMessage(MSG* pMsg)
 		bool ctrl  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 		bool shift = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
 		bool alt   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+		// Tab from a mix list jumps to the filter box (so you can filter the
+		// active pane without reaching for the mouse). The list view isn't part
+		// of a dialog tab loop, so MFC won't do this for us. Plain Tab only —
+		// leave Ctrl/Alt+Tab to the system.
+		if (pMsg->wParam == VK_TAB && !ctrl && !alt)
+		{
+			if (CMainFrame* mf = GetMainFrame())
+				if (mf->focus_filter_box())
+					return TRUE;
+		}
 		UINT action = 0;
 		if (keybinds::match_view(keybinds::scope_list_view, (UINT)pMsg->wParam, ctrl, shift, alt, action))
 		{

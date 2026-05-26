@@ -236,6 +236,10 @@ public:
 	// after a pane navigates and clears its filter). Public: the mix view calls
 	// it from update_list. Safe before the edit exists.
 	void sync_filter_ui();
+	// Move focus to the filter edit (Tab from a mix pane). Selects all text so
+	// the user can type-to-replace. No-op if the filter box is hidden. Returns
+	// true if focus was moved.
+	bool focus_filter_box();
 	// Mark a mix pane as the active one (called when a list gains focus). Repaints
 	// both panes' borders so the indicator moves. Ignores null / no-op repeats.
 	void set_active_pane(CXCCMixerView* pane);
