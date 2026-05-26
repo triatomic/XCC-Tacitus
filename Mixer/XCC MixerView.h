@@ -253,7 +253,46 @@ public:
 	// VXL full-hierarchy auto-load checking the opposite pane's MIX for a
 	// sibling `<base>tur.vxl` that's missing from the body's source MIX.
 	Cmix_file* current_mix() const { return m_mix_f; }
+
+	// Ordered, human-readable segments of this pane's current location, from
+	// root (leftmost) to current (rightmost) — drives the frame's breadcrumb.
+	// Filesystem: drive + folder components of m_dir. MIX: the root MIX's
+	// folder path components, the root MIX filename, then each nested MIX name.
+	// Empty only before the first navigation.
+	std::vector<std::string> nav_segments() const;
+	// Navigate this pane to the location identified by segment `level` (an index
+	// into nav_segments()). Pops nested MIX locations / truncates m_dir as
+	// needed, then refreshes the list. Routes through the forward-stack so Back
+	// still replays the levels that were left. No-op if already at that level.
+	void nav_to_segment(int level);
+
+	// One navigable child of a breadcrumb level (a subfolder/archive on a folder
+	// level, or a nested archive inside a MIX level). Drives the Explorer-style
+	// chevron dropdown. `is_mix_child` distinguishes a nested-MIX entry (open via
+	// its in-MIX id once the parent MIX is current) from a filesystem child
+	// (open by path). `id` is the in-MIX file id for mix children; unused else.
+	struct t_nav_child
+	{
+		std::string name;
+		bool is_mix_child = false;
+		int id = 0;
+	};
+	// Enumerate the navigable children of breadcrumb segment `level` WITHOUT
+	// navigating: folder levels are read via FindFirstFile on the joined path;
+	// MIX levels read the already-open Cmix_file at that depth. Returns the
+	// alphabetically-sorted children (folders/archives only). Empty if the level
+	// has none or can't be resolved.
+	std::vector<t_nav_child> nav_children(int level) const;
+	// Navigate to `level` then descend into the named child (folder or archive).
+	// Used when the user picks an entry from the chevron dropdown.
+	void nav_descend(int level, const t_nav_child& child);
 private:
+	// Resolve the open Cmix_file at breadcrumb MIX-level `level` (or nullptr if
+	// the level is a filesystem segment / out of range). Shared by nav_children.
+	Cmix_file* mix_at_level(int level) const;
+	// Join folder segments [0..level] of nav_segments() into a path with a
+	// trailing backslash (filesystem levels only). Empty if level is a MIX.
+	std::string folder_path_at_level(int level) const;
 	struct t_nav_entry
 	{
 		enum { kind_dir, kind_disk_mix, kind_nested_mix_id } kind;

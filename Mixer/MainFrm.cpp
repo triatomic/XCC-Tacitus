@@ -20,6 +20,7 @@
 #include "VxlLightingDlg.h"
 #include "string_conversion.h"
 #include "theme.h"
+#include "version.h"
 #include "theme_ts_ini_reader.h"
 #include "wav_file.h"
 #include "xcc_dirs.h"
@@ -178,6 +179,15 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_ACTIVE_PANE_BORDER, OnUpdateThemeActivePaneBorder)
 	ON_COMMAND(ID_THEME_SHOW_FILTER_BOX, OnThemeShowFilterBox)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_FILTER_BOX, OnUpdateThemeShowFilterBox)
+	ON_COMMAND(ID_THEME_SHOW_BREADCRUMB, OnThemeShowBreadcrumb)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SHOW_BREADCRUMB, OnUpdateThemeShowBreadcrumb)
+	ON_COMMAND(ID_THEME_TOGGLE_TOPBAR, OnThemeToggleTopbar)
+	ON_COMMAND(ID_THEME_SWAP_TOPBAR, OnThemeSwapTopbar)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SWAP_TOPBAR, OnUpdateThemeSwapTopbar)
+	ON_MESSAGE(WM_BREADCRUMB_CLICK, &CMainFrame::OnBreadcrumbClick)
+	ON_MESSAGE(WM_BREADCRUMB_CHEVRON, &CMainFrame::OnBreadcrumbChevron)
+	ON_MESSAGE(WM_TOPBAR_DIVIDER_DRAG, &CMainFrame::OnTopbarDividerDrag)
+	ON_MESSAGE(WM_TOPBAR_DIVIDER_DONE, &CMainFrame::OnTopbarDividerDone)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
 	ON_COMMAND(ID_THEME_SHP_TRANSPARENCY, OnThemeShpTransparency)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SHP_TRANSPARENCY, OnUpdateThemeShpTransparency)
@@ -276,7 +286,8 @@ END_MESSAGE_MAP()
 
 static UINT indicators[] =
 {
-	ID_SEPARATOR,           // status line indicator
+	ID_SEPARATOR,           // status line indicator (stretches)
+	ID_INDICATOR_VERSION,   // right-side version pane
 };
 
 CMainFrame::CMainFrame()
@@ -308,6 +319,23 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	{
 		TRACE0("Failed to create status bar\n");
 		return -1;
+	}
+	// Right-side version pane. Style it as a plain (non-sunken) label and size it
+	// to the text so it sits flush at the right edge. Version comes from the
+	// single constant in version.h.
+	{
+		int idx = m_wndStatusBar.CommandToIndex(ID_INDICATOR_VERSION);
+		if (idx >= 0)
+		{
+			const CString ver(_T(XCC_MIXER_VERSION_LABEL));
+			CClientDC dc(&m_wndStatusBar);
+			CFont* oldf = dc.SelectObject(m_wndStatusBar.GetFont());
+			CSize sz = dc.GetTextExtent(ver);
+			if (oldf) dc.SelectObject(oldf);
+			m_wndStatusBar.SetPaneInfo(idx, ID_INDICATOR_VERSION,
+				SBPS_NORMAL, sz.cx + 12);
+			m_wndStatusBar.SetPaneText(idx, ver);
+		}
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	rebuild_menu_owner_draw();
@@ -417,15 +445,25 @@ BOOL CMainFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext)
 	if (!theme::show_filter_box())
 		m_filter_edit.ShowWindow(SW_HIDE);
 
+	// Breadcrumb + draggable divider share the top strip with the filter edit.
+	m_breadcrumb.Create(this, IDC_BREADCRUMB_BAR);
+	m_breadcrumb.SetFont(GetFont() ? GetFont() : CFont::FromHandle(
+		(HFONT)::GetStockObject(DEFAULT_GUI_FONT)));
+	m_topbar_divider.Create(this, IDC_TOPBAR_DIVIDER);
+	m_topbar_filter_w_live = theme::topbar_filter_w();
+	if (!theme::show_breadcrumb())
+		m_breadcrumb.ShowWindow(SW_HIDE);
+
 	apply_theme_to_children();
 	if (!m_two_panes)
 		set_pane_layout(false);
 	return true;
 }
 
-// Reserve a top strip for the filter edit and shrink the splitter below it.
-// Called after every frame resize / RecalcLayout (the base lays the splitter
-// out to the full client first; we then carve the strip back out).
+// Reserve a top strip for the breadcrumb + divider + filter edit and shrink
+// the splitter below it. Called after every frame resize / RecalcLayout (the
+// base lays the splitter out to the full client first; we then carve the strip
+// back out). Layout left->right: [ breadcrumb ][ divider ][ filter box ].
 void CMainFrame::layout_filter_bar()
 {
 	if (!m_filter_edit.GetSafeHwnd() || !m_wndSplitter.GetSafeHwnd())
@@ -440,10 +478,14 @@ void CMainFrame::layout_filter_bar()
 		m_wndStatusBar.GetWindowRect(sb);
 		rc.bottom -= sb.Height();
 	}
-	// When the filter box is hidden (Theme > Pane Layout > Show Filter Box off),
-	// reserve no strip — the splitter fills the whole client area.
+
+	const bool show_filter = theme::show_filter_box();
+	const bool show_crumb = theme::show_breadcrumb();
+	const bool divider_on = show_filter && show_crumb;  // only meaningful between two zones
+
+	// Reserve the strip only if at least one of the two is shown.
 	int bar = 0;
-	if (theme::show_filter_box())
+	if (show_filter || show_crumb)
 	{
 		TEXTMETRIC tm = {};
 		{
@@ -453,17 +495,102 @@ void CMainFrame::layout_filter_bar()
 			dc.GetTextMetrics(&tm);
 			if (old) dc.SelectObject(old);
 		}
-		// Small 2px left/right margin so the filter box doesn't sit flush
-		// against the side window edges. Top stays flush; panes start below it.
-		const int pad = 2;
+		const int pad = 2;          // side margins so zones aren't flush to the edge
+		const int divW = divider_on ? 7 : 0;
 		bar = tm.tmHeight + 8;
-		m_filter_edit.SetWindowPos(NULL, rc.left + pad, rc.top,
-			rc.Width() - 2 * pad, bar,
-			SWP_NOZORDER | SWP_NOACTIVATE);
+
+		const int left = rc.left + pad;
+		const int right = rc.right - pad;
+		const int total = right - left;
+
+		// Filter width from the right, clamped so neither zone collapses when
+		// both are shown. When only one zone is visible it takes the full width.
+		int filter_w;
+		if (show_filter && show_crumb)
+		{
+			filter_w = (m_topbar_filter_w_live >= 0)
+				? m_topbar_filter_w_live : theme::topbar_filter_w();
+			const int min_filter = 120;
+			const int min_crumb = 160;
+			if (filter_w < min_filter) filter_w = min_filter;
+			if (filter_w > total - divW - min_crumb) filter_w = total - divW - min_crumb;
+			if (filter_w < 40) filter_w = 40;     // degenerate tiny-window guard
+		}
+		else
+			filter_w = total;
+
+		const int crumb_w = show_crumb ? (total - (show_filter ? filter_w + divW : 0)) : 0;
+		const bool swapped = theme::topbar_swapped();
+
+		// Reposition the three top-strip children in one atomic DeferWindowPos
+		// transaction so they move/resize together in a single paint pass.
+		// (No SWP_NOCOPYBITS — it discards the existing pixels without repainting
+		// the newly-uncovered area, which made the breadcrumb text / filter text
+		// disappear mid-drag. We force a clean repaint of the content controls
+		// below instead.)
+		// Order is breadcrumb | divider | filter normally, filter | divider |
+		// breadcrumb when swapped. The divider sits between whichever two are
+		// shown; the filter keeps its own width (filter_w) on either side.
+		const UINT swp = SWP_NOZORDER | SWP_NOACTIVATE;
+		HDWP hdwp = ::BeginDeferWindowPos(3);
+		int x = left;
+		auto place_breadcrumb = [&](int w)
+		{
+			hdwp = ::DeferWindowPos(hdwp, m_breadcrumb.GetSafeHwnd(), NULL,
+				x, rc.top, w > 0 ? w : 0, bar, swp);
+			x += w;
+		};
+		auto place_divider = [&]()
+		{
+			hdwp = ::DeferWindowPos(hdwp, m_topbar_divider.GetSafeHwnd(), NULL,
+				x, rc.top, divW, bar, swp | SWP_SHOWWINDOW);
+			x += divW;
+		};
+		auto place_filter = [&](int w)
+		{
+			hdwp = ::DeferWindowPos(hdwp, m_filter_edit.GetSafeHwnd(), NULL,
+				x, rc.top, w > 0 ? w : 0, bar, swp);
+			x += w;
+		};
+		if (!swapped)
+		{
+			if (show_crumb) place_breadcrumb(show_filter ? crumb_w : total);
+			if (divider_on) place_divider();
+			if (show_filter) place_filter(show_crumb ? (right - x) : total);
+		}
+		else
+		{
+			if (show_filter) place_filter(show_crumb ? filter_w : total);
+			if (divider_on) place_divider();
+			if (show_crumb) place_breadcrumb(show_filter ? (right - x) : total);
+		}
+		if (hdwp)
+			::EndDeferWindowPos(hdwp);
+		// The breadcrumb fully repaints from its own buffer; invalidate it so a
+		// width change re-lays-out and redraws cleanly. The filter edit repaints
+		// its text on the same trigger.
+		if (show_crumb && m_breadcrumb.GetSafeHwnd())
+			m_breadcrumb.Invalidate(FALSE);
+		if (show_filter && m_filter_edit.GetSafeHwnd())
+			m_filter_edit.Invalidate(FALSE);
+		if (!divider_on && m_topbar_divider.GetSafeHwnd())
+			m_topbar_divider.ShowWindow(SW_HIDE);
 	}
+	else if (m_topbar_divider.GetSafeHwnd())
+		m_topbar_divider.ShowWindow(SW_HIDE);
+
 	m_wndSplitter.SetWindowPos(NULL, rc.left, rc.top + bar,
 		rc.Width(), rc.bottom - (rc.top + bar) > 0 ? rc.bottom - (rc.top + bar) : 0,
 		SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void CMainFrame::refresh_breadcrumb()
+{
+	if (!m_breadcrumb.GetSafeHwnd())
+		return;
+	CXCCMixerView* pane = active_mix_pane();
+	m_breadcrumb.set_segments(pane ? pane->nav_segments()
+		: std::vector<std::string>());
 }
 
 CXCCMixerView* CMainFrame::active_mix_pane() const
@@ -493,6 +620,9 @@ void CMainFrame::set_active_pane(CXCCMixerView* pane)
 		prev->RedrawWindow(NULL, NULL, f);
 	if (pane->GetSafeHwnd())
 		pane->RedrawWindow(NULL, NULL, f);
+	// The shared filter box + breadcrumb track the active pane, so refresh both
+	// when it changes (sync_filter_ui also refreshes the breadcrumb).
+	sync_filter_ui();
 }
 
 bool CMainFrame::is_active_pane(const CXCCMixerView* pane) const
@@ -515,6 +645,9 @@ void CMainFrame::sync_filter_ui()
 	const CString want(pane ? pane->filter_text().c_str() : "");
 	if (cur != want)
 		m_filter_edit.SetWindowText(want);
+	// Same triggers (nav + pane switch) that re-sync the filter also refresh the
+	// breadcrumb to the active pane's current location.
+	refresh_breadcrumb();
 }
 
 void CMainFrame::OnSize(UINT nType, int cx, int cy)
@@ -2184,25 +2317,161 @@ void CMainFrame::OnUpdateThemeActivePaneBorder(CCmdUI* pCmdUI)
 	pCmdUI->SetCheck(theme::active_pane_border() ? 1 : 0);
 }
 
-void CMainFrame::OnThemeShowFilterBox()
+// Sync the two top-strip children's visibility to the current settings, re-lay
+// out the strip, and repaint the splitter subtree. Shared by every command that
+// changes the strip (show filter, show breadcrumb, combined toggle, swap).
+// SetWindowPos shifts the splitter but doesn't force its children to repaint,
+// so the listviews keep stale pixels until the next real WM_PAINT — invalidate
+// the splitter subtree here (same fix as set_pane_layout after RecalcLayout).
+void CMainFrame::reflow_topbar()
 {
-	theme::set_show_filter_box(!theme::show_filter_box());
 	if (m_filter_edit.GetSafeHwnd())
 		m_filter_edit.ShowWindow(theme::show_filter_box() ? SW_SHOW : SW_HIDE);
-	// Re-flow: layout_filter_bar reclaims the strip for the panes when hidden.
+	if (m_breadcrumb.GetSafeHwnd())
+		m_breadcrumb.ShowWindow(theme::show_breadcrumb() ? SW_SHOW : SW_HIDE);
 	layout_filter_bar();
-	// SetWindowPos shifts the splitter but doesn't force its children to repaint,
-	// so the listviews keep stale pixels (garbage colors) until the next real
-	// WM_PAINT (maximize / hover). Invalidate the splitter subtree now — same fix
-	// as set_pane_layout after its RecalcLayout.
+	if (theme::show_breadcrumb())
+		refresh_breadcrumb();
 	if (m_wndSplitter.GetSafeHwnd())
 		m_wndSplitter.RedrawWindow(NULL, NULL,
 			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
+void CMainFrame::OnThemeShowFilterBox()
+{
+	theme::set_show_filter_box(!theme::show_filter_box());
+	reflow_topbar();
+}
+
 void CMainFrame::OnUpdateThemeShowFilterBox(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(theme::show_filter_box() ? 1 : 0);
+}
+
+void CMainFrame::OnThemeShowBreadcrumb()
+{
+	theme::set_show_breadcrumb(!theme::show_breadcrumb());
+	reflow_topbar();
+}
+
+void CMainFrame::OnUpdateThemeShowBreadcrumb(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::show_breadcrumb() ? 1 : 0);
+}
+
+// Alt+3: toggle the filter box and breadcrumb together (they share the hotkey).
+// If either is shown, hide both; if both are hidden, show both.
+void CMainFrame::OnThemeToggleTopbar()
+{
+	const bool any_shown = theme::show_filter_box() || theme::show_breadcrumb();
+	const bool target = !any_shown;   // show both if currently all hidden
+	theme::set_show_filter_box(target);
+	theme::set_show_breadcrumb(target);
+	reflow_topbar();
+}
+
+void CMainFrame::OnThemeSwapTopbar()
+{
+	theme::set_topbar_swapped(!theme::topbar_swapped());
+	reflow_topbar();
+}
+
+void CMainFrame::OnUpdateThemeSwapTopbar(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(theme::topbar_swapped() ? 1 : 0);
+	// Swapping only matters when both zones are visible.
+	pCmdUI->Enable(theme::show_filter_box() && theme::show_breadcrumb());
+}
+
+// A breadcrumb segment was clicked: navigate the active pane to that level.
+LRESULT CMainFrame::OnBreadcrumbClick(WPARAM wp, LPARAM)
+{
+	if (CXCCMixerView* pane = active_mix_pane())
+	{
+		pane->nav_to_segment(static_cast<int>(wp));
+		// nav_to_segment funnels through update_list, which calls sync_filter_ui
+		// (refreshing the breadcrumb), but only for the active pane — which this
+		// is, so the bar updates on its own.
+	}
+	return 0;
+}
+
+// A breadcrumb chevron was clicked: drop an Explorer-style menu of that level's
+// navigable children and descend into the chosen one.
+LRESULT CMainFrame::OnBreadcrumbChevron(WPARAM wp, LPARAM lp)
+{
+	CXCCMixerView* pane = active_mix_pane();
+	if (!pane)
+		return 0;
+	const int level = static_cast<int>(wp);
+	std::vector<CXCCMixerView::t_nav_child> kids = pane->nav_children(level);
+	if (kids.empty())
+		return 0;
+
+	// Cap the menu so a giant MIX/folder doesn't produce an unusable list.
+	const int kMax = 200;
+	const int count = static_cast<int>(kids.size()) < kMax
+		? static_cast<int>(kids.size()) : kMax;
+
+	CMenu menu;
+	menu.CreatePopupMenu();
+	for (int i = 0; i < count; i++)
+		menu.AppendMenu(MF_STRING, static_cast<UINT_PTR>(i + 1),
+			kids[i].name.c_str());     // 1-based cmd; 0 = no selection
+	if (count < static_cast<int>(kids.size()))
+	{
+		menu.AppendMenu(MF_SEPARATOR);
+		menu.AppendMenu(MF_STRING | MF_GRAYED, 0xFFFF, _T("(more not shown)"));
+	}
+
+	// Cast through short so negative coordinates (multi-monitor) sign-extend
+	// correctly out of the packed LPARAM.
+	const int x = static_cast<short>(LOWORD(lp));
+	const int y = static_cast<short>(HIWORD(lp));
+	// CFrameWnd::m_bAutoMenuEnable (default TRUE) disables any popup item that
+	// lacks an enabled ON_UPDATE_COMMAND_UI/ON_COMMAND handler during the
+	// WM_INITMENUPOPUP that TrackPopupMenu fires — our ad-hoc ids 1..N have none,
+	// so every item grayed out. Suspend it across this menu only.
+	BOOL saved_auto = m_bAutoMenuEnable;
+	m_bAutoMenuEnable = FALSE;
+	// TPM_RETURNCMD: get the picked id back here instead of via WM_COMMAND, so
+	// we don't have to reserve a command-id range or pollute the message map.
+	int cmd = menu.TrackPopupMenu(
+		TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON,
+		x, y, this);
+	m_bAutoMenuEnable = saved_auto;
+	if (cmd >= 1 && cmd <= count)
+		pane->nav_descend(level, kids[cmd - 1]);
+	return 0;
+}
+
+// The divider is being dragged: re-clamp + re-flow with the proposed width.
+LRESULT CMainFrame::OnTopbarDividerDrag(WPARAM wp, LPARAM)
+{
+	int w = static_cast<int>(wp);
+	// Store unclamped; layout_filter_bar clamps to the valid range so a drag
+	// past either end just pins the divider there. set_topbar_filter_w only
+	// touches the INI when the value actually changes, but to avoid a disk write
+	// per mouse-move we let layout read it and persist once on drag-done — so
+	// here we update the live value directly without forcing a save each tick.
+	m_topbar_filter_w_live = w;
+	layout_filter_bar();
+	return 0;
+}
+
+// Drag finished: persist the (clamped) width that layout actually used.
+LRESULT CMainFrame::OnTopbarDividerDone(WPARAM, LPARAM)
+{
+	// Read back the on-screen filter width so we persist the clamped value, not
+	// a value that was dragged out of range.
+	if (m_filter_edit.GetSafeHwnd())
+	{
+		CRect fr;
+		m_filter_edit.GetWindowRect(fr);
+		m_topbar_filter_w_live = fr.Width();
+		theme::set_topbar_filter_w(fr.Width());   // persists (only on real change)
+	}
+	return 0;
 }
 
 void CMainFrame::OnThemeAlphaColor()
@@ -2758,6 +3027,12 @@ void CMainFrame::apply_theme_to_children()
 		theme::apply_edit(m_filter_edit.GetSafeHwnd());
 		::RedrawWindow(m_filter_edit.GetSafeHwnd(), NULL, NULL, inv_flags);
 	}
+	// Breadcrumb + divider read theme colors live in their own OnPaint, so a
+	// repaint is all they need on a Light <-> Dark flip.
+	if (m_breadcrumb.GetSafeHwnd())
+		m_breadcrumb.refresh_theme();
+	if (m_topbar_divider.GetSafeHwnd())
+		m_topbar_divider.Invalidate(FALSE);
 	if (m_wndStatusBar.GetSafeHwnd())
 	{
 		theme::apply_window(m_wndStatusBar.GetSafeHwnd());

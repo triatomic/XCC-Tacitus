@@ -93,6 +93,23 @@ namespace theme
 	bool show_filter_box();
 	void set_show_filter_box(bool v);
 
+	// When on (default), an Explorer-style breadcrumb of the active pane's
+	// current location is shown in the top strip (left of the filter box). Off
+	// hides it; if the filter box is also hidden the panes reclaim the strip.
+	bool show_breadcrumb();
+	void set_show_breadcrumb(bool v);
+
+	// Width (px) reserved for the filter box at the right edge of the top strip;
+	// the breadcrumb fills the remaining width left of the draggable divider.
+	// Persisted so the divider position survives restarts. Clamped by the frame.
+	int topbar_filter_w();
+	void set_topbar_filter_w(int v);
+
+	// When on, the breadcrumb and filter box swap sides (filter on the left,
+	// breadcrumb on the right). Default off (breadcrumb left, filter right).
+	bool topbar_swapped();
+	void set_topbar_swapped(bool v);
+
 	// Size column format: Auto = "1.5 MB" via totalSize(); Bytes = grouped
 	// raw byte count "1,572,864". Applies to the listview panes and to the
 	// right-pane MIX/PAK/BIG/RG-MIX content listings.

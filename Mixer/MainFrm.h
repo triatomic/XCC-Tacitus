@@ -2,6 +2,7 @@
 
 #include "XCCFileView.h"
 #include "XCC MixerView.h"
+#include "Breadcrumb.h"
 
 #include <ddraw.h>
 #include <memory>
@@ -205,6 +206,15 @@ protected:
 	// active (focused, else left). The frame owns layout (OnSize reserves a
 	// top strip for it and shrinks the splitter below).
 	CEdit m_filter_edit;
+	// Explorer-style breadcrumb of the active pane's location (left of the
+	// filter box) plus a draggable divider between them. Both live in the same
+	// top strip layout_filter_bar() manages.
+	CBreadcrumbBar m_breadcrumb;
+	CTopbarDivider m_topbar_divider;
+	// Live filter-box width used by layout_filter_bar; seeded from the persisted
+	// theme value, updated on every divider-drag tick (no disk write), and
+	// flushed back to theme:: (saved) once the drag ends. -1 = use theme value.
+	int m_topbar_filter_w_live = -1;
 	CThemedStatusBar m_wndStatusBar;
 	CThemedHeaderCtrl m_left_header;
 	CThemedHeaderCtrl m_right_header;
@@ -252,6 +262,9 @@ protected:
 	// splitter; active_mix_pane() picks the focused pane (left fallback).
 	// sync_filter_ui() is declared public above (the mix view calls it).
 	void layout_filter_bar();
+	// Refresh the breadcrumb from the active pane's current location. Called
+	// from sync_filter_ui() (fires on nav + pane switch) and set_active_pane.
+	void refresh_breadcrumb();
 	CXCCMixerView* active_mix_pane() const;
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -367,6 +380,17 @@ protected:
 	afx_msg void OnThemeHideEmptyResults();
 	afx_msg void OnThemeActivePaneBorder();
 	afx_msg void OnThemeShowFilterBox();
+	afx_msg void OnThemeShowBreadcrumb();
+	afx_msg void OnUpdateThemeShowBreadcrumb(CCmdUI* pCmdUI);
+	afx_msg void OnThemeToggleTopbar();
+	afx_msg void OnThemeSwapTopbar();
+	afx_msg void OnUpdateThemeSwapTopbar(CCmdUI* pCmdUI);
+	// Shared re-flow after a top-strip visibility/layout change (show/hide/swap).
+	void reflow_topbar();
+	afx_msg LRESULT OnBreadcrumbClick(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnBreadcrumbChevron(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnTopbarDividerDrag(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnTopbarDividerDone(WPARAM wp, LPARAM lp);
 	afx_msg void OnThemeAlphaColor();
 	afx_msg void OnThemeShpTransparency();
 	afx_msg void OnUpdateThemeShpTransparency(CCmdUI* pCmdUI);

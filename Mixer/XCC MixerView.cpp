@@ -9,6 +9,7 @@
 #include "keybinds.h"
 #include "resource.h"
 #include "XSTE_dlg.h"
+#include <algorithm>
 #include <aud_decode.h>
 #include <aud_file_write.h>
 #include <aud_file.h>
@@ -562,6 +563,19 @@ void CXCCMixerView::open_location_mix(const string& name)
 	else
 	{
 	MPUSH:
+		// Entering a disk-root MIX (no MIX was open yet). Anchor m_dir to the
+		// MIX's containing folder so "go up" / breadcrumb folder segments return
+		// to the right place. Game MIXes opened from the built-in list (e.g.
+		// D:\Westwood\RA1\redalert.mix) never set m_dir otherwise, so exiting the
+		// MIX dropped the pane back onto a stale directory (the navigation-bar
+		// limitation: folder clicks landed somewhere unrelated). Only when this
+		// is the root open (m_mix_f == nullptr) and the path has a folder part.
+		if (!m_mix_f)
+		{
+			string folder = Cfname(name).get_path();
+			if (!folder.empty())
+				m_dir = folder;
+		}
 		m_location.push(m_mix_f);
 		m_entered_ids.push(-1);
 		m_mix_f = mix_f;
@@ -746,6 +760,268 @@ bool CXCCMixerView::nav_go_up()
 	open_location_dir(m_dir.substr(0, i + 1));
 	m_nav_replaying = false;
 	return true;
+}
+
+std::vector<std::string> CXCCMixerView::nav_segments() const
+{
+	std::vector<std::string> segs;
+	if (!m_mix_f)
+	{
+		// Filesystem: split m_dir ("c:\\westwood\\data\\") into drive + folders.
+		// Keep the drive ("c:") as the first segment; skip the trailing empty
+		// token produced by the terminating backslash.
+		string cur;
+		for (char c : m_dir)
+		{
+			if (c == '\\' || c == '/')
+			{
+				if (!cur.empty())
+					segs.push_back(cur);
+				cur.clear();
+			}
+			else
+				cur += c;
+		}
+		if (!cur.empty())
+			segs.push_back(cur);
+		return segs;
+	}
+
+	// MIX: walk the parent chain bottom-to-top. m_location holds the parent
+	// Cmix_file* at each level (nullptr at the very bottom — the pre-MIX state),
+	// m_entered_ids the file-id entered at each level (-1 for the disk-root MIX).
+	// Copy the stacks so we can read them root-first.
+	std::vector<Cmix_file*> parents;   // bottom (nullptr) .. immediate parent
+	std::vector<int> entered;          // matching entered ids
+	{
+		std::stack<Cmix_file*> sl = m_location;
+		std::stack<int> se = m_entered_ids;
+		while (!sl.empty()) { parents.push_back(sl.top()); sl.pop(); }
+		while (!se.empty()) { entered.push_back(se.top()); se.pop(); }
+		std::reverse(parents.begin(), parents.end());
+		std::reverse(entered.begin(), entered.end());
+	}
+
+	// First: the folder path components of the on-disk root MIX (so the user
+	// can click back out to the filesystem), then the root MIX filename.
+	string root_folder = Cfname(m_mix_fname).get_path();
+	{
+		string cur;
+		for (char c : root_folder)
+		{
+			if (c == '\\' || c == '/')
+			{
+				if (!cur.empty())
+					segs.push_back(cur);
+				cur.clear();
+			}
+			else
+				cur += c;
+		}
+		if (!cur.empty())
+			segs.push_back(cur);
+	}
+	segs.push_back(Cfname(m_mix_fname).get_fname());
+
+	// Then each nested MIX, named via its parent's mix database. parents[0] is
+	// the nullptr pre-MIX entry and entered[0] is -1 (the root, already added),
+	// so nested levels start at index 1. The parent for entered[i] is the MIX
+	// open one level shallower: parents[i+1] for i+1 < size, else m_mix_f's
+	// parent — but the running `cur_parent` chain is exact.
+	Cmix_file* cur_parent = nullptr;
+	for (size_t i = 0; i < entered.size(); i++)
+	{
+		int id = entered[i];
+		if (id == -1)
+		{
+			// Disk-root MIX: its name is already shown; advance the parent
+			// pointer to it for the next nested lookup.
+			cur_parent = nullptr; // resolved lazily below
+		}
+		else if (cur_parent)
+		{
+			t_game g = cur_parent->get_game();
+			string name = mix_database::get_name(g, id);
+			if (name.empty())
+				name = nh(8, id);
+			segs.push_back(name);
+		}
+		// The MIX opened at this level becomes the parent for the next one.
+		// parents[] stores the parent that was current *before* this level was
+		// entered, so the MIX entered at level i is parents[i+1] when present.
+		cur_parent = (i + 1 < parents.size()) ? parents[i + 1] : m_mix_f;
+	}
+	return segs;
+}
+
+void CXCCMixerView::nav_to_segment(int level)
+{
+	std::vector<std::string> segs = nav_segments();
+	int last = static_cast<int>(segs.size()) - 1;
+	if (level < 0 || level >= last)
+		return; // already at (or past) the requested level
+
+	int up = last - level; // number of levels to ascend
+	// Each nav_go_up() drops the current level by exactly one (a nested MIX pops
+	// to its parent MIX; the root MIX pops to its on-disk folder; a folder pops
+	// to its parent folder), so the segment index stays in lock-step. Stop early
+	// if a level can't ascend (e.g. clicking the drive root).
+	for (int i = 0; i < up; i++)
+		if (!nav_go_up())
+			break;
+}
+
+// Count of leading filesystem (folder) segments in nav_segments(). For a pure
+// filesystem location that's all of them; for a MIX location it's the number
+// of path components in the root MIX's folder (the MIX itself and any nested
+// MIXes follow). Used to tell folder levels from MIX levels.
+static int count_folder_segments(const std::string& dir)
+{
+	int n = 0;
+	std::string cur;
+	for (char c : dir)
+	{
+		if (c == '\\' || c == '/')
+		{
+			if (!cur.empty()) n++;
+			cur.clear();
+		}
+		else
+			cur += c;
+	}
+	if (!cur.empty()) n++;
+	return n;
+}
+
+std::string CXCCMixerView::folder_path_at_level(int level) const
+{
+	std::vector<std::string> segs = nav_segments();
+	int folder_segs = m_mix_f
+		? count_folder_segments(Cfname(m_mix_fname).get_path())
+		: static_cast<int>(segs.size());
+	if (level < 0 || level >= folder_segs)
+		return std::string();   // MIX level or out of range
+	std::string path;
+	for (int i = 0; i <= level; i++)
+		path += segs[i] + '\\';
+	return path;
+}
+
+Cmix_file* CXCCMixerView::mix_at_level(int level) const
+{
+	if (!m_mix_f)
+		return nullptr;
+	int folder_segs = count_folder_segments(Cfname(m_mix_fname).get_path());
+	int mix_index = level - folder_segs;   // 0 = root MIX, 1 = first nested, ...
+	if (mix_index < 0)
+		return nullptr;                    // a folder level
+	// Build the open MIX chain root-first: parents (skipping the nullptr bottom)
+	// then m_mix_f (the current/deepest).
+	std::vector<Cmix_file*> open_mixes;
+	{
+		std::stack<Cmix_file*> sl = m_location;
+		std::vector<Cmix_file*> parents;
+		while (!sl.empty()) { parents.push_back(sl.top()); sl.pop(); }
+		std::reverse(parents.begin(), parents.end());
+		for (size_t i = 1; i < parents.size(); i++)   // skip parents[0] == nullptr
+			open_mixes.push_back(parents[i]);
+		open_mixes.push_back(m_mix_f);
+	}
+	if (mix_index >= static_cast<int>(open_mixes.size()))
+		return nullptr;
+	return open_mixes[mix_index];
+}
+
+std::vector<CXCCMixerView::t_nav_child> CXCCMixerView::nav_children(int level) const
+{
+	std::vector<t_nav_child> out;
+
+	std::string folder = folder_path_at_level(level);
+	if (!folder.empty())
+	{
+		// Filesystem level: list subfolders + navigable archive files.
+		WIN32_FIND_DATA fd;
+		HANDLE h = FindFirstFile((folder + "*").c_str(), &fd);
+		if (h != INVALID_HANDLE_VALUE)
+		{
+			do
+			{
+				std::string name = fd.cFileName;
+				if (name == "." || name == "..")
+					continue;
+				if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+				{
+					t_nav_child c; c.name = name; c.is_mix_child = false;
+					out.push_back(c);
+				}
+				else
+				{
+					std::string ext = to_lower(Cfname(name).get_fext());
+					if (ext == ".mix" || ext == ".big" || ext == ".dat"
+						|| ext == ".pak" || ext == ".pkg" || ext == ".mmx"
+						|| ext == ".yro" || ext == ".bag")
+					{
+						t_nav_child c; c.name = name; c.is_mix_child = false;
+						out.push_back(c);
+					}
+				}
+			}
+			while (FindNextFile(h, &fd));
+			FindClose(h);
+		}
+	}
+	else if (Cmix_file* mf = mix_at_level(level))
+	{
+		// MIX level: list nested archive entries inside that open MIX.
+		t_game g = mf->get_game();
+		for (int i = 0; i < mf->get_c_files(); i++)
+		{
+			int id = mf->get_id(i);
+			t_file_type ft = mf->get_type(id);
+			if (ft == ft_mix || ft == ft_big || ft == ft_mix_rg || ft == ft_pak)
+			{
+				std::string name = mix_database::get_name(g, id);
+				if (name.empty())
+					name = nh(8, id);
+				t_nav_child c; c.name = name; c.is_mix_child = true; c.id = id;
+				out.push_back(c);
+			}
+		}
+	}
+
+	std::sort(out.begin(), out.end(),
+		[](const t_nav_child& a, const t_nav_child& b)
+		{ return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
+	return out;
+}
+
+void CXCCMixerView::nav_descend(int level, const t_nav_child& child)
+{
+	// First climb to the chosen level (no-op if already there), then descend
+	// into the picked child — same primitives as a click + double-click.
+	nav_to_segment(level);
+	if (child.is_mix_child)
+	{
+		// We're now at the MIX `level`; the child is one of its nested entries.
+		if (m_mix_f)
+			open_location_mix(child.id);
+	}
+	else
+	{
+		// Filesystem child: a subfolder or an archive file under folder `level`.
+		std::string folder = folder_path_at_level(level);
+		if (folder.empty())
+			return;
+		std::string full = folder + child.name;
+		std::string ext = to_lower(Cfname(child.name).get_fext());
+		bool is_archive = (ext == ".mix" || ext == ".big" || ext == ".dat"
+			|| ext == ".pak" || ext == ".pkg" || ext == ".mmx"
+			|| ext == ".yro" || ext == ".bag");
+		if (is_archive)
+			open_location_mix(full);
+		else
+			open_location_dir(full + '\\');   // subfolder
+	}
 }
 
 bool CXCCMixerView::nav_go_forward()

@@ -33,6 +33,9 @@ namespace theme
 		bool g_hide_empty_results = false;
 		bool g_active_pane_border = true;
 		bool g_show_filter_box = true;
+		bool g_show_breadcrumb = true;
+		int g_topbar_filter_w = 250;
+		bool g_topbar_swapped = false;
 		size_format g_size_fmt = size_auto;
 		clipboard_format g_clipboard_fmt = clipboard_indexed;
 		vxl_ss g_vxl_ss = vxl_ss_4;
@@ -221,6 +224,9 @@ namespace theme
 		g_hide_empty_results = AfxGetApp()->GetProfileInt("Theme", "hide_empty_results", 0) != 0;
 		g_active_pane_border = AfxGetApp()->GetProfileInt("Theme", "active_pane_border", 1) != 0;
 		g_show_filter_box = AfxGetApp()->GetProfileInt("Theme", "show_filter_box", 1) != 0;
+		g_show_breadcrumb = AfxGetApp()->GetProfileInt("Theme", "show_breadcrumb", 1) != 0;
+		g_topbar_filter_w = AfxGetApp()->GetProfileInt("Theme", "topbar_filter_w", 250);
+		g_topbar_swapped = AfxGetApp()->GetProfileInt("Theme", "topbar_swapped", 0) != 0;
 		g_shp_transparency = AfxGetApp()->GetProfileInt("Theme", "shp_transparency", 0) != 0;
 		g_alpha_color = static_cast<COLORREF>(AfxGetApp()->GetProfileInt("Theme", "alpha_color", RGB(0, 255, 0)));
 		g_use_checkerboard = AfxGetApp()->GetProfileInt("Theme", "use_checkerboard", 1) != 0;
@@ -319,6 +325,9 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "hide_empty_results", g_hide_empty_results ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "active_pane_border", g_active_pane_border ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "show_filter_box", g_show_filter_box ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "show_breadcrumb", g_show_breadcrumb ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "topbar_filter_w", g_topbar_filter_w);
+		AfxGetApp()->WriteProfileInt("Theme", "topbar_swapped", g_topbar_swapped ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "shp_transparency", g_shp_transparency ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "alpha_color", static_cast<int>(g_alpha_color));
 		AfxGetApp()->WriteProfileInt("Theme", "use_checkerboard", g_use_checkerboard ? 1 : 0);
@@ -414,6 +423,36 @@ namespace theme
 		if (g_show_filter_box == v)
 			return;
 		g_show_filter_box = v;
+		save();
+	}
+
+	bool show_breadcrumb() { return g_show_breadcrumb; }
+
+	void set_show_breadcrumb(bool v)
+	{
+		if (g_show_breadcrumb == v)
+			return;
+		g_show_breadcrumb = v;
+		save();
+	}
+
+	int topbar_filter_w() { return g_topbar_filter_w; }
+
+	void set_topbar_filter_w(int v)
+	{
+		if (g_topbar_filter_w == v)
+			return;
+		g_topbar_filter_w = v;
+		save();
+	}
+
+	bool topbar_swapped() { return g_topbar_swapped; }
+
+	void set_topbar_swapped(bool v)
+	{
+		if (g_topbar_swapped == v)
+			return;
+		g_topbar_swapped = v;
 		save();
 	}
 

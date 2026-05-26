@@ -31,6 +31,7 @@ namespace keybinds
 			{ "theme_light",              "Theme: Light",            scope_accel, ID_THEME_LIGHT,               '1',         FCONTROL,           mb_none, 0 },
 			{ "theme_dark",               "Theme: Dark",             scope_accel, ID_THEME_DARK,                '2',         FCONTROL,           mb_none, 0 },
 			{ "theme_vxl_lighting",       "VXL Lighting...",         scope_accel, ID_THEME_VXL_LIGHTING,        'L',         FCONTROL,           mb_none, 0 },
+			{ "theme_toggle_topbar",      "Toggle filter+breadcrumb",scope_accel, ID_THEME_TOGGLE_TOPBAR,        '3',         FALT,               mb_none, 0 },
 			{ "file_screenshot",          "Screenshot current frame",scope_accel, ID_FILE_SCREENSHOT,           'S',         FCONTROL | FSHIFT,  mb_none, 0 },
 
 			// scope_file_view: keyboard-only actions
@@ -312,6 +313,11 @@ namespace keybinds
 	std::string shortcut_for_command(UINT cmd)
 	{
 		ensure_init();
+		// Show Filter Box / Show Breadcrumb have no accelerator of their own —
+		// they share the combined "toggle top bar" hotkey (Alt+3 by default), so
+		// display that binding on both. Honors a user rebind of the toggle.
+		if (cmd == ID_THEME_SHOW_FILTER_BOX || cmd == ID_THEME_SHOW_BREADCRUMB)
+			cmd = ID_THEME_TOGGLE_TOPBAR;
 		for (const Binding& b : g_current)
 		{
 			if (b.scope == scope_accel && b.action == cmd)
