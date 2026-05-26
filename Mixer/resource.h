@@ -239,6 +239,13 @@
 #define IDC_PANE_FILTER                 1255
 #define IDC_BREADCRUMB_BAR              1256
 #define IDC_TOPBAR_DIVIDER              1257
+#define IDC_KEYBINDS_FILTER             1258
+#define ID_FILE_RECENT_CLEAR            33142
+// 256 contiguous IDs (33150..33405) for the Recents popup. Cap matches
+// recents::hard_cap(); the visible count is recents::max_items() and the
+// INI honours [Recents] max_items (default 20).
+#define ID_FILE_RECENT_00               33150
+#define ID_FILE_RECENT_LAST             33405
 #define IDC_LOADPAL_FILTER_LABEL        1217
 #define IDC_LOADPAL_FILTER              1218
 #define IDC_LOADPAL_LIST                1219

@@ -29,6 +29,41 @@ namespace
 	}
 }
 
+// ===================== CPathEdit =====================
+
+BEGIN_MESSAGE_MAP(CPathEdit, CEdit)
+	ON_WM_KILLFOCUS()
+END_MESSAGE_MAP()
+
+BOOL CPathEdit::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN)
+	{
+		CBreadcrumbBar* bar = static_cast<CBreadcrumbBar*>(GetParent());
+		if (pMsg->wParam == VK_RETURN)
+		{
+			if (bar) bar->on_edit_commit();
+			return TRUE;   // swallow (don't beep / insert newline)
+		}
+		if (pMsg->wParam == VK_ESCAPE)
+		{
+			if (bar) bar->on_edit_cancel();
+			return TRUE;
+		}
+	}
+	return CEdit::PreTranslateMessage(pMsg);
+}
+
+void CPathEdit::OnKillFocus(CWnd* pNewWnd)
+{
+	CEdit::OnKillFocus(pNewWnd);
+	// Losing focus cancels edit mode (Explorer behavior). Guard against the
+	// kill-focus that fires while we're being hidden by a successful commit.
+	CBreadcrumbBar* bar = static_cast<CBreadcrumbBar*>(GetParent());
+	if (bar && bar->in_edit_mode())
+		bar->exit_edit_mode();
+}
+
 // ===================== CBreadcrumbBar =====================
 
 BEGIN_MESSAGE_MAP(CBreadcrumbBar, CWnd)
@@ -38,7 +73,23 @@ BEGIN_MESSAGE_MAP(CBreadcrumbBar, CWnd)
 	ON_WM_MOUSELEAVE()
 	ON_WM_LBUTTONUP()
 	ON_WM_SIZE()
+	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
+
+// The path edit is a child of the bar (not the frame), so its WM_CTLCOLOREDIT
+// comes here — without this it paints with the default white background in dark
+// mode. Mirror CMainFrame::OnCtlColor.
+HBRUSH CBreadcrumbBar::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	if (theme::is_dark())
+	{
+		pDC->SetTextColor(theme::text());
+		pDC->SetBkColor(theme::bg());
+		pDC->SetBkMode(TRANSPARENT);
+		return theme::bg_brush();
+	}
+	return CWnd::OnCtlColor(pDC, pWnd, nCtlColor);
+}
 
 BOOL CBreadcrumbBar::Create(CWnd* parent, UINT id)
 {
@@ -46,18 +97,29 @@ BOOL CBreadcrumbBar::Create(CWnd* parent, UINT id)
 	// OnPaint, so a class brush would just cause flicker.
 	LPCTSTR cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW,
 		::LoadCursor(NULL, IDC_ARROW), NULL, NULL);
-	return CWnd::Create(cls, _T(""), WS_CHILD | WS_VISIBLE,
-		CRect(0, 0, 0, 0), parent, id);
+	if (!CWnd::Create(cls, _T(""), WS_CHILD | WS_VISIBLE,
+		CRect(0, 0, 0, 0), parent, id))
+		return FALSE;
+	// Inner editable path box, hidden until edit mode. ID is arbitrary (child of
+	// the bar, not the frame). ES_AUTOHSCROLL so long paths scroll horizontally.
+	m_path_edit.Create(WS_CHILD | ES_AUTOHSCROLL, CRect(0, 0, 0, 0), this, 1);
+	m_path_edit.SetFont(GetFont() ? GetFont()
+		: CFont::FromHandle((HFONT)::GetStockObject(DEFAULT_GUI_FONT)));
+	return TRUE;
 }
 
 void CBreadcrumbBar::refresh_theme()
 {
 	if (GetSafeHwnd())
 		Invalidate(FALSE);
+	if (m_path_edit.GetSafeHwnd())
+		theme::apply_edit(m_path_edit.GetSafeHwnd());
 }
 
-void CBreadcrumbBar::set_segments(const std::vector<std::string>& segs)
+void CBreadcrumbBar::set_segments(const std::vector<std::string>& segs,
+	const std::string& full_path)
 {
+	m_full_path = full_path;
 	if (segs == m_segments)
 	{
 		// Same path: still repaint (theme may have flipped) but skip re-layout.
@@ -67,15 +129,76 @@ void CBreadcrumbBar::set_segments(const std::vector<std::string>& segs)
 	}
 	m_segments = segs;
 	m_hot = -1;
+	// A navigation while the editor is open (e.g. via the other pane) drops edit
+	// mode so the bar reflects the new location.
+	if (m_editing)
+		exit_edit_mode();
 	layout_segments();
 	if (GetSafeHwnd())
 		Invalidate(FALSE);
+}
+
+void CBreadcrumbBar::enter_edit_mode()
+{
+	if (m_editing || !m_path_edit.GetSafeHwnd())
+		return;
+	m_editing = true;
+	theme::apply_edit(m_path_edit.GetSafeHwnd());
+	CRect rc;
+	GetClientRect(rc);
+	m_path_edit.MoveWindow(rc, FALSE);
+	m_path_edit.SetWindowText(m_full_path.c_str());
+	m_path_edit.ShowWindow(SW_SHOW);
+	m_path_edit.SetFocus();
+	m_path_edit.SetSel(0, -1);   // select all so paste / typing replaces
+	Invalidate(FALSE);
+}
+
+void CBreadcrumbBar::exit_edit_mode()
+{
+	if (!m_editing)
+		return;
+	m_editing = false;
+	if (m_path_edit.GetSafeHwnd())
+		m_path_edit.ShowWindow(SW_HIDE);
+	Invalidate(FALSE);
+}
+
+CString CBreadcrumbBar::edited_path() const
+{
+	CString s;
+	if (m_path_edit.GetSafeHwnd())
+		m_path_edit.GetWindowText(s);
+	return s;
+}
+
+void CBreadcrumbBar::on_edit_commit()
+{
+	// Tell the parent to navigate; it reads edited_path(). If navigation
+	// succeeds the parent's set_segments() will exit edit mode for us; if it
+	// fails we leave the editor open so the user can fix the path.
+	if (CWnd* p = GetParent())
+		p->PostMessage(WM_BREADCRUMB_PATH, 0, 0);
+}
+
+void CBreadcrumbBar::on_edit_cancel()
+{
+	exit_edit_mode();
+	// Return focus to the bar's parent so the edit doesn't keep capturing keys.
+	if (CWnd* p = GetParent())
+		p->SetFocus();
 }
 
 void CBreadcrumbBar::OnSize(UINT nType, int cx, int cy)
 {
 	CWnd::OnSize(nType, cx, cy);
 	layout_segments();
+	if (m_editing && m_path_edit.GetSafeHwnd())
+	{
+		CRect rc;
+		GetClientRect(rc);
+		m_path_edit.MoveWindow(rc, TRUE);
+	}
 	Invalidate(FALSE);
 }
 
@@ -201,6 +324,14 @@ void CBreadcrumbBar::OnPaint()
 	CRect rc;
 	GetClientRect(rc);
 
+	// In edit mode the path edit covers the client area; just fill the
+	// background (the edit paints itself).
+	if (m_editing)
+	{
+		fill_bg(&dc, rc);
+		return;
+	}
+
 	// Double-buffer to kill flicker on hover repaints.
 	CDC mem;
 	mem.CreateCompatibleDC(&dc);
@@ -320,7 +451,14 @@ void CBreadcrumbBar::OnLButtonUp(UINT, CPoint point)
 	int lab = hit_test_label(point);
 	int real = real_index(lab);
 	if (real >= 0)
+	{
 		p->PostMessage(WM_BREADCRUMB_CLICK, real, 0);
+		return;
+	}
+
+	// Click on blank area (not a segment or chevron) → Explorer-style edit mode:
+	// the bar becomes an editable path box you can copy from / paste into.
+	enter_edit_mode();
 }
 
 // ===================== CTopbarDivider =====================

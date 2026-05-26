@@ -227,6 +227,7 @@ protected:
 	std::unique_ptr<CVxlLightingDlg> m_vxl_lighting_dlg;
 public:
 	void set_pane_layout(bool two_panes);
+	bool two_panes() const { return m_two_panes; }
 	// Walk every themed child window and re-apply dark-mode state. Public
 	// because the listview's "Open With..." path needs to call this after
 	// SHOpenWithDialog returns — the picker invalidates our process-wide
@@ -393,6 +394,7 @@ protected:
 	void reflow_topbar();
 	afx_msg LRESULT OnBreadcrumbClick(WPARAM wp, LPARAM lp);
 	afx_msg LRESULT OnBreadcrumbChevron(WPARAM wp, LPARAM lp);
+	afx_msg LRESULT OnBreadcrumbPath(WPARAM wp, LPARAM lp);
 	afx_msg LRESULT OnTopbarDividerDrag(WPARAM wp, LPARAM lp);
 	afx_msg LRESULT OnTopbarDividerDone(WPARAM wp, LPARAM lp);
 	afx_msg void OnThemeAlphaColor();
@@ -498,6 +500,9 @@ protected:
 	afx_msg void OnThemeVxlFullHier();
 	afx_msg void OnUpdateThemeVxlFullHier(CCmdUI* pCmdUI);
 	afx_msg void OnKeybindsConfigure();
+	afx_msg void OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu);
+	afx_msg void OnFileRecent(UINT id);
+	afx_msg void OnFileRecentClear();
 
 	// Replace the frame's accelerator table with one built from current
 	// keybinds. Safe to call repeatedly; frees the old table.

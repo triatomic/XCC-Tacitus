@@ -99,6 +99,11 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Reload Mix Database\tCtrl+Shift+R", ID_FILE_RELOAD_MIX_DB
         MENUITEM SEPARATOR
+        POPUP "&Recents"
+        BEGIN
+            MENUITEM "(empty)",                     ID_FILE_RECENT_00, GRAYED
+        END
+        MENUITEM SEPARATOR
         MENUITEM "E&xit",                       ID_APP_EXIT
     END
     POPUP "&Conversion"
@@ -190,9 +195,12 @@ BEGIN
             MENUITEM "&Auto",                       ID_THEME_SIZE_FORMAT_AUTO
             MENUITEM "&Bytes",                      ID_THEME_SIZE_FORMAT_BYTES
         END
-        MENUITEM "Show &Filter Box",            ID_THEME_SHOW_FILTER_BOX
-        MENUITEM "Show Bread&crumb",            ID_THEME_SHOW_BREADCRUMB
-        MENUITEM "S&wap Filter && Breadcrumb",  ID_THEME_SWAP_TOPBAR
+        POPUP "&Navigation Bar"
+        BEGIN
+            MENUITEM "Show &Filter Box",            ID_THEME_SHOW_FILTER_BOX
+            MENUITEM "Show Bread&crumb",            ID_THEME_SHOW_BREADCRUMB
+            MENUITEM "S&wap Filter && Breadcrumb",  ID_THEME_SWAP_TOPBAR
+        END
         MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
         MENUITEM "Show Column &Headers",        ID_THEME_SHOW_COLUMN_HEADERS
         MENUITEM "Hide Results When Search Is &Empty", ID_THEME_HIDE_EMPTY_RESULTS
@@ -279,7 +287,7 @@ BEGIN
     BEGIN
         MENUITEM "Open\tEnter",                 ID_POPUP_OPEN
         MENUITEM "Open &With...",               ID_POPUP_OPEN_WITH
-        MENUITEM "&Explore...",                 ID_POPUP_EXPLORE
+        MENUITEM "&Explore...\tCtrl+E",         ID_POPUP_EXPLORE
         MENUITEM "&New Archive...",             ID_FILE_NEW
         MENUITEM SEPARATOR
         POPUP "Clipboard"
@@ -1068,7 +1076,8 @@ CAPTION "Keybinds"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     LTEXT           "Each action can have a keyboard shortcut, a mouse gesture, or both. Double-click a row or use the buttons below to change. Same-scope conflicts are rejected on OK.",IDC_STATIC,7,7,526,18
-    CONTROL         "List1",IDC_KEYBINDS_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,30,526,210
+    EDITTEXT        IDC_KEYBINDS_FILTER,7,28,526,12,ES_AUTOHSCROLL
+    CONTROL         "List1",IDC_KEYBINDS_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,44,526,196
     PUSHBUTTON      "Change &Key...",IDC_KEYBINDS_CHANGE_KEY,7,250,72,14
     PUSHBUTTON      "Change &Mouse...",IDC_KEYBINDS_CHANGE_MOUSE,82,250,80,14
     PUSHBUTTON      "Clear Key",IDC_KEYBINDS_CLEAR_KEY,165,250,55,14

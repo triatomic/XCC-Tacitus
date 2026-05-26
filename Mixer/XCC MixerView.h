@@ -286,6 +286,18 @@ public:
 	// Navigate to `level` then descend into the named child (folder or archive).
 	// Used when the user picks an entry from the chevron dropdown.
 	void nav_descend(int level, const t_nav_child& child);
+
+	// Canonical copyable path string for the current location — the on-disk path
+	// (folder when browsing the filesystem; the root MIX's file path when inside
+	// a MIX, e.g. "D:\games\ra2.mix"). Drives the editable breadcrumb's text and
+	// the "copy path" action.
+	std::string nav_current_path() const;
+	// Navigate the active pane to a typed/pasted path: an existing folder opens
+	// as a directory; an existing archive file (.mix/.big/.dat/.pak/.pkg/.mmx/
+	// .yro/.bag) opens as a MIX. Surrounding quotes are tolerated. Returns true
+	// if the path resolved and navigation happened; false otherwise (caller can
+	// beep / keep the editor open).
+	bool nav_open_path(const std::string& path);
 private:
 	// Resolve the open Cmix_file at breadcrumb MIX-level `level` (or nullptr if
 	// the level is a filesystem segment / out of range). Shared by nav_children.

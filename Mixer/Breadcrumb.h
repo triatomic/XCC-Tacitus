@@ -19,6 +19,19 @@
 // dropdown of that level's navigable children. wParam = segment index,
 // lParam = MAKELPARAM(screenX, screenY) of the drop point.
 #define WM_BREADCRUMB_CHEVRON (WM_APP + 0x63)
+// Posted when the user commits an edited path (Enter in edit mode). The parent
+// reads the text via CBreadcrumbBar::edited_path() and navigates there.
+#define WM_BREADCRUMB_PATH (WM_APP + 0x64)
+
+// Inner edit used by the breadcrumb's Explorer-style "click to edit path" mode.
+// Intercepts Enter (commit) / Esc (cancel) and notifies the owning bar.
+class CPathEdit : public CEdit
+{
+protected:
+	afx_msg BOOL PreTranslateMessage(MSG* pMsg) override;
+	afx_msg void OnKillFocus(CWnd* pNewWnd);
+	DECLARE_MESSAGE_MAP()
+};
 
 class CBreadcrumbBar : public CWnd
 {
@@ -28,12 +41,26 @@ public:
 	// Create the control as a child of `parent` with the given id. Call once.
 	BOOL Create(CWnd* parent, UINT id);
 
-	// Replace the displayed path. Triggers a repaint + hit-rect recompute.
-	// No-op (besides repaint) if the segments are unchanged.
-	void set_segments(const std::vector<std::string>& segs);
+	// Replace the displayed path. `segs` are the visual breadcrumb segments;
+	// `full_path` is the canonical copyable/editable path string (shown in edit
+	// mode). Triggers a repaint + hit-rect recompute.
+	void set_segments(const std::vector<std::string>& segs,
+		const std::string& full_path);
 
 	// Re-apply theme colors (just a repaint — colors are read live in OnPaint).
 	void refresh_theme();
+
+	// Edit-mode control: swap the segment display for an editable path box
+	// (Explorer-style). enter_edit_mode fills it with the current path, shows
+	// + focuses + selects-all; exit restores the segment display.
+	void enter_edit_mode();
+	void exit_edit_mode();
+	bool in_edit_mode() const { return m_editing; }
+	// Text currently in the path editor (read by the parent on commit).
+	CString edited_path() const;
+	// Called by CPathEdit on Enter/Esc.
+	void on_edit_commit();
+	void on_edit_cancel();
 
 protected:
 	afx_msg void OnPaint();
@@ -42,6 +69,7 @@ protected:
 	afx_msg void OnMouseLeave();
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	DECLARE_MESSAGE_MAP()
 
 private:
@@ -64,11 +92,14 @@ private:
 	int real_index(int drawn) const;
 
 	std::vector<std::string> m_segments;   // full path, root-first
+	std::string m_full_path;               // canonical copyable/editable string
 	std::vector<t_seg> m_drawn;            // visible segments with hit rects
 	int m_first_visible = 0;               // index of first non-elided segment
 	int m_hot = -1;                        // hovered drawn-segment label index, or -1
 	int m_hot_chevron = -1;                // hovered drawn-segment chevron index, or -1
 	bool m_tracking = false;               // TrackMouseEvent armed
+	CPathEdit m_path_edit;                 // editable path box (Explorer-style)
+	bool m_editing = false;                // edit mode active
 };
 
 // Thin draggable divider between the breadcrumb and the filter box, modeled on

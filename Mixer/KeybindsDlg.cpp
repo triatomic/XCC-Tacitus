@@ -15,6 +15,7 @@ void CKeybindsDlg::DoDataExchange(CDataExchange* pDX)
 {
 	ETSLayoutDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_KEYBINDS_LIST, m_list);
+	DDX_Control(pDX, IDC_KEYBINDS_FILTER, m_filter);
 	DDX_Control(pDX, IDC_KEYBINDS_CHANGE_KEY, m_change_key);
 	DDX_Control(pDX, IDC_KEYBINDS_CHANGE_MOUSE, m_change_mouse);
 	DDX_Control(pDX, IDC_KEYBINDS_CLEAR_KEY, m_clear_key);
@@ -34,6 +35,7 @@ BEGIN_MESSAGE_MAP(CKeybindsDlg, ETSLayoutDialog)
 	ON_BN_CLICKED(IDC_KEYBINDS_OPEN_INI, OnOpenIni)
 	ON_NOTIFY(NM_DBLCLK, IDC_KEYBINDS_LIST, OnDblclkList)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_KEYBINDS_LIST, OnItemchangedList)
+	ON_EN_CHANGE(IDC_KEYBINDS_FILTER, OnFilterChange)
 	ON_WM_CTLCOLOR()
 	ON_WM_SIZE()
 END_MESSAGE_MAP()
@@ -43,6 +45,7 @@ BOOL CKeybindsDlg::OnInitDialog()
 	CreateRoot(VERTICAL)
 		<< (pane(VERTICAL, GREEDY)
 			<< item(IDC_STATIC, ABSOLUTE_VERT)
+			<< item(IDC_KEYBINDS_FILTER, ABSOLUTE_VERT)
 			<< item(IDC_KEYBINDS_LIST, GREEDY)
 			)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
@@ -64,6 +67,10 @@ BOOL CKeybindsDlg::OnInitDialog()
 	m_list.InsertColumn(1, "Keyboard", LVCFMT_LEFT, 130);
 	m_list.InsertColumn(2, "Mouse",    LVCFMT_LEFT, 130);
 	m_list.InsertColumn(3, "Scope",    LVCFMT_LEFT, 80);
+
+	// Cue banner in the filter edit (faded until the user types).
+	::SendMessageW(m_filter.GetSafeHwnd(), EM_SETCUEBANNER, TRUE,
+		reinterpret_cast<LPARAM>(L"Filter commands..."));
 
 	m_working = keybinds::current();
 	rebuild_list();
@@ -108,34 +115,90 @@ void CKeybindsDlg::resize_columns()
 	m_list.SetColumnWidth(0, rest);
 }
 
+// Case-insensitive substring match. Used by the filter against the command
+// label, shortcut text, mouse text, and scope name (so "ctrl+f" matches by
+// shortcut and "view" matches by scope).
+static bool needle_in(const std::string& needle, const char* hay)
+{
+	if (needle.empty() || !hay) return true;
+	std::string n; n.reserve(needle.size());
+	for (char c : needle) n += static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+	std::string h;
+	for (const char* p = hay; *p; ++p)
+		h += static_cast<char>(::tolower(static_cast<unsigned char>(*p)));
+	return h.find(n) != std::string::npos;
+}
+
 void CKeybindsDlg::rebuild_list()
 {
+	CString cs;
+	if (m_filter.GetSafeHwnd())
+		m_filter.GetWindowText(cs);
+	const std::string needle = static_cast<const char*>(cs);
+
 	m_list.SetRedraw(FALSE);
 	m_list.DeleteAllItems();
+	int row = 0;
 	for (size_t i = 0; i < m_working.size(); i++)
 	{
 		const keybinds::Binding& b = m_working[i];
-		int row = m_list.InsertItem((int)i, b.label);
-		m_list.SetItemText(row, 1, keybinds::format_shortcut(b.vk, b.key_mods).c_str());
-		m_list.SetItemText(row, 2, keybinds::format_mouse(b.btn, b.mouse_mods).c_str());
-		m_list.SetItemText(row, 3, keybinds::scope_name(b.scope).c_str());
+		std::string sc = keybinds::format_shortcut(b.vk, b.key_mods);
+		std::string mb = keybinds::format_mouse(b.btn, b.mouse_mods);
+		std::string sn = keybinds::scope_name(b.scope);
+		// Match against any of label / shortcut / mouse / scope so users can
+		// search by what they remember (command name OR the key combo OR scope).
+		if (!needle.empty()
+			&& !needle_in(needle, b.label)
+			&& !needle_in(needle, sc.c_str())
+			&& !needle_in(needle, mb.c_str())
+			&& !needle_in(needle, sn.c_str()))
+			continue;
+		m_list.InsertItem(row, b.label);
+		m_list.SetItemData(row, static_cast<DWORD_PTR>(i));  // real m_working idx
+		m_list.SetItemText(row, 1, sc.c_str());
+		m_list.SetItemText(row, 2, mb.c_str());
+		m_list.SetItemText(row, 3, sn.c_str());
+		row++;
 	}
 	m_list.SetRedraw(TRUE);
 }
 
-void CKeybindsDlg::update_row(int row)
+// `wi` is a m_working index, NOT a list row. Look up the row showing it (may be
+// hidden by the filter) before rewriting columns.
+void CKeybindsDlg::update_row(int wi)
 {
-	if (row < 0 || row >= (int)m_working.size())
+	if (wi < 0 || wi >= (int)m_working.size())
 		return;
-	const keybinds::Binding& b = m_working[row];
+	int row = row_for_working(wi);
+	if (row < 0)
+		return;
+	const keybinds::Binding& b = m_working[wi];
 	m_list.SetItemText(row, 1, keybinds::format_shortcut(b.vk, b.key_mods).c_str());
 	m_list.SetItemText(row, 2, keybinds::format_mouse(b.btn, b.mouse_mods).c_str());
+}
+
+int CKeybindsDlg::working_index_at(int row) const
+{
+	if (row < 0 || row >= m_list.GetItemCount())
+		return -1;
+	return static_cast<int>(m_list.GetItemData(row));
+}
+
+int CKeybindsDlg::row_for_working(int wi) const
+{
+	for (int r = 0; r < m_list.GetItemCount(); r++)
+		if (static_cast<int>(m_list.GetItemData(r)) == wi)
+			return r;
+	return -1;
 }
 
 int CKeybindsDlg::selected_index() const
 {
 	POSITION pos = m_list.GetFirstSelectedItemPosition();
-	return pos ? m_list.GetNextSelectedItem(pos) : -1;
+	if (!pos)
+		return -1;
+	int row = m_list.GetNextSelectedItem(pos);
+	return working_index_at(row);
 }
 
 void CKeybindsDlg::update_buttons()
@@ -153,6 +216,23 @@ void CKeybindsDlg::OnItemchangedList(NMHDR*, LRESULT* pResult)
 {
 	update_buttons();
 	*pResult = 0;
+}
+
+void CKeybindsDlg::OnFilterChange()
+{
+	// Preserve the currently selected command across the rebuild so typing
+	// doesn't keep stealing the selection.
+	int wi = selected_index();
+	rebuild_list();
+	int row = (wi >= 0) ? row_for_working(wi) : -1;
+	if (row < 0 && m_list.GetItemCount() > 0)
+		row = 0;
+	if (row >= 0)
+	{
+		m_list.SetItemState(row, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
+		m_list.EnsureVisible(row, FALSE);
+	}
+	update_buttons();
 }
 
 void CKeybindsDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)

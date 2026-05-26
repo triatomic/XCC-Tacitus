@@ -16,6 +16,7 @@
 #include "ColorPickerDlg.h"
 #include "KeybindsDlg.h"
 #include "keybinds.h"
+#include "recents.h"
 #include "SelectPaletteDlg.h"
 #include "VxlLightingDlg.h"
 #include "string_conversion.h"
@@ -80,6 +81,9 @@ IMPLEMENT_DYNCREATE(CMainFrame, CFrameWnd)
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnViewPalette)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnUpdateViewPalette)
+	ON_COMMAND_RANGE(ID_FILE_RECENT_00, ID_FILE_RECENT_LAST, OnFileRecent)
+	ON_COMMAND(ID_FILE_RECENT_CLEAR, OnFileRecentClear)
+	ON_WM_INITMENUPOPUP()
 	ON_WM_CREATE()
 	ON_WM_SIZE()
 	ON_EN_CHANGE(IDC_PANE_FILTER, OnFilterChange)
@@ -186,6 +190,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SWAP_TOPBAR, OnUpdateThemeSwapTopbar)
 	ON_MESSAGE(WM_BREADCRUMB_CLICK, &CMainFrame::OnBreadcrumbClick)
 	ON_MESSAGE(WM_BREADCRUMB_CHEVRON, &CMainFrame::OnBreadcrumbChevron)
+	ON_MESSAGE(WM_BREADCRUMB_PATH, &CMainFrame::OnBreadcrumbPath)
 	ON_MESSAGE(WM_TOPBAR_DIVIDER_DRAG, &CMainFrame::OnTopbarDividerDrag)
 	ON_MESSAGE(WM_TOPBAR_DIVIDER_DONE, &CMainFrame::OnTopbarDividerDone)
 	ON_COMMAND(ID_THEME_ALPHA_COLOR, OnThemeAlphaColor)
@@ -338,6 +343,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		}
 	}
 	theme::apply_titlebar(GetSafeHwnd());
+	recents::load();
 	rebuild_menu_owner_draw();
 	// Load user-overridden keybinds from registry; defer the accel table
 	// rebuild until after LoadFrame finishes. LoadFrame calls Create (which
@@ -589,8 +595,9 @@ void CMainFrame::refresh_breadcrumb()
 	if (!m_breadcrumb.GetSafeHwnd())
 		return;
 	CXCCMixerView* pane = active_mix_pane();
-	m_breadcrumb.set_segments(pane ? pane->nav_segments()
-		: std::vector<std::string>());
+	m_breadcrumb.set_segments(
+		pane ? pane->nav_segments() : std::vector<std::string>(),
+		pane ? pane->nav_current_path() : std::string());
 }
 
 CXCCMixerView* CMainFrame::active_mix_pane() const
@@ -667,6 +674,54 @@ void CMainFrame::OnSize(UINT nType, int cx, int cy)
 
 BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 {
+	// Global Tab / Ctrl+Tab focus moves — handled at the frame so they work no
+	// matter which child currently has focus (lists, filter edit, breadcrumb,
+	// player band, etc.). The frame's PreTranslateMessage sees every keystroke
+	// in the thread before the focused control does.
+	//   Ctrl+Tab  -> toggle the active pane (left <-> right).
+	//   Tab       -> toggle focus between the active pane and the filter box.
+	// Skip when a modal popup / combo dropdown owns input (handled by them).
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_TAB
+		&& (pMsg->lParam & (1 << 30)) == 0)        // ignore auto-repeat
+	{
+		const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+		const bool alt  = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+		if (!alt)
+		{
+			if (ctrl)
+			{
+				// Toggle pane 1 <-> 2. Pick the pane that ISN'T active and focus
+				// it; set_active_pane (via OnSetFocus) repaints the indicator.
+				CXCCMixerView* cur = active_mix_pane();
+				CXCCMixerView* other = (cur == m_left_mix_pane)
+					? m_right_mix_pane : m_left_mix_pane;
+				// In one-pane mode the right pane is collapsed — stay on left.
+				if (!m_two_panes)
+					other = m_left_mix_pane;
+				if (other && other->GetSafeHwnd())
+				{
+					other->SetFocus();
+					return TRUE;
+				}
+			}
+			else
+			{
+				// Plain Tab: filter box <-> active pane.
+				HWND f = ::GetFocus();
+				if (m_filter_edit.GetSafeHwnd() && f == m_filter_edit.GetSafeHwnd())
+				{
+					if (CXCCMixerView* pane = active_mix_pane())
+					{
+						pane->SetFocus();
+						return TRUE;
+					}
+				}
+				else if (focus_filter_box())
+					return TRUE;
+			}
+		}
+	}
+
 	// Filter edit has focus: keep keystrokes away from the frame's accelerator
 	// table. CFrameWnd::PreTranslateMessage runs TranslateAccelerator, which
 	// would consume editing keys bound as accelerators (e.g. Backspace =
@@ -678,23 +733,8 @@ BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 	{
 		if (pMsg->message == WM_KEYDOWN)
 		{
-			if (pMsg->wParam == VK_TAB)
-			{
-				// Tab back from the filter edit returns focus to the active pane
-				// (mirrors Tab from the pane into the filter — see
-				// CXCCMixerView::PreTranslateMessage). Plain Tab only.
-				const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-				const bool alt  = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
-				if (!ctrl && !alt)
-				{
-					if (CXCCMixerView* pane = active_mix_pane())
-					{
-						pane->SetFocus();
-						return TRUE;
-					}
-				}
-			}
-			else if (pMsg->wParam == VK_ESCAPE)
+			// Tab/Ctrl+Tab are handled globally at the top of this function.
+			if (pMsg->wParam == VK_ESCAPE)
 			{
 				CString s;
 				m_filter_edit.GetWindowText(s);
@@ -2408,6 +2448,29 @@ void CMainFrame::OnUpdateThemeSwapTopbar(CCmdUI* pCmdUI)
 	pCmdUI->Enable(theme::show_filter_box() && theme::show_breadcrumb());
 }
 
+// The user committed an edited path in the breadcrumb (Enter). Navigate the
+// active pane there; on success the resulting update_list -> sync_filter_ui ->
+// refresh_breadcrumb exits edit mode. On failure, beep and leave the editor up.
+LRESULT CMainFrame::OnBreadcrumbPath(WPARAM, LPARAM)
+{
+	CXCCMixerView* pane = active_mix_pane();
+	if (!pane)
+		return 0;
+	CString s = m_breadcrumb.edited_path();
+	if (!pane->nav_open_path(static_cast<const char*>(s)))
+	{
+		::MessageBeep(MB_ICONWARNING);   // unresolved path — keep editing
+		return 0;
+	}
+	// Success: leave edit mode explicitly (set_segments only exits on a segment
+	// change, which won't fire if the committed path equals the current one) and
+	// return focus to the pane.
+	m_breadcrumb.exit_edit_mode();
+	if (pane->GetSafeHwnd())
+		pane->SetFocus();
+	return 0;
+}
+
 // A breadcrumb segment was clicked: navigate the active pane to that level.
 LRESULT CMainFrame::OnBreadcrumbClick(WPARAM wp, LPARAM)
 {
@@ -3226,4 +3289,100 @@ void CMainFrame::OnKeybindsConfigure()
 		rebuild_accel();
 		refresh_menu_shortcuts();
 	}
+}
+
+// Rebuild the File > Recents popup just before it is shown so the list always
+// reflects the latest recents::list(). Identified by a stable sentinel item
+// (ID_FILE_RECENT_00) that the .rc template seeds; we never address the popup
+// by position. After rebuild, set_menu_owner_draw is re-applied so freshly
+// inserted items get the dark-mode treatment.
+void CMainFrame::OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu)
+{
+	CFrameWnd::OnInitMenuPopup(pPopupMenu, nIndex, bSysMenu);
+	if (bSysMenu || !pPopupMenu || !pPopupMenu->GetSafeHmenu())
+		return;
+	HMENU hm = pPopupMenu->GetSafeHmenu();
+	// Match by presence of any recents id rather than position.
+	bool is_recents = false;
+	int n = ::GetMenuItemCount(hm);
+	for (int i = 0; i < n; i++)
+	{
+		UINT id = ::GetMenuItemID(hm, i);
+		if (id == ID_FILE_RECENT_CLEAR ||
+			(id >= ID_FILE_RECENT_00 && id <= static_cast<UINT>(ID_FILE_RECENT_LAST)))
+		{
+			is_recents = true;
+			break;
+		}
+	}
+	if (!is_recents)
+		return;
+
+	// Wipe and repopulate.
+	while (::GetMenuItemCount(hm) > 0)
+		::RemoveMenu(hm, 0, MF_BYPOSITION);
+
+	const auto& v = recents::list();
+	if (v.empty())
+	{
+		::AppendMenuA(hm, MF_STRING | MF_GRAYED, ID_FILE_RECENT_00, "(empty)");
+	}
+	else
+	{
+		int slots = static_cast<int>(v.size());
+		if (slots > recents::max_items()) slots = recents::max_items();
+		for (int i = 0; i < slots; i++)
+		{
+			// "&N  <basename>  (<parent dir>)". '&' literals doubled so they
+			// don't underline the next char. No leading tab — menus right-align
+			// post-tab text as an accelerator suffix.
+			const std::string& full = v[i];
+			auto slash = full.find_last_of("\\/");
+			std::string short_name = (slash == std::string::npos) ? full : full.substr(slash + 1);
+			std::string parent;
+			if (slash != std::string::npos)
+			{
+				parent = full.substr(0, slash);
+				auto slash2 = parent.find_last_of("\\/");
+				if (slash2 != std::string::npos)
+					parent = parent.substr(slash2 + 1);
+			}
+			char prefix[16];
+			_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "&%d.  ", (i + 1) % 10);
+			std::string label = prefix;
+			for (char c : short_name) { if (c == '&') label += '&'; label += c; }
+			if (!parent.empty())
+			{
+				label += "  (";
+				for (char c : parent) { if (c == '&') label += '&'; label += c; }
+				label += ')';
+			}
+			::AppendMenuA(hm, MF_STRING, ID_FILE_RECENT_00 + i, label.c_str());
+		}
+		::AppendMenuA(hm, MF_SEPARATOR, 0, NULL);
+		::AppendMenuA(hm, MF_STRING, ID_FILE_RECENT_CLEAR, "&Clear list");
+	}
+	// Native popups render in the system's dark palette via SetPreferredAppMode
+	// (see rebuild_menu_owner_draw notes). Calling rebuild_menu_owner_draw here
+	// flashes the bar white because it cycles SetMenu(NULL)+SetMenu(hm).
+}
+
+void CMainFrame::OnFileRecent(UINT id)
+{
+	int i = static_cast<int>(id) - ID_FILE_RECENT_00;
+	const auto& v = recents::list();
+	if (i < 0 || i >= static_cast<int>(v.size()))
+		return;
+	std::string path = v[i];
+	CXCCMixerView* pane = active_mix_pane();
+	if (!pane)
+		pane = left_mix_pane();
+	if (!pane)
+		return;
+	pane->nav_open_path(path);
+}
+
+void CMainFrame::OnFileRecentClear()
+{
+	recents::clear();
 }

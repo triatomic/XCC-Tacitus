@@ -7,6 +7,7 @@
 #include "XCC MixerView.h"
 #include "AudioPlayerDlg.h"
 #include "keybinds.h"
+#include "recents.h"
 #include "resource.h"
 #include "XSTE_dlg.h"
 #include <algorithm>
@@ -570,7 +571,8 @@ void CXCCMixerView::open_location_mix(const string& name)
 		// MIX dropped the pane back onto a stale directory (the navigation-bar
 		// limitation: folder clicks landed somewhere unrelated). Only when this
 		// is the root open (m_mix_f == nullptr) and the path has a folder part.
-		if (!m_mix_f)
+		bool is_root_open = (m_mix_f == nullptr);
+		if (is_root_open)
 		{
 			string folder = Cfname(name).get_path();
 			if (!folder.empty())
@@ -580,6 +582,11 @@ void CXCCMixerView::open_location_mix(const string& name)
 		m_entered_ids.push(-1);
 		m_mix_f = mix_f;
 		m_mix_fname = name;
+		// Record root-open of a disk archive in the Recents list. Skip nested
+		// MIXes (those have a parent m_mix_f) and nav-stack replays (the path
+		// is already in recents from the original open).
+		if (is_root_open && !m_nav_replaying)
+			recents::push(name);
 	}
 	update_list();
 }
@@ -932,6 +939,15 @@ Cmix_file* CXCCMixerView::mix_at_level(int level) const
 	return open_mixes[mix_index];
 }
 
+// Set of archive extensions we treat as navigable MIX-likes. Shared by the
+// breadcrumb child dropdown and the editable-path navigation.
+static bool is_archive_ext(const std::string& ext_lower)
+{
+	return ext_lower == ".mix" || ext_lower == ".big" || ext_lower == ".dat"
+		|| ext_lower == ".pak" || ext_lower == ".pkg" || ext_lower == ".mmx"
+		|| ext_lower == ".yro" || ext_lower == ".bag";
+}
+
 std::vector<CXCCMixerView::t_nav_child> CXCCMixerView::nav_children(int level) const
 {
 	std::vector<t_nav_child> out;
@@ -956,10 +972,7 @@ std::vector<CXCCMixerView::t_nav_child> CXCCMixerView::nav_children(int level) c
 				}
 				else
 				{
-					std::string ext = to_lower(Cfname(name).get_fext());
-					if (ext == ".mix" || ext == ".big" || ext == ".dat"
-						|| ext == ".pak" || ext == ".pkg" || ext == ".mmx"
-						|| ext == ".yro" || ext == ".bag")
+					if (is_archive_ext(to_lower(Cfname(name).get_fext())))
 					{
 						t_nav_child c; c.name = name; c.is_mix_child = false;
 						out.push_back(c);
@@ -1013,15 +1026,56 @@ void CXCCMixerView::nav_descend(int level, const t_nav_child& child)
 		if (folder.empty())
 			return;
 		std::string full = folder + child.name;
-		std::string ext = to_lower(Cfname(child.name).get_fext());
-		bool is_archive = (ext == ".mix" || ext == ".big" || ext == ".dat"
-			|| ext == ".pak" || ext == ".pkg" || ext == ".mmx"
-			|| ext == ".yro" || ext == ".bag");
-		if (is_archive)
+		if (is_archive_ext(to_lower(Cfname(child.name).get_fext())))
 			open_location_mix(full);
 		else
 			open_location_dir(full + '\\');   // subfolder
 	}
+}
+
+std::string CXCCMixerView::nav_current_path() const
+{
+	// Inside a MIX: the on-disk root MIX path (the canonical thing the user can
+	// paste back). On the filesystem: the current directory.
+	if (m_mix_f)
+		return m_mix_fname;
+	return m_dir;
+}
+
+bool CXCCMixerView::nav_open_path(const std::string& path)
+{
+	// Trim whitespace + surrounding quotes (Explorer's "Copy as path" quotes).
+	std::string p = path;
+	size_t a = p.find_first_not_of(" \t\r\n\"");
+	size_t b = p.find_last_not_of(" \t\r\n\"");
+	if (a == std::string::npos)
+		return false;
+	p = p.substr(a, b - a + 1);
+	if (p.empty())
+		return false;
+
+	DWORD attr = ::GetFileAttributesA(p.c_str());
+	if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+	{
+		// Existing folder: ensure a trailing backslash (update_list globs m_dir + "*").
+		if (p.back() != '\\' && p.back() != '/')
+			p += '\\';
+		close_all_locations();
+		open_location_dir(p);
+		return true;
+	}
+	if (attr != INVALID_FILE_ATTRIBUTES)
+	{
+		// Existing file: only navigable if it's an archive we can open as a MIX.
+		if (is_archive_ext(to_lower(Cfname(p).get_fext())))
+		{
+			close_all_locations();
+			open_location_mix(p);
+			return true;
+		}
+		return false;   // a regular file — nothing to navigate into
+	}
+	return false;       // path doesn't exist
 }
 
 bool CXCCMixerView::nav_go_forward()
@@ -1903,6 +1957,34 @@ static int seh_call_dispatch(CXCCMixerView* v, t_file_type ft, int i, Cfname* fn
 
 void CXCCMixerView::copy_as(t_file_type ft)
 {
+	// One-pane mode: there's no "other pane" the user can see, so prompt for a
+	// destination folder and redirect m_other_pane's state to it for the duration
+	// of this call. The whole function reads destination through m_other_pane->
+	// get_dir() / ->m_mix_f, so a save+temp-override+restore works without
+	// touching the per-format branches below.
+	struct other_pane_saver {
+		CXCCMixerView* p;
+		string saved_dir;
+		Cmix_file* saved_mix_f;
+		bool armed;
+		~other_pane_saver() { if (armed) { p->m_dir = saved_dir; p->m_mix_f = saved_mix_f; } }
+	} restore{ m_other_pane, m_other_pane ? m_other_pane->m_dir : string(), m_other_pane ? m_other_pane->m_mix_f : nullptr, false };
+	if (m_other_pane && GetMainFrame() && !GetMainFrame()->two_panes())
+	{
+		CFolderPickerDialog dlg;
+		dlg.m_ofn.lpstrTitle = "Choose destination folder";
+		if (dlg.DoModal() != IDOK)
+			return;
+		string dest = static_cast<const char*>(dlg.GetPathName());
+		if (dest.empty())
+			return;
+		if (dest.back() != '\\' && dest.back() != '/')
+			dest += '\\';
+		restore.armed = true;
+		m_other_pane->m_dir = dest;
+		m_other_pane->m_mix_f = nullptr;   // force the "write to disk" branch
+	}
+
 	CWaitCursor wait;
 	int error;
 	for (auto& i : m_index_selected)
@@ -4204,16 +4286,8 @@ BOOL CXCCMixerView::PreTranslateMessage(MSG* pMsg)
 		bool ctrl  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 		bool shift = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
 		bool alt   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
-		// Tab from a mix list jumps to the filter box (so you can filter the
-		// active pane without reaching for the mouse). The list view isn't part
-		// of a dialog tab loop, so MFC won't do this for us. Plain Tab only —
-		// leave Ctrl/Alt+Tab to the system.
-		if (pMsg->wParam == VK_TAB && !ctrl && !alt)
-		{
-			if (CMainFrame* mf = GetMainFrame())
-				if (mf->focus_filter_box())
-					return TRUE;
-		}
+		// Tab / Ctrl+Tab focus moves are handled globally in
+		// CMainFrame::PreTranslateMessage (work regardless of focus).
 		UINT action = 0;
 		if (keybinds::match_view(keybinds::scope_list_view, (UINT)pMsg->wParam, ctrl, shift, alt, action))
 		{
