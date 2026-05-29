@@ -2,7 +2,8 @@
 
 A fork of XCC Mixer with a Win11-style dark mode, in-pane SHP/WSA/VXL player and recorder, customizable keybinds, and faster search & navigation.
 
-<img width="2559" height="1130" alt="image" src="https://github.com/user-attachments/assets/288f76ca-4ab1-4993-92e0-b30eaa0ae68f" />
+<img width="2559" height="1373" alt="image" src="https://github.com/user-attachments/assets/cfba70d7-af62-4785-b058-579b846ae231" />
+
 
 ## Downloads
 
