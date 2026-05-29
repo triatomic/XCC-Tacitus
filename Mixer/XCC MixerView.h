@@ -338,9 +338,11 @@ private:
 	vector<t_nested_edit> m_nested_edit;
 	// True while the current MIX level's editable file is a temp (i.e. nested).
 	bool editing_nested() const { return !m_nested_edit.empty(); }
-	// Extract nested MIX `id` (child of m_mix_f, named `name`) to a temp file;
-	// push a t_nested_edit and return the temp path (empty on failure).
-	string nested_extract_to_temp(int id, const string& name);
+	// Materialize the current nested level's temp file on demand (lazy extract).
+	// Called from edit_release on the first edit; no-op once extracted. Returns
+	// true if a usable temp exists (m_mix_fname then points at it), false if not
+	// nested or the extract failed.
+	bool ensure_nested_temp();
 	// Re-insert the top nested temp into its parent if dirty, then delete the
 	// temp and pop. Recurses: marks the new parent level dirty so the change
 	// propagates up to the on-disk root. Called from close_location.
@@ -353,7 +355,9 @@ private:
 	// edit_reopen(edited) afterward. At the disk root these mirror the old
 	// close_location(false)+open_location_mix(m_mix_fname) pair; at a nested
 	// level they keep the temp alive and reopen it (see definitions).
-	void edit_release();
+	// Returns false if a nested edit could not be prepared (lazy extract failed);
+	// callers must then skip the edit. Always true at the disk root.
+	bool edit_release();
 	void edit_reopen(bool edited);
 	// Parallel to nested levels: m_mix_fname value of each PARENT level, so it
 	// can be restored when close_location pops back up.
