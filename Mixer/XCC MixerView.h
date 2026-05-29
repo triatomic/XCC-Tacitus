@@ -317,6 +317,48 @@ private:
 	stack<int> m_entered_ids;
 	bool m_nav_replaying = false;
 
+	// Nested-MIX editing. A nested MIX has no file on disk -- it lives as a byte
+	// range inside its parent. To make the existing disk-path editors
+	// (Cmix_edit/Cbig_edit/Cmix_rg_edit, all of which open(path)) work on a
+	// nested MIX, on descent we extract its bytes to a temp file and point the
+	// current level's editable path at it. Edits accumulate in the temp; on the
+	// way back up (close_location) a dirty temp is re-inserted into its parent
+	// under the same entry name -- recursing up the chain since the parent may
+	// itself be a temp. One disk write per session at the on-disk root.
+	struct t_nested_edit
+	{
+		string temp_path;   // temp file holding this nested MIX's bytes
+		string entry_name;  // name of this MIX's entry inside its parent
+		int entry_id;       // id of this MIX's entry inside its parent
+		bool dirty;         // an edit op touched temp_path since extract
+	};
+	// One entry per nested level, parallel to the nested portion of m_location.
+	// m_nested_edit.back() describes the currently-open nested MIX (when the
+	// current level is nested). Empty when at the disk-root MIX or filesystem.
+	vector<t_nested_edit> m_nested_edit;
+	// True while the current MIX level's editable file is a temp (i.e. nested).
+	bool editing_nested() const { return !m_nested_edit.empty(); }
+	// Extract nested MIX `id` (child of m_mix_f, named `name`) to a temp file;
+	// push a t_nested_edit and return the temp path (empty on failure).
+	string nested_extract_to_temp(int id, const string& name);
+	// Re-insert the top nested temp into its parent if dirty, then delete the
+	// temp and pop. Recurses: marks the new parent level dirty so the change
+	// propagates up to the on-disk root. Called from close_location.
+	void nested_flush_top();
+	// Mark the current nested level dirty (called after any edit op). No-op at
+	// the disk root.
+	void nested_mark_dirty() { if (!m_nested_edit.empty()) m_nested_edit.back().dirty = true; }
+	// In-place edit teardown/restore. The edit ops (insert/drop/delete/compact)
+	// call edit_release() before opening a disk-path editor on m_mix_fname, then
+	// edit_reopen(edited) afterward. At the disk root these mirror the old
+	// close_location(false)+open_location_mix(m_mix_fname) pair; at a nested
+	// level they keep the temp alive and reopen it (see definitions).
+	void edit_release();
+	void edit_reopen(bool edited);
+	// Parallel to nested levels: m_mix_fname value of each PARENT level, so it
+	// can be restored when close_location pops back up.
+	vector<string> m_mix_fname_stack;
+
 	// Current name filter for this pane (fname_filter syntax). Consulted by
 	// insert_filtered_rows; set via set_filter() from the frame's filter edit;
 	// cleared on every navigation (in update_list). Empty = show all.

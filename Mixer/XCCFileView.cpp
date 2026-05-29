@@ -5549,8 +5549,11 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 		return false;
 	const bool vxl = is_vxl_view();
 
-	// VXL: cx_s/cy_s include supersampling. SHP/WSA/etc.: native player size.
+	// VXL: cx_s/cy_s include supersampling. SHP/WSA/etc.: native player size,
+	// multiplied by the pixel-art upscale factor when one is active (the BGRA
+	// cache entries hold post-upscale pixels — see player_fill_bgra_cache_entry).
 	int cx_s = 0, cy_s = 0;
+	int shp_upscale = 1;
 	if (vxl)
 	{
 		cx_s = m_vxl_splat.cx_s;
@@ -5558,8 +5561,9 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 	}
 	else
 	{
-		cx_s = m_player_cx;
-		cy_s = m_player_cy;
+		shp_upscale = shp_effective_upscale_factor();
+		cx_s = m_player_cx * shp_upscale;
+		cy_s = m_player_cy * shp_upscale;
 	}
 	if (cx_s <= 0 || cy_s <= 0)
 		return false;
@@ -5595,6 +5599,8 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 	// and keeps the v9.62 real-transparency behavior in Alpha/Pane modes.
 	const bool want_alpha = !wysiwyg && (m_player_bg_mode == 1 || m_player_bg_mode == 2);
 	const byte* indexed = nullptr;
+	const int idx_cx = vxl ? cx_s : m_player_cx;
+	const int idx_cy = vxl ? cy_s : m_player_cy;
 	if (want_alpha)
 	{
 		if (vxl)
@@ -5603,8 +5609,9 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 		}
 		else
 		{
+			const int idx_n = idx_cx * idx_cy;
 			if (m_player_frame >= 0 && m_player_frame < static_cast<int>(m_player_frames.size())
-				&& static_cast<int>(m_player_frames[m_player_frame].size()) >= n_pixels)
+				&& static_cast<int>(m_player_frames[m_player_frame].size()) >= idx_n)
 			{
 				indexed = m_player_frames[m_player_frame].data();
 			}
@@ -5617,10 +5624,32 @@ bool CXCCFileView::capture_current_frame(std::vector<DWORD>& out_bgra, int& out_
 		// VXL always uses idx 0 as "no voxel"; SHP/WSA respects the
 		// player's configurable BG idx (0 for RA2/TS, 4 for TD/RA1).
 		const byte bg = vxl ? byte(0) : static_cast<byte>(m_player_bg_idx);
-		for (int i = 0; i < n_pixels; i++)
+		// When a pixel-art upscaler is active the BGRA buffer is upscaled but
+		// the indexed buffer stays at native res — nearest-sample the index
+		// per output pixel so the alpha mask matches the BGRA cache layout.
+		if (!vxl && shp_upscale != 1)
 		{
-			const DWORD a = indexed[i] == bg ? 0u : 0xFF000000u;
-			out_bgra[i] = indexed[i] == bg ? 0u : (src_dwords[i] | a);
+			for (int y = 0; y < cy_s; y++)
+			{
+				const int sy = y / shp_upscale;
+				const byte* srow = indexed + static_cast<size_t>(sy) * idx_cx;
+				DWORD* drow = out_bgra.data() + static_cast<size_t>(y) * cx_s;
+				const DWORD* brow = src_dwords + static_cast<size_t>(y) * cx_s;
+				for (int x = 0; x < cx_s; x++)
+				{
+					const int sx = x / shp_upscale;
+					const DWORD a = srow[sx] == bg ? 0u : 0xFF000000u;
+					drow[x] = srow[sx] == bg ? 0u : (brow[x] | a);
+				}
+			}
+		}
+		else
+		{
+			for (int i = 0; i < n_pixels; i++)
+			{
+				const DWORD a = indexed[i] == bg ? 0u : 0xFF000000u;
+				out_bgra[i] = indexed[i] == bg ? 0u : (src_dwords[i] | a);
+			}
 		}
 	}
 	else
@@ -5724,6 +5753,16 @@ bool CXCCFileView::take_screenshot()
 		else if (ext == ".pcx") fmt = fmt_pcx;
 	}
 
+	// SHP/WSA zoom-aware output: scale captured buffers to the player's
+	// current effective zoom so the saved file matches what the user sees.
+	// VXL skipped — its cx_s/cy_s already include supersampling and zoom is a
+	// logical-pixel concept that doesn't compose cleanly with the splat size.
+	// BGRA uses bilinear (matches the on-screen view's default), indexed is
+	// always nearest (palette indices can't be blended).
+	const int z_pct = vxl ? 100 : player_effective_zoom_pct();
+	const int zoom_cx = (z_pct == 100) ? cx_s : std::max(1, cx_s * z_pct / 100);
+	const int zoom_cy = (z_pct == 100) ? cy_s : std::max(1, cy_s * z_pct / 100);
+
 	bool ok = false;
 	if (fmt == fmt_pcx)
 	{
@@ -5764,7 +5803,28 @@ bool CXCCFileView::take_screenshot()
 			pal[i].g = static_cast<byte>((bgra >> 8) & 0xff);
 			pal[i].r = static_cast<byte>((bgra >> 16) & 0xff);
 		}
-		const int rv = pcx_file_write(std::string(path), indexed, pal, cx_s, cy_s, 1);
+		std::vector<byte> zoomed_indexed;
+		const byte* pcx_src = indexed;
+		int pcx_cx = cx_s, pcx_cy = cy_s;
+		if (!vxl && z_pct != 100)
+		{
+			zoomed_indexed.assign(static_cast<size_t>(zoom_cx) * zoom_cy, 0);
+			for (int y = 0; y < zoom_cy; y++)
+			{
+				const int sy = std::min(cy_s - 1, (y * 2 + 1) * cy_s / (zoom_cy * 2));
+				const byte* srow = indexed + static_cast<size_t>(sy) * cx_s;
+				byte* drow = zoomed_indexed.data() + static_cast<size_t>(y) * zoom_cx;
+				for (int x = 0; x < zoom_cx; x++)
+				{
+					const int sx = std::min(cx_s - 1, (x * 2 + 1) * cx_s / (zoom_cx * 2));
+					drow[x] = srow[sx];
+				}
+			}
+			pcx_src = zoomed_indexed.data();
+			pcx_cx = zoom_cx;
+			pcx_cy = zoom_cy;
+		}
+		const int rv = pcx_file_write(std::string(path), pcx_src, pal, pcx_cx, pcx_cy, 1);
 		ok = (rv == 0);
 	}
 	else
@@ -5781,6 +5841,16 @@ bool CXCCFileView::take_screenshot()
 		}
 		cx_s = out_cx;
 		cy_s = out_cy;
+		std::vector<DWORD> zoomed_bgra;
+		if (!vxl && z_pct != 100)
+		{
+			zoomed_bgra.assign(static_cast<size_t>(zoom_cx) * zoom_cy, 0);
+			theme::bilinear_resample_bgra(out.data(), cx_s, cy_s,
+				zoomed_bgra.data(), zoom_cx, zoom_cy);
+			out.swap(zoomed_bgra);
+			cx_s = zoom_cx;
+			cy_s = zoom_cy;
+		}
 		const byte* bgra = reinterpret_cast<const byte*>(out.data());
 		if (fmt == fmt_tga)
 		{
@@ -5882,6 +5952,35 @@ bool CXCCFileView::copy_screenshot_to_clipboard()
 			return false;
 		}
 
+		// SHP/WSA: nearest-resample the indexed buffer to the player's
+		// current effective zoom so the clipboard matches what the user
+		// sees. VXL skipped (see take_screenshot). Indexed always nearest.
+		std::vector<byte> zoomed_indexed;
+		if (!vxl)
+		{
+			const int z_pct = player_effective_zoom_pct();
+			if (z_pct != 100)
+			{
+				const int zoom_cx = std::max(1, cx_s * z_pct / 100);
+				const int zoom_cy = std::max(1, cy_s * z_pct / 100);
+				zoomed_indexed.assign(static_cast<size_t>(zoom_cx) * zoom_cy, 0);
+				for (int y = 0; y < zoom_cy; y++)
+				{
+					const int sy = std::min(cy_s - 1, (y * 2 + 1) * cy_s / (zoom_cy * 2));
+					const byte* srow = indexed + static_cast<size_t>(sy) * cx_s;
+					byte* drow = zoomed_indexed.data() + static_cast<size_t>(y) * zoom_cx;
+					for (int x = 0; x < zoom_cx; x++)
+					{
+						const int sx = std::min(cx_s - 1, (x * 2 + 1) * cx_s / (zoom_cx * 2));
+						drow[x] = srow[sx];
+					}
+				}
+				indexed = zoomed_indexed.data();
+				cx_s = zoom_cx;
+				cy_s = zoom_cy;
+			}
+		}
+
 		// CF_DIB layout: BITMAPINFOHEADER, 256 * RGBQUAD palette, rows
 		// bottom-up, each row padded to a DWORD boundary.
 		const int row_stride = (cx_s + 3) & ~3;
@@ -5933,6 +6032,23 @@ bool CXCCFileView::copy_screenshot_to_clipboard()
 			if (CMainFrame* mf = GetMainFrame())
 				mf->SetMessageText("Copy to clipboard: rendered buffer unavailable.");
 			return false;
+		}
+		// SHP/WSA: bilinear-resample BGRA to the player's effective zoom so
+		// the clipboard matches what the user sees. VXL skipped.
+		if (!vxl)
+		{
+			const int z_pct = player_effective_zoom_pct();
+			if (z_pct != 100)
+			{
+				const int zoom_cx = std::max(1, cx_s * z_pct / 100);
+				const int zoom_cy = std::max(1, cy_s * z_pct / 100);
+				std::vector<DWORD> zoomed(static_cast<size_t>(zoom_cx) * zoom_cy, 0);
+				theme::bilinear_resample_bgra(bgra.data(), cx_s, cy_s,
+					zoomed.data(), zoom_cx, zoom_cy);
+				bgra.swap(zoomed);
+				cx_s = zoom_cx;
+				cy_s = zoom_cy;
+			}
 		}
 		// 32bpp CF_DIB: BITMAPINFOHEADER + 4-byte-aligned rows of BGRA,
 		// bottom-up. Alpha byte is set to 0xFF (BI_RGB ignores it but many

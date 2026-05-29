@@ -669,6 +669,105 @@ void CXCCMixerView::open_location_mix(int mix_id, const vector<int>& sub_mix_cha
 	}
 }
 
+// Extract nested MIX `id` (a child of the currently-open m_mix_f, with display
+// name `name`) to a unique temp file and push a t_nested_edit describing it.
+// Returns the temp path, or empty on failure. Called from open_location_mix(id)
+// at descent time, while m_mix_f still points at the PARENT (so get_vdata works).
+string CXCCMixerView::nested_extract_to_temp(int id, const string& name)
+{
+	// Always pushes a t_nested_edit (one per nested level, lock-step with
+	// m_mix_fname_stack). On any failure temp_path stays empty -> that level is
+	// read-only; flush/reopen treat an empty temp_path as a no-op.
+	t_nested_edit ne;
+	ne.entry_name = name;
+	ne.entry_id = id;
+	ne.dirty = false;
+	string path;
+	if (m_mix_f)
+	{
+		Cvirtual_binary d = m_mix_f->get_vdata(id);
+		if (d.data() && d.size())
+		{
+			// Unique leaf so two same-named nested MIXes (or the same one at
+			// different depths) never collide: "<depth>_<id>_<sanitized name>".
+			char prefix[32];
+			wsprintfA(prefix, "%u_%d_", static_cast<unsigned>(m_nested_edit.size()), id);
+			string p = ext_open::temp_dir() + string(prefix) + ext_open::sanitize(name.empty() ? "nested.mix" : name);
+			if (!d.save(p))             // save() returns 0 on success
+			{
+				ext_open::g_temp_files.push_back(p);  // cleaned up on app exit
+				path = p;
+			}
+		}
+	}
+	ne.temp_path = path;
+	m_nested_edit.push_back(ne);
+	return path;
+}
+
+// Re-inject the deepest nested temp into its parent if it was edited, then pop
+// it. The parent's editable file is the next path down: another temp if the
+// parent is itself nested, else the on-disk root (m_mix_fname after the pop).
+// Re-injecting marks the parent dirty so a multi-level edit propagates all the
+// way to the on-disk root. Called from nav_go_up (the real "leaving" path), not
+// from the edit ops' internal close_location.
+void CXCCMixerView::nested_flush_top()
+{
+	if (m_nested_edit.empty())
+		return;
+	t_nested_edit ne = m_nested_edit.back();
+	m_nested_edit.pop_back();
+	if (ne.dirty && !ne.temp_path.empty())
+	{
+		// Parent path: the new top temp if still nested, else the disk root
+		// (front of the fname stack, which close_location restores next).
+		string parent_path = m_nested_edit.empty()
+			? (m_mix_fname_stack.empty() ? m_mix_fname : m_mix_fname_stack.front())
+			: m_nested_edit.back().temp_path;
+		Cvirtual_binary d;
+		if (!parent_path.empty() && !d.load(ne.temp_path))
+		{
+			// The parent file (m_mix_f, just restored by close_location) is still
+			// open and memory-mapped -- Cmix_edit::open uses open_edit (read-write,
+			// EXCLUSIVE share), which fails while any handle holds the file. Close
+			// the live parent around the edit, then reopen it from its path so the
+			// view stays consistent. This was the bug: open_edit(parent) returned
+			// nonzero (sharing violation) and the reinject was silently skipped.
+			Cmix_file* saved_parent = m_mix_f;
+			m_mix_f = nullptr;
+			delete saved_parent;            // release the parent's file handle/map
+
+			Cmix_edit f;
+			int err = f.open(parent_path);
+			if (!err)
+			{
+				f.erase(ne.entry_id);
+				f.insert(ne.entry_name, d);
+				f.write_index();
+				f.compact();
+				f.close();
+				if (!m_nested_edit.empty())
+					m_nested_edit.back().dirty = true;   // propagate up the chain
+				else if (GetMainFrame())
+					GetMainFrame()->SetMessageText(("Saved changes to " + Cfname(parent_path).get_fname()).c_str());
+			}
+
+			// Reopen the parent from its path so m_mix_f is live again for the
+			// post-flush view (close_location's caller expects a valid parent).
+			Cmix_file* mix_f = new Cmix_file;
+			if (mix_f->open(parent_path))
+			{
+				delete mix_f;
+				mix_f = new Cmix_file_rd;
+				static_cast<Cmix_file_rd*>(mix_f)->open(parent_path);
+			}
+			m_mix_f = mix_f;
+		}
+	}
+	if (!ne.temp_path.empty())
+		DeleteFile(ne.temp_path.c_str());
+}
+
 void CXCCMixerView::open_location_mix(int id)
 {
 	if (!m_nav_replaying)
@@ -690,6 +789,20 @@ void CXCCMixerView::open_location_mix(int id)
 	else
 	{
 	MPUSH:
+		// Extract this nested MIX to a temp so the disk-path editors can edit
+		// it; m_mix_fname becomes the temp path for the duration of this level
+		// (restored to the parent path on close_location). Best-effort: if the
+		// extract fails we still navigate, just without edit support here.
+		// Every nested descent pushes exactly one m_nested_edit + one
+		// m_mix_fname_stack entry (kept in lock-step; close_location pops both).
+		// nested_extract_to_temp always pushes -- with an empty temp_path when
+		// the extract fails, so that level is simply read-only (flush is a
+		// dirty-gated no-op). m_mix_fname swaps to the temp only on success.
+		string nested_name = m_mix_f ? m_mix_f->get_name(id) : string();
+		m_mix_fname_stack.push_back(m_mix_fname);
+		string tp = nested_extract_to_temp(id, nested_name);
+		if (!tp.empty())
+			m_mix_fname = tp;
 		m_location.push(m_mix_f);
 		m_entered_ids.push(id);
 		m_mix_f = mix_f;
@@ -701,11 +814,27 @@ void CXCCMixerView::close_location(int reload)
 {
 	if (m_mix_f)
 	{
+		// Release the live Cmix_file FIRST: it memory-maps / holds an open handle
+		// on the nested temp, and nested_flush_top below must load(temp) +
+		// reinject. Flushing while the handle is still open made d.load fail
+		// silently, so nested edits never reached the parent. Delete before flush.
 		delete m_mix_f;
 		m_mix_f = m_location.top();
 		m_location.pop();
 		if (!m_entered_ids.empty())
 			m_entered_ids.pop();
+		// Flush+pop the nested-edit temp for this level (no-op at disk root).
+		// Re-inject happens here so it covers every genuine leave route (nav up,
+		// ".." row, breadcrumb, Backspace, file-close); they all funnel through
+		// close_location. The edit ops do NOT teardown via close_location at
+		// nested levels -- they use edit_release()/edit_reopen() so the temp
+		// survives the edit (see those).
+		nested_flush_top();
+		if (!m_mix_fname_stack.empty())
+		{
+			m_mix_fname = m_mix_fname_stack.back();
+			m_mix_fname_stack.pop_back();
+		}
 		if (reload)
 			update_list();
 	}
@@ -715,6 +844,52 @@ void CXCCMixerView::close_all_locations()
 {
 	while (!m_location.empty())
 		close_location(false);
+}
+
+// Release the current MIX level's file handle so a disk-path editor
+// (Cmix_edit/Cbig_edit/Cmix_rg_edit) can open m_mix_fname. The level is NOT
+// left -- at a nested level the t_nested_edit temp survives so edit_reopen()
+// can restore the view afterward. Used by the in-place edit ops (insert/drop/
+// delete/compact) in place of the old close_location(false)+reopen pair.
+void CXCCMixerView::edit_release()
+{
+	if (editing_nested())
+	{
+		// Drop just the live Cmix_file (unlocks the temp); keep m_mix_f's parent
+		// on m_location and the t_nested_edit/m_mix_fname (= temp) intact.
+		delete m_mix_f;
+		m_mix_f = nullptr;
+	}
+	else
+	{
+		close_location(false);
+	}
+}
+
+// Restore the view after an in-place edit and record that the edit happened.
+// At a nested level, re-open the (now edited) temp as a standalone disk MIX and
+// mark the level dirty so close_location re-injects it into the parent on leave.
+// At the disk root, behaves like the old reopen.
+void CXCCMixerView::edit_reopen(bool edited)
+{
+	if (editing_nested())
+	{
+		if (edited)
+			nested_mark_dirty();
+		Cmix_file* mix_f = new Cmix_file;
+		if (mix_f->open(m_mix_fname))   // open(path) returns 0 on success
+		{
+			delete mix_f;
+			mix_f = new Cmix_file_rd;
+			static_cast<Cmix_file_rd*>(mix_f)->open(m_mix_fname);
+		}
+		m_mix_f = mix_f;
+		update_list();
+	}
+	else
+	{
+		open_location_mix(m_mix_fname);
+	}
 }
 
 void CXCCMixerView::nav_clear_forward()
@@ -1752,7 +1927,11 @@ bool CXCCMixerView::can_accept() const
 
 bool CXCCMixerView::can_edit() const
 {
-	return m_location.size() < 2;
+	// Disk-root MIX (m_location.size()==1) edits in place. Nested MIXes edit a
+	// temp copy that is re-injected into the parent on the way up (see
+	// t_nested_edit). Both are editable; only the pre-MIX filesystem state
+	// (size 0) and the degenerate no-mix case are not.
+	return m_location.size() >= 1;
 }
 
 string CXCCMixerView::get_dir() const
@@ -1998,7 +2177,7 @@ void CXCCMixerView::copy_as(t_file_type ft)
 			if (find_ref(m_index, get_id(i)).name.find('\\') != string::npos)
 				create_deep_dir(get_dir(), Cfname(find_ref(m_index, get_id(i)).name).get_path());
 			t_file_type mix_ft = m_other_pane->m_mix_f->get_file_type();
-			m_other_pane->close_location(false);
+			m_other_pane->edit_release();
 			switch (mix_ft)
 			{
 			case ft_big:
@@ -2051,7 +2230,7 @@ void CXCCMixerView::copy_as(t_file_type ft)
 					}
 				}
 			}
-			m_other_pane->open_location_mix(m_other_pane->m_mix_fname);
+			m_other_pane->edit_reopen(!error);
 			if (error)
 				copy_failed(fname, error);
 			else
@@ -3209,7 +3388,7 @@ void CXCCMixerView::OnDropFiles(HDROP hDropInfo)
 	if (m_mix_f)
 	{
 		t_file_type ft = m_mix_f->get_file_type();
-		close_location(false);
+		edit_release();
 		switch (ft)
 		{
 		case ft_big:
@@ -3270,8 +3449,9 @@ void CXCCMixerView::OnDropFiles(HDROP hDropInfo)
 				f.close();
 			}
 		}
-		open_location_mix(m_mix_fname);
-		OnPopupCompact();
+		edit_reopen(!error);
+		if (!editing_nested())
+			OnPopupCompact();
 	}
 	else
 	{
@@ -3291,7 +3471,7 @@ void CXCCMixerView::OnPopupCompact()
 	CWaitCursor wait;
 	int error = 0;
 	t_file_type ft = m_mix_f->get_file_type();
-	close_location(false);
+	edit_release();
 	switch (ft)
 	{
 	case ft_big:
@@ -3326,12 +3506,14 @@ void CXCCMixerView::OnPopupCompact()
 		}
 	}
 	set_msg(error ? "Compact failed" : "Compact done");
-	open_location_mix(m_mix_fname);
+	edit_reopen(!error);
 }
 
 void CXCCMixerView::OnUpdatePopupCompact(CCmdUI* pCmdUI)
 {
-	pCmdUI->Enable(m_location.size() == 1);
+	// Disk-root MIX, or a nested MIX we extracted to an editable temp.
+	pCmdUI->Enable(m_location.size() == 1
+		|| (editing_nested() && !m_nested_edit.back().temp_path.empty()));
 }
 
 bool DeleteDirectory(string strPath, const int uiEndLevel = -1, int iCurrentLevel = 0)
@@ -3390,7 +3572,7 @@ void CXCCMixerView::OnPopupDelete()
 	if (m_mix_f)
 	{
 		t_file_type ft = m_mix_f->get_file_type();
-		close_location(false);
+		edit_release();
 		switch (ft)
 		{
 		case ft_big:
@@ -3430,8 +3612,9 @@ void CXCCMixerView::OnPopupDelete()
 				f.close();
 			}
 		}
-		open_location_mix(m_mix_fname);
-		OnPopupCompact();
+		edit_reopen(!error);
+		if (!editing_nested())
+			OnPopupCompact();
 	}
 	else
 	{
