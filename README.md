@@ -18,29 +18,6 @@ This project descends from a chain of forks:
 
 Credit for the underlying app and the bulk of the modern improvements goes to Olaf van der Spek and Vodrix respectively. This fork's contribution is the additions described below.
 
-## Recent releases
-
-- **v10.3** (2026-05-17) — **Live palette switching in player mode** + Screenshot copy-to-clipboard.
-  `View > Palette` now retints SHP/WSA/VXL sprites on the fly while the player is open; previously the displayed
-  colors stayed pinned to whichever palette was active when you pressed P. The Screenshot button is now a
-  split-button menu (Save As… / Copy to Clipboard), with a new `Theme > Image > Clipboard Format` submenu picking
-  the payload — **Indexed** (8-bit paletted DIB, round-trips into Mixer's own Paste-as-SHP) or **RGB** (32-bit BGRA
-  WYSIWYG composite, broadest external-viewer compatibility). VXL non-HVA Game Grid combo placement fix (was
-  overlapping the Native button after v10.1 widened it for the live-zoom label).
-- **v10.2** (2026-05-16) — **Record Filter dropdown for SHP captures**: Crisp (nearest-neighbor BGRA resample,
-  paletted GIF writer, honors per-frame transparency on palette index 0) or Filtered (bilinear BGRA resample via
-  the existing `theme::bilinear_resample_bgra` helper, gif.h's RGB quantizer). Decoupled from
-  `Graphics > Image Interpolation` so the on-screen preview and the recording filter can differ — picking Bilinear
-  in the preview no longer silently produces a nearest-neighbor GIF.
-- **v10.1** (2026-05-16) — **Zoom-aware SHP recording** + **live zoom on the Native button**. Recordings now scale
-  each frame to the player's current effective zoom (Ctrl+wheel override, Native toggle, or auto-fit fallback)
-  instead of always emitting native pixel size, so a 250% preview records at 250%. The Native button label tracks
-  the live zoom (`Native 250%`, `Native 1600%`) and updates every paint, so you can read the current scale at a
-  glance during playback. Indexed pixel buffers stay on nearest with sample-center math to preserve
-  transparent_pal0 + shadow-sentinel masks.
-
-For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/tags).
-
 ## What's new in this fork
 
   - **Win11-style dark mode** — full theming via uxtheme ordinals + DWM immersive dark, owner-draw menus (bar + popups),
@@ -59,7 +36,8 @@ For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/
   sliders with two-way edit boxes, live commits during slider drag. Normal source choice: file (Westwood normal table
   per section type) vs computed (6-face / 26-neighbor weighted / smooth Gaussian gradient with 3³ or 5³ kernel).
   Engine-faithful VPL section mapping (specular-aware two-light formula ported from vxl-renderer). Light-direction
-  overlay sun indicator while the dialog is open.
+  overlay sun indicator while the dialog is open. **Ambient occlusion** group (contact / hemisphere methods, strength
+  + falloff + quality) bakes per-voxel AO into the shading pass.
   - **HVA animation playback for VXL** — `Load HVA…` button auto-matches HVAs in the same MIX by basename fuzzy match.
   Quaternion-slerp interpolation between keyframes (12 timeline steps per keyframe), Loop toggle, slider scrubbing.
   Sibling-part HVAs play independently from the body's HVA. Picking a body HVA from the menu (or Browse...) also
@@ -73,12 +51,22 @@ For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/
   paint invalidation and mouse-input handler bodies; high-poll mice no longer eat a CPU core during orbit-drag.
   - **SHP transparency toggle** — palette index 0 paints the alpha checkerboard instead of the literal palette color.
   Applies to SHP/PCX/CPS/WSA/TMP and the VXL background.
-  - **Two search dialogs**:
-    - `Ctrl+F` — `CSearchInPaneDlg` searches the current MIX/folder, regex toggle, sortable Name / Size, multi-select.
-    - `Ctrl+Shift+F` — `CSearchFileDlg` searches recursively across both panes; results captured with `top_mix_path` so
-  extract still works after pane navigation. List view groups results by source MIX chain.
+  - **Three search dialogs**:
+    - `Ctrl+F` — `CSearchInPaneDlg` searches the current MIX/folder, live filter, sortable Name / Size, multi-select.
+    - `Ctrl+Shift+F` — `CSearchFileDlg` searches recursively across both panes (background-threaded so the UI stays
+  responsive, Search button doubles as Cancel); results captured with `top_mix_path` so extract still works after pane
+  navigation. List view groups results by source MIX chain.
+    - `Ctrl+Alt+F` — `CSearchOnDiskDlg` queries voidtools' **Everything** over IPC for archives anywhere on disk
+  (mix/big/dat/pak/pkg/wsx) and opens the pick directly.
+  - **Nested MIX editing** — add, drop, and delete files inside a MIX that is itself nested inside another MIX (not just
+  top-level archives). The nested MIX is extracted to a temp on entry, edited in place, and re-injected into its parent
+  when you navigate out — recursing all the way up to the on-disk root archive.
   - **Per-pane forward/back navigation stack** — XButton1 mouse, the `..` row, and `File → Close` all route through the
   same nav stack. Forward/back works as expected; `Browse...` and `..` rows are pinned to the top regardless of sort.
+  - **Navigation bar** — optional top strip with a **breadcrumb** (click any segment or chevron to jump/branch through
+  the folder + MIX chain) and a live **filter box** for the active pane; `Theme → Navigation Bar` toggles each and swaps
+  their sides. `Alt+3` shows/hides both.
+  - **Recent files** — `File → Recents` lists most-recently-opened MIX/archive paths (count tunable in the settings INI).
   - **Numeric size sort** — listviews sort by raw bytes, not formatted size strings.
   - **Batch extract** — flat (filenames sanitized) and preserve (under `<chosen>/<source_mix_name>/<file>`) variants.
   **Parallel extract** option (`Configure → Parallel Extract`, default on) — two-phase serial-read / parallel-write that
@@ -90,7 +78,12 @@ For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/
   light gray).
   - **Folder-loaded palettes** — `CSelectPaletteDlg` "Load Folder..." reads palettes from disk recursively. `Ctrl+[` /
   `Ctrl+]` cycle siblings of the current palette. **PAL Paths dialog** — user-managed list of folders / MIX archives
-  loaded at every start, with override-per-game toggle.
+  loaded at every start, with override-per-game toggle. **Load PAL** is a searchable, sortable picker (palettes from the
+  list plus every `.pal` in the source MIX) with live preview as you arrow through it.
+  - **Themed color picker** — a custom R/G/B + H/S/L + hex picker (replacing the system `CColorDialog`, which ignored
+  dark mode) used for alpha color and SHP/VXL custom side colors.
+  - **Column hide + order persistence** — right-click any list header to show/hide columns; column order and manual
+  resize widths are remembered per listview across sessions. `Theme → Show Column Headers` toggles headers entirely.
   - **Customizable keybinds** — `Configure → Keybinds…` rebinds every accelerator and most context actions to keys +
   mouse buttons (incl. chord shortcuts). Persisted to settings INI. Settings Directory submenu picks between
   `%APPDATA%\XCC\Mixer\` and the EXE folder.
@@ -98,9 +91,14 @@ For older releases see the [tags page](https://github.com/triatomic/XCC-Tacitus/
   saved key → Westwood retail registry → Steam libraries (parses `libraryfolders.vdf`, knows per-game appids and
   installdir names for every classic C&C SKU on Steam). All detected sources offered as dropdown choices plus
   `Custom...` folder browser.
-  - **Screenshot export** (VXL/SHP player) — `Screenshot` button or `Ctrl+Shift+S`. PNG (default), TGA, PCX. Real alpha
-  channel derived from the indexed buffer when BG = Alpha or BG = Pane, transparent pixels zeroed in RGB. PCX uses the
-  gamma-corrected color table so exports match BMP/PNG.
+  - **Screenshot export** (VXL/SHP player) — `Screenshot` button or `Ctrl+Shift+S`, a split-button menu: **Save As…**
+  (PNG default, TGA, PCX) or **Copy to Clipboard** (`Theme → Image → Clipboard Format` picks **Indexed** 8-bit paletted
+  DIB, round-trips into Mixer's Paste-as-SHP, or **RGB** 32-bit WYSIWYG composite). Real alpha channel derived from the
+  indexed buffer when BG = Alpha or BG = Pane, transparent pixels zeroed in RGB. PCX uses the gamma-corrected color table
+  so exports match BMP/PNG. **SHP/WSA captures honor the current zoom level** (Save As and Clipboard alike) — a 250%
+  preview exports at 250%, not native pixel size.
+  - **Live palette switching in player mode** — `View → Palette` retints SHP/WSA/VXL sprites on the fly while the player
+  is open, instead of staying pinned to whichever palette was active when you pressed `P`.
   - **Animated Recording** (VXL/SHP/WSA player) — `Record` button captures animations to GIF or numbered PNG sequence.
   **VXL** modes: rotation only (360° turntable), HVA only, or combined rotation + HVA. **SHP/WSA**: walks the asset's
   own frame animation. Captures honor every active player setting (SS, lighting, VPL, shading, side color, BG mode,
