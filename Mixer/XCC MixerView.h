@@ -343,6 +343,12 @@ private:
 	// true if a usable temp exists (m_mix_fname then points at it), false if not
 	// nested or the extract failed.
 	bool ensure_nested_temp();
+	// Materialize the CURRENT top nested level's temp when it has none, used by
+	// nested_flush_top while reducing up the chain (the top level is the parent
+	// receiving a child's re-inject). Unlike ensure_nested_temp it does NOT touch
+	// m_mix_fname. Covers depth >= 2 where a browse-only intermediate parent never
+	// got a temp of its own. Returns true if a usable temp exists afterward.
+	bool ensure_parent_temp();
 	// Re-insert the top nested temp into its parent if dirty, then delete the
 	// temp and pop. Recurses: marks the new parent level dirty so the change
 	// propagates up to the on-disk root. Called from close_location.

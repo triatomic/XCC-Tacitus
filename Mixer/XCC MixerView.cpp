@@ -710,6 +710,38 @@ bool CXCCMixerView::ensure_nested_temp()
 	return true;
 }
 
+// Materialize a temp for the CURRENT top nested level (m_nested_edit.back())
+// when it has none. Unlike ensure_nested_temp(), this does NOT touch m_mix_fname
+// -- it is called from nested_flush_top() while reducing up the chain, where the
+// top level is the *parent* receiving a child's re-inject. The parent's bytes
+// come from its own parent, which at flush time is the live m_location.top() at
+// id m_entered_ids.top(). Returns true if a usable temp exists afterward.
+bool CXCCMixerView::ensure_parent_temp()
+{
+	if (m_nested_edit.empty())
+		return false;
+	t_nested_edit& pe = m_nested_edit.back();
+	if (!pe.temp_path.empty())
+		return true;
+	if (m_location.empty() || m_entered_ids.empty())
+		return false;
+	Cmix_file* grandparent = m_location.top();
+	int id = m_entered_ids.top();
+	if (!grandparent)
+		return false;
+	Cvirtual_binary d = grandparent->get_vdata(id);
+	if (!d.data() || !d.size())
+		return false;
+	char prefix[32];
+	wsprintfA(prefix, "%u_%d_", static_cast<unsigned>(m_nested_edit.size() - 1), id);
+	string p = ext_open::temp_dir() + string(prefix) + ext_open::sanitize(pe.entry_name.empty() ? "nested.mix" : pe.entry_name);
+	if (d.save(p))                      // save() returns 0 on success
+		return false;
+	ext_open::g_temp_files.push_back(p);
+	pe.temp_path = p;
+	return true;
+}
+
 // Re-inject the deepest nested temp into its parent if it was edited, then pop
 // it. The parent's editable file is the next path down: another temp if the
 // parent is itself nested, else the on-disk root (m_mix_fname after the pop).
@@ -726,6 +758,17 @@ void CXCCMixerView::nested_flush_top()
 	{
 		// Parent path: the new top temp if still nested, else the disk root
 		// (front of the fname stack, which close_location restores next).
+		//
+		// At depth >= 2 the parent is itself a nested MIX whose temp may not
+		// exist yet -- a browse-only intermediate level never ran
+		// ensure_nested_temp(). A dirty child is now a reason the parent MUST
+		// have a disk-backed temp to receive the re-inject, so materialize it
+		// here on demand (extract the parent's bytes from ITS parent, which at
+		// this point is the live m_location.top() at id m_entered_ids.top()).
+		// Without this the re-inject target is "" and the child edit is dropped
+		// silently -- that was the depth->=2 bug.
+		if (!m_nested_edit.empty() && m_nested_edit.back().temp_path.empty())
+			ensure_parent_temp();
 		string parent_path = m_nested_edit.empty()
 			? (m_mix_fname_stack.empty() ? m_mix_fname : m_mix_fname_stack.front())
 			: m_nested_edit.back().temp_path;
