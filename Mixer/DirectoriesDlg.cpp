@@ -5,6 +5,13 @@
 #include "xcc_dirs.h"
 #include <afxdlgs.h>
 
+// Posted from on_path_combo_change so the modal folder picker for "Custom..."
+// opens after the combo's CBN_CLOSEUP fully settles (see OnCustomPick).
+#define WM_DIR_CUSTOM_PICK (WM_USER + 0x120)
+// Posted on CBN_SETFOCUS to clear the edit's auto-select highlight and park the
+// caret at the end so long paths scroll their tail into view (see OnDeselectCombo).
+#define WM_DIR_DESELECT (WM_USER + 0x121)
+
 namespace
 {
 	struct DirRow { int combo_id; int static_id; t_game game; };
@@ -32,6 +39,12 @@ namespace
 	{
 		for (auto& r : kRows) if (r.combo_id == combo_id) return r.game;
 		return game_unknown;
+	}
+
+	bool is_path_combo(int combo_id)
+	{
+		for (auto& r : kRows) if (r.combo_id == combo_id) return true;
+		return false;
 	}
 }
 
@@ -103,7 +116,32 @@ BEGIN_MESSAGE_MAP(CDirectoriesDlg, ETSLayoutDialog)
 	ON_CBN_CLOSEUP(IDC_TW,           OnSelTw)
 	ON_CBN_CLOSEUP(IDC_DATA,         OnSelData)
 	ON_CBN_CLOSEUP(IDC_CD,           OnSelCd)
+	ON_MESSAGE(WM_DIR_CUSTOM_PICK,   OnCustomPick)
+	ON_MESSAGE(WM_DIR_DESELECT,      OnDeselectCombo)
 END_MESSAGE_MAP()
+
+BOOL CDirectoriesDlg::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	// When a path combo gains focus the edit auto-selects all its text (the
+	// blue highlight band). Defer a deselect that also parks the caret at the
+	// end so long paths scroll into view from the right.
+	if (HIWORD(wParam) == CBN_SETFOCUS && is_path_combo(LOWORD(wParam)))
+		PostMessage(WM_DIR_DESELECT, (WPARAM)LOWORD(wParam));
+	return ETSLayoutDialog::OnCommand(wParam, lParam);
+}
+
+LRESULT CDirectoriesDlg::OnDeselectCombo(WPARAM wParam, LPARAM)
+{
+	CComboBox* cb = static_cast<CComboBox*>(GetDlgItem((int)wParam));
+	if (!cb) return 0;
+	// -1,0 removes the selection (clears the blue band); then park the caret at
+	// the end so a long path scrolls its tail (the folder name) into view.
+	cb->SetEditSel(-1, 0);
+	CString s;
+	cb->GetWindowText(s);
+	cb->SetEditSel(s.GetLength(), s.GetLength());
+	return 0;
+}
 
 void CDirectoriesDlg::populate_path_combo(int combo_id)
 {
@@ -133,20 +171,12 @@ void CDirectoriesDlg::on_path_combo_change(int combo_id)
 	uintptr_t tag = (uintptr_t)cb->GetItemDataPtr(sel);
 	if (tag == 0)
 	{
-		CString seed = m_last_committed[combo_id];
-		CFolderPickerDialog dlg(seed.IsEmpty() ? NULL : (LPCTSTR)seed, 0, this);
-		if (dlg.DoModal() == IDOK)
-		{
-			CString chosen = dlg.GetPathName();
-			if (!chosen.IsEmpty() && chosen.GetAt(chosen.GetLength() - 1) != '\\')
-				chosen += '\\';
-			cb->SetWindowText(chosen);
-			m_last_committed[combo_id] = chosen;
-		}
-		else
-		{
-			cb->SetWindowText(m_last_committed[combo_id]);
-		}
+		// "Custom...": opening the modal folder picker synchronously here (still
+		// inside the combo's CBN_CLOSEUP) is fragile -- after we return the combo
+		// finishes its close-up and restamps the selected "Custom..." item text
+		// over whatever we wrote. Defer the picker to a posted message so it runs
+		// after the combo has fully settled, on a clean edit field.
+		PostMessage(WM_DIR_CUSTOM_PICK, (WPARAM)combo_id);
 	}
 	else
 	{
@@ -156,6 +186,32 @@ void CDirectoriesDlg::on_path_combo_change(int combo_id)
 		cb->SetWindowText(sources[i].path.c_str());
 		m_last_committed[combo_id] = sources[i].path.c_str();
 	}
+}
+
+LRESULT CDirectoriesDlg::OnCustomPick(WPARAM wParam, LPARAM)
+{
+	int combo_id = (int)wParam;
+	CComboBox* cb = static_cast<CComboBox*>(GetDlgItem(combo_id));
+	if (!cb) return 0;
+	// The combo has finished its close-up by now; drop the "Custom..." list
+	// selection so nothing restamps over the path we are about to write.
+	cb->SetCurSel(-1);
+	CString seed = m_last_committed[combo_id];
+	CFolderPickerDialog dlg(seed.IsEmpty() ? NULL : (LPCTSTR)seed, 0, this);
+	if (dlg.DoModal() == IDOK)
+	{
+		CString chosen = dlg.GetPathName();
+		if (!chosen.IsEmpty() && chosen.GetAt(chosen.GetLength() - 1) != '\\')
+			chosen += '\\';
+		cb->SetWindowText(chosen);
+		cb->SetEditSel(chosen.GetLength(), chosen.GetLength());
+		m_last_committed[combo_id] = chosen;
+	}
+	else
+	{
+		cb->SetWindowText(m_last_committed[combo_id]);
+	}
+	return 0;
 }
 
 void CDirectoriesDlg::OnSelDune2()        { on_path_combo_change(IDC_DUNE2); }
@@ -221,6 +277,11 @@ void CDirectoriesDlg::OnResetData()
 BOOL CDirectoriesDlg::OnInitDialog()
 {
 	ETSLayoutDialog::OnInitDialog();
+	// Flashbang mitigation: build + theme the whole dialog with painting frozen
+	// so the first frame the user sees is already dark (no light-mode flash).
+	// apply_dialog runs while the window is still hidden so apply_titlebar's
+	// hidden-frame discard fires. See theme.cpp "Dialog flashbang mitigation".
+	SetRedraw(FALSE);
 	CreateRoot(HORIZONTAL)
 		<< (pane(VERTICAL, ABSOLUTE_VERT)
 			<< item(IDC_DUNE2_STATIC, NORESIZE)
@@ -284,7 +345,25 @@ BOOL CDirectoriesDlg::OnInitDialog()
 	m_tooltips.Activate(TRUE);
 
 	theme::apply_dialog(GetSafeHwnd());
-	return true;
+
+	// Clear the combo-edit selection that SetWindowText leaves behind, parking
+	// the caret at the end so long paths show their tail. Done after layout +
+	// theming so nothing re-selects afterward.
+	for (auto& r : kRows)
+	{
+		CComboBox* cb = static_cast<CComboBox*>(GetDlgItem(r.combo_id));
+		if (cb) cb->SetEditSel(-1, 0);
+	}
+
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+
+	// Return FALSE + focus OK so MFC's default "focus first tabstop and select
+	// all its text" doesn't re-highlight the first combo.
+	if (CWnd* ok = GetDlgItem(IDOK))
+		ok->SetFocus();
+	return FALSE;
 }
 
 BOOL CDirectoriesDlg::PreTranslateMessage(MSG* pMsg)

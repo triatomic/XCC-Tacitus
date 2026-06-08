@@ -42,6 +42,13 @@ END_MESSAGE_MAP()
 
 BOOL CKeybindsDlg::OnInitDialog()
 {
+	// Apply dark titlebar via DWM and suppress paint until everything is laid
+	// out + themed + populated. Same flash mitigation as CSearchInPaneDlg —
+	// without these the first paint shows light defaults for one frame before
+	// apply_dialog's repaint catches up.
+	theme::apply_titlebar(GetSafeHwnd());
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(VERTICAL, GREEDY)
 			<< item(IDC_STATIC, ABSOLUTE_VERT)
@@ -61,6 +68,10 @@ BOOL CKeybindsDlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+
+	// Theme the listview background before columns/populate so its first paint
+	// is already dark (avoids a one-frame white SysListView32 erase). Idempotent.
+	theme::apply_listview(m_list.GetSafeHwnd());
 
 	m_list.SetExtendedStyle(m_list.GetExtendedStyle() | LVS_EX_FULLROWSELECT);
 	m_list.InsertColumn(0, "Command",  LVCFMT_LEFT, 220);
@@ -83,6 +94,11 @@ BOOL CKeybindsDlg::OnInitDialog()
 	resize_columns();
 
 	theme::apply_dialog(GetSafeHwnd());
+
+	// Release redraw + flush one fully-themed paint.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return TRUE;
 }
 

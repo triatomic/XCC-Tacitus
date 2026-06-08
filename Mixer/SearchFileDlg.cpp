@@ -101,8 +101,15 @@ void CSearchFileDlg::set(CMainFrame* main_frame, bool prefer_right)
 	m_prefer_right = prefer_right;
 }
 
-BOOL CSearchFileDlg::OnInitDialog() 
+BOOL CSearchFileDlg::OnInitDialog()
 {
+	// Apply dark titlebar via DWM and suppress paint until everything is laid
+	// out + themed + populated. Same flash mitigation as CSearchInPaneDlg —
+	// without these the first paint shows light defaults for one frame before
+	// apply_dialog's repaint catches up.
+	theme::apply_titlebar(GetSafeHwnd());
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_FILENAME_STATIC, NORESIZE)
@@ -120,6 +127,12 @@ BOOL CSearchFileDlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+	// Theme the listview's background BEFORE it inserts columns / populates, so
+	// its first paint is already dark. Without this the stock SysListView32
+	// erases once with COLOR_WINDOW (white) before apply_dialog's later
+	// apply_listview lands -- a white flash inside the otherwise-frozen dialog.
+	// apply_listview is idempotent; the apply_dialog child-walk re-runs it.
+	theme::apply_listview(m_list.GetSafeHwnd());
 	CheckDlgButton(IDC_INCLUDE_GAME_MIXES, m_include_game_mixes ? BST_CHECKED : BST_UNCHECKED);
 	// Two-column layout: Source = the MIX chain ("top.mix (1) - sub.mix"),
 	// File = the leaf entry inside it. Split is done at render time in
@@ -146,6 +159,11 @@ BOOL CSearchFileDlg::OnInitDialog()
 	// clrText/clrTextBk is a no-op on Win10/11). Idempotent + no-op in
 	// light mode.
 	theme::apply_listview_groups(m_list.GetSafeHwnd());
+
+	// Release redraw + flush one fully-themed paint.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return true;
 }
 

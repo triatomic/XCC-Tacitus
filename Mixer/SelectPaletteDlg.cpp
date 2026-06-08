@@ -51,6 +51,13 @@ void CSelectPaletteDlg::set(CMainFrame* main_frame, t_pal_map_list pal_map_list,
 
 BOOL CSelectPaletteDlg::OnInitDialog()
 {
+	// Apply dark titlebar via DWM and suppress paint until everything is laid
+	// out + themed + populated. Same flash mitigation as CSearchInPaneDlg —
+	// without these the first paint shows light defaults for one frame before
+	// apply_dialog's repaint catches up.
+	theme::apply_titlebar(GetSafeHwnd());
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, GREEDY)
 			<< item(IDC_TREE, GREEDY)
@@ -65,10 +72,22 @@ BOOL CSelectPaletteDlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+	// Theme the list + tree backgrounds before populate so their first paint is
+	// already dark (avoids a one-frame white SysListView32 / SysTreeView32 erase
+	// inside the frozen dialog). apply_listview is idempotent; the tree gets its
+	// full treatment from the apply_dialog child-walk below.
+	theme::apply_listview(m_list.GetSafeHwnd());
+	if (theme::is_dark() && m_tree.GetSafeHwnd())
+		TreeView_SetBkColor(m_tree.GetSafeHwnd(), theme::bg());
 	m_list.InsertColumn(0, "Name");
 	m_list.auto_size();
 	insert_tree_entry(-1, TVI_ROOT);
 	theme::apply_dialog(GetSafeHwnd());
+
+	// Release redraw + flush one fully-themed paint.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return true;
 }
 

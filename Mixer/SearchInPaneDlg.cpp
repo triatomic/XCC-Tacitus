@@ -75,6 +75,9 @@ BOOL CSearchInPaneDlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+	// Theme the listview background before columns/populate so its first paint
+	// is already dark (avoids a one-frame white SysListView32 erase). Idempotent.
+	theme::apply_listview(m_list.GetSafeHwnd());
 	m_list.InsertColumn(0, "Name");
 	m_list.InsertColumn(1, "Size");
 	m_list.set_size(0);

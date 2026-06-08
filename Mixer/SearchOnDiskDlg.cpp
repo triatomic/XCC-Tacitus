@@ -199,6 +199,13 @@ void CSearchOnDiskDlg::set(CMainFrame* main_frame, bool prefer_right)
 
 BOOL CSearchOnDiskDlg::OnInitDialog()
 {
+	// Apply dark titlebar via DWM and suppress paint until everything is laid
+	// out + themed + populated. Same flash mitigation as CSearchInPaneDlg —
+	// without these the first paint shows light defaults for one frame before
+	// apply_dialog's repaint catches up.
+	theme::apply_titlebar(GetSafeHwnd());
+	SetRedraw(FALSE);
+
 	CreateRoot(VERTICAL)
 		<< (pane(HORIZONTAL, ABSOLUTE_VERT)
 			<< item(IDC_FILENAME_STATIC, NORESIZE)
@@ -212,6 +219,11 @@ BOOL CSearchOnDiskDlg::OnInitDialog()
 			<< item(IDCANCEL, NORESIZE)
 			);
 	ETSLayoutDialog::OnInitDialog();
+
+	// Theme the listview's background BEFORE it inserts columns / populates, so
+	// its first paint is already dark (stock SysListView32 would otherwise erase
+	// once with COLOR_WINDOW white inside the frozen dialog). Idempotent.
+	theme::apply_listview(m_list.GetSafeHwnd());
 
 	// Populate the ext filter combobox from the single-source-of-truth
 	// ext_options[] table. Pre-select the persisted choice.
@@ -232,6 +244,10 @@ BOOL CSearchOnDiskDlg::OnInitDialog()
 	theme::apply_column_headers(m_list.GetSafeHwnd());
 	theme::enable_column_visibility_menu(m_list.GetSafeHwnd(), "search_on_disk_v2");
 
+	// Release redraw + flush one fully-themed paint.
+	SetRedraw(TRUE);
+	RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	return true;
 }
 

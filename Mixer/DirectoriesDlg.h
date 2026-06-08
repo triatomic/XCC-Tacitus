@@ -45,6 +45,9 @@ protected:
 	CToolTipCtrl m_tooltips;
 	void populate_path_combo(int combo_id);
 	void on_path_combo_change(int combo_id);
+	afx_msg LRESULT OnCustomPick(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnDeselectCombo(WPARAM wParam, LPARAM lParam);
+	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
 
 public:
 	virtual BOOL PreTranslateMessage(MSG* pMsg) override;
