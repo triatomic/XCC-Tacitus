@@ -3365,8 +3365,18 @@ void CMainFrame::OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu)
 				if (slash2 != std::string::npos)
 					parent = parent.substr(slash2 + 1);
 			}
+			// Real 1-based position. Items 1-9 take an Alt-digit mnemonic
+			// (&1..&9); the 10th uses "1&0." so '0' is its mnemonic while the
+			// number still reads "10"; items 11+ show a plain number (no
+			// single-digit mnemonic is possible). Using (i+1)%10 here made the
+			// count cycle 1-9,0,1-9,0,... and produced duplicate mnemonics.
 			char prefix[16];
-			_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "&%d.  ", (i + 1) % 10);
+			if (i < 9)
+				_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "&%d.  ", i + 1);
+			else if (i == 9)
+				_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "1&0.  ");
+			else
+				_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "%d.  ", i + 1);
 			std::string label = prefix;
 			for (char c : short_name) { if (c == '&') label += '&'; label += c; }
 			if (!parent.empty())
