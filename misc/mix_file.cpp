@@ -536,7 +536,11 @@ void Cmix_file::reclassify_unknown_types()
 		else if (ext == ".wsa") m_index_ft[i] = ft_wsa;
 		else if (ext == ".fnt") m_index_ft[i] = ft_fnt;
 		else if (ext == ".icn") m_index_ft[i] = ft_tmp;
-		else if (ext == ".urb" || ext == ".tem") m_index_ft[i] = ft_tmp_ra;
+		// .tem (temperate) and .urb (urban) are theater tile sets, but the
+		// format depends on the game like .tmp above: TD = classic template,
+		// RA1 = RA template, TS/RA2/YR = iso tile ("isotile"). Forcing them to
+		// ft_tmp_ra unconditionally mislabelled every TS/RA2 .tem as "icon (ra)".
+		else if (ext == ".urb" || ext == ".tem") m_index_ft[i] = m_game == game_td ? ft_tmp : (m_game == game_ra ? ft_tmp_ra : ft_tmp_ts);
 		else if (ext == ".vpl") m_index_ft[i] = ft_vpl;
 		else if (ext == ".voc") m_index_ft[i] = ft_voc;
 		else if (ext == ".wav") m_index_ft[i] = ft_wav;
