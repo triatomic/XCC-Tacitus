@@ -325,6 +325,10 @@ protected:
 	// becomes a 3dsmax-style orbit viewer instead of an animation player.
 	struct t_vxl_voxel { double x, y, z; unsigned char color; unsigned char normal_idx; float nx, ny, nz; unsigned char ao; };
 	vector<t_vxl_voxel> m_vxl_cloud;
+	// Westwood normal type of the loaded VXL (section_tailer.unknown; 2 = TS
+	// 36-normal set, else RA2/YR 244). Captured in player_decode_frames, used
+	// by the surface-normals view mode to pick the grayscale ramp divisor.
+	int m_vxl_normal_type = 0;
 	int m_vxl_half = 0;
 	double m_vxl_yaw = 0.0;
 	double m_vxl_pitch = 30.0 * 3.14159265358979323846 / 180.0;
@@ -554,6 +558,21 @@ private:
 		// against theme::vxl_lighting_version() at paint time to decide
 		// whether the cheap shading pass needs to re-run. -1 = unbuilt.
 		int shade_lighting_version = -1;
+		// View > Voxel mode the splat was built for (0=colors, 1=surface
+		// normals, 2=depth). Part of the cache key: switching mode forces a
+		// rebuild so the per-mode auxiliary buffers below are repopulated.
+		int view_mode = 0;
+		// Mode 1 (surface normals): per-pixel grayscale of the stored normal
+		// index, gray ramp matching the static grid view (TS idx*255/35,
+		// RA2 idx direct). Valid only where buf != 0 (occupied). Empty when
+		// view_mode != 1.
+		std::vector<unsigned char> nidx;
+		// Mode 2 (depth): per-pixel winning camera-space depth (z-buffer
+		// snapshot). Valid only where buf != 0. Empty when view_mode != 2.
+		// depth_min/_max bound the occupied range for the grayscale ramp.
+		std::vector<short> depth;
+		short depth_min = 0;
+		short depth_max = 0;
 	};
 	vxl_splat_cache m_vxl_splat;
 
@@ -571,6 +590,7 @@ private:
 		double splat_pitch = 0.0;
 		int splat_ss = 0;
 		bool splat_shading = false;
+		int view_mode = 0;	// View > Voxel mode the composite was built for
 		int splat_lighting_version = -1;
 		bool splat_vpl_active = false;
 		int splat_vpl_lighting_version = -1;

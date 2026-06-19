@@ -2801,6 +2801,7 @@ void CXCCFileView::player_decode_frames()
 		// Build the object-space point cloud once. The viewer rasterizes it
 		// per frame at the current m_vxl_yaw/m_vxl_pitch.
 		m_vxl_cloud.clear();
+		m_vxl_normal_type = 0;
 		for (auto& src : sources)
 		{
 			Cvxl_file& f = src.vxl;
@@ -2923,6 +2924,9 @@ void CXCCFileView::player_decode_frames()
 			const theme::vxl_normal_source norm_src = theme::vxl_normal_src();
 			const theme::vxl_normal_method norm_method = theme::vxl_normals_method();
 			const unsigned char normal_type = static_cast<unsigned char>(st.unknown);
+			// Capture for the surface-normals view mode's gray ramp. Sections of
+			// one model share a normal type, so last-wins is fine.
+			m_vxl_normal_type = normal_type;
 			// Smooth-gradient pre-pass: build a separable-Gaussian-blurred
 			// float density field over the section's occupancy grid. Runs
 			// once per section, only when method == gradient. Kernel size is
@@ -4324,12 +4328,16 @@ void CXCCFileView::player_draw(CDC* pDC)
 		// VPL bakes lighting directly into buf, so its key must include both
 		// "vpl is on" and the current lighting version (light direction).
 		const int splat_lighting_version_now = theme::vxl_lighting_version();
+		// View > Voxel mode (0=colors, 1=surface normals, 2=depth). Drives which
+		// auxiliary buffer the splat populates and how the composite paints it.
+		const int view_mode = GetMainFrame()->get_vxl_mode();
 		const bool cache_hit =
 			m_vxl_splat.token == m_open_token &&
 			m_vxl_splat.yaw == m_vxl_yaw &&
 			m_vxl_splat.pitch == m_vxl_pitch &&
 			m_vxl_splat.ss == ss &&
 			m_vxl_splat.shading == shading &&
+			m_vxl_splat.view_mode == view_mode &&
 			m_vxl_splat.vpl_active == m_vpl_loaded &&
 			(!m_vpl_loaded || m_vxl_splat.vpl_lighting_version == splat_lighting_version_now) &&
 			(!m_vpl_loaded || m_vxl_splat.vpl_pal_version == m_player_bgra_version) &&
@@ -4421,6 +4429,22 @@ void CXCCFileView::player_draw(CDC* pDC)
 			byte* d = m_vxl_splat.buf.write_start(c_pixels);
 			memset(d, 0, c_pixels);
 			vector<short> z_buf(c_pixels, SHRT_MIN);
+			// Surface-normals view: per-pixel grayscale of the normal index,
+			// written alongside color in the z-test win below. Occupancy is read
+			// from buf (d[ofs] != 0) at composite time, so this only needs the
+			// gray value. nt_div mirrors the static grid ramp (TS 36-set -> /35,
+			// RA2/YR 244-set -> direct 0..255).
+			unsigned char* nidx_buf = nullptr;
+			const int nt_div = (m_vxl_normal_type == 2) ? 35 : 255;
+			if (view_mode == 1)
+			{
+				m_vxl_splat.nidx.assign(c_pixels, 0);
+				nidx_buf = m_vxl_splat.nidx.data();
+			}
+			else
+				m_vxl_splat.nidx.clear();
+			if (view_mode != 2)
+				m_vxl_splat.depth.clear();
 			// Splat writes the rotated camera-space normal per pixel into
 			// cam_normal[], not a pre-shaded byte. The lighting pass below
 			// converts cam_normal -> shade in a cheap second pass keyed on
@@ -4522,6 +4546,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 				// either path needs it.
 				signed char ni8x = 0, ni8y = 0, ni8z = 0;
 				byte voxel_pal = v.color;
+				// Surface-normals view: gray value for this voxel's normal index.
+				// Per-voxel (not per-pixel), so compute it once here.
+				byte ngray = 0;
+				if (nidx_buf)
+				{
+					int g = (nt_div == 35) ? (v.normal_idx * 255 / 35) : v.normal_idx;
+					ngray = static_cast<byte>(g > 255 ? 255 : g);
+				}
 				const bool need_normal = synth_shading || m_vpl_loaded;
 				if (need_normal)
 				{
@@ -4601,6 +4633,8 @@ void CXCCFileView::player_draw(CDC* pDC)
 						{
 							z_buf[ofs] = depth;
 							d[ofs] = voxel_pal;
+							if (nidx_buf)
+								nidx_buf[ofs] = ngray;
 							if (cam_n_buf)
 							{
 								signed char* p = cam_n_buf + 3 * ofs;
@@ -4611,6 +4645,25 @@ void CXCCFileView::player_draw(CDC* pDC)
 					}
 				}
 			}
+			// Depth view: keep the finished z-buffer and bound the occupied
+			// range for the grayscale ramp. Occupancy = d[o] != 0 (same
+			// convention the color composite uses to detect background).
+			if (view_mode == 2)
+			{
+				m_vxl_splat.depth.assign(z_buf.begin(), z_buf.end());
+				short dmin = SHRT_MAX, dmax = SHRT_MIN;
+				for (int o = 0; o < c_pixels; o++)
+				{
+					if (d[o] == 0) continue;
+					short zv = z_buf[o];
+					if (zv < dmin) dmin = zv;
+					if (zv > dmax) dmax = zv;
+				}
+				if (dmax < dmin) { dmin = 0; dmax = 0; }
+				m_vxl_splat.depth_min = dmin;
+				m_vxl_splat.depth_max = dmax;
+			}
+			m_vxl_splat.view_mode = view_mode;
 			m_vxl_splat.token = m_open_token;
 			m_vxl_splat.yaw = m_vxl_yaw;
 			m_vxl_splat.pitch = m_vxl_pitch;
@@ -4893,6 +4946,14 @@ void CXCCFileView::player_draw(CDC* pDC)
 				sshad = m_player_frames[shadow_idx].data();
 		}
 		const unsigned char* shade_buf = (vxl_shade_p && !vxl_shade_p->empty()) ? vxl_shade_p->data() : nullptr;
+		// View > Voxel mode for the VXL composite. Normals/depth paint a
+		// grayscale derived from the splat's auxiliary buffers instead of the
+		// palette color; nullptr buffers fall back to the color path.
+		const int vxl_vmode = vxl ? m_vxl_splat.view_mode : 0;
+		const unsigned char* vxl_nidx = (vxl_vmode == 1 && !m_vxl_splat.nidx.empty()) ? m_vxl_splat.nidx.data() : nullptr;
+		const short* vxl_depth = (vxl_vmode == 2 && !m_vxl_splat.depth.empty()) ? m_vxl_splat.depth.data() : nullptr;
+		const int vxl_dmin = m_vxl_splat.depth_min;
+		const int vxl_drange = m_vxl_splat.depth_max - m_vxl_splat.depth_min;
 		const int n = cx_s * cy_s;
 		// Cache lookup for SHP/WSA. VXL skips this path; it has its own
 		// single-buffer BGRA cache below keyed on splat identity + side state.
@@ -4925,6 +4986,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 				vc.splat_pitch == m_vxl_splat.pitch &&
 				vc.splat_ss == m_vxl_splat.ss &&
 				vc.splat_shading == m_vxl_splat.shading &&
+				vc.view_mode == m_vxl_splat.view_mode &&
 				vc.splat_lighting_version == m_vxl_splat.shade_lighting_version &&
 				vc.splat_vpl_active == m_vxl_splat.vpl_active &&
 				vc.splat_vpl_lighting_version == m_vxl_splat.vpl_lighting_version &&
@@ -4979,6 +5041,22 @@ void CXCCFileView::player_draw(CDC* pDC)
 					bgra = (((x >> 3) ^ (y >> 3)) & 1) ? ck_b_d : ck_a_d;
 				}
 			}
+			else if (vxl_nidx)
+			{
+				// Surface-normals view: grayscale of the stored normal index
+				// (ramp baked into nidx by the splat). No palette, no side
+				// remap, no relighting — a faithful diagnostic readout.
+				int g = vxl_nidx[i];
+				bgra = static_cast<DWORD>(g) | (static_cast<DWORD>(g) << 8) | (static_cast<DWORD>(g) << 16);
+			}
+			else if (vxl_depth)
+			{
+				// Depth view: normalize the winning z over the occupied range.
+				// Brighter = nearer the camera, matching the static grid view.
+				int g = (vxl_drange > 0) ? ((vxl_depth[i] - vxl_dmin) * 255 / vxl_drange) : 255;
+				if (g < 0) g = 0; else if (g > 255) g = 255;
+				bgra = static_cast<DWORD>(g) | (static_cast<DWORD>(g) << 8) | (static_cast<DWORD>(g) << 16);
+			}
 			else
 			{
 				bgra = m_color_table[idx];
@@ -4998,8 +5076,9 @@ void CXCCFileView::player_draw(CDC* pDC)
 			// VXL directional shading: scale the voxel color by the per-pixel
 			// shade factor that the splat wrote (128 = neutral 1.0). Skips
 			// background pixels (idx == 0) so the bg color / alpha-checker stay
-			// at full intensity.
-			if (shade_buf && idx != 0)
+			// at full intensity. Color view only — normals/depth are grayscale
+			// diagnostics that must not be relit.
+			if (shade_buf && idx != 0 && vxl_vmode == 0)
 			{
 				int sb = shade_buf[i];
 				int rr = static_cast<int>(((bgra >> 16) & 0xff) * sb / 128);
@@ -5098,6 +5177,7 @@ void CXCCFileView::player_draw(CDC* pDC)
 			vc.splat_pitch = m_vxl_splat.pitch;
 			vc.splat_ss = m_vxl_splat.ss;
 			vc.splat_shading = m_vxl_splat.shading;
+			vc.view_mode = m_vxl_splat.view_mode;
 			vc.splat_lighting_version = m_vxl_splat.shade_lighting_version;
 			vc.splat_vpl_active = m_vxl_splat.vpl_active;
 			vc.splat_vpl_lighting_version = m_vxl_splat.vpl_lighting_version;
