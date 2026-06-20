@@ -216,6 +216,10 @@ protected:
 	// flushed back to theme:: (saved) once the drag ends. -1 = use theme value.
 	int m_topbar_filter_w_live = -1;
 	CThemedStatusBar m_wndStatusBar;
+	// "Load PAL..." button hosted on the status bar (right side, left of the
+	// version pane). Lives on the frame so it never scrolls with the file view.
+	// Visibility is driven by the file-info pane via show_load_pal_button().
+	CButton m_load_pal_btn;
 	CThemedHeaderCtrl m_left_header;
 	CThemedHeaderCtrl m_right_header;
 	bool m_headers_subclassed = false;
@@ -261,6 +265,13 @@ public:
 	// returns whether anything was using a VPL; reload returns whether one was found.
 	void clear_vpl_in_file_view();
 	bool reload_vpl_in_file_view();
+	// Show/hide the status-bar "Load PAL..." button. Called by the file-info
+	// pane when its open file's paletted-ness changes. Reserves/zeroes the
+	// status-bar pane and repositions the button over it.
+	void show_load_pal_button(bool show);
+	// Reposition the Load PAL button over its status-bar pane. Called on frame
+	// resize (the right-anchored pane shifts) and from show_load_pal_button().
+	void layout_load_pal_button();
 
 protected:
 	// Filter-bar plumbing. layout_filter_bar() positions the edit + shrinks the
@@ -273,6 +284,7 @@ protected:
 	CXCCMixerView* active_mix_pane() const;
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnLoadPalClicked();
 	afx_msg void OnFilterChange();
 	afx_msg void OnViewGameTD();
 	afx_msg void OnViewGameRA();

@@ -286,12 +286,14 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_VXL_FULL_HIER, OnThemeVxlFullHier)
 	ON_UPDATE_COMMAND_UI(ID_THEME_VXL_FULL_HIER, OnUpdateThemeVxlFullHier)
 	ON_COMMAND(ID_KEYBINDS_CONFIGURE, OnKeybindsConfigure)
+	ON_BN_CLICKED(IDC_LOAD_PAL, OnLoadPalClicked)
 END_MESSAGE_MAP()
 
 
 static UINT indicators[] =
 {
 	ID_SEPARATOR,           // status line indicator (stretches)
+	ID_INDICATOR_LOAD_PAL,  // right-side pane that hosts the Load PAL button
 	ID_INDICATOR_VERSION,   // right-side version pane
 };
 
@@ -341,6 +343,20 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 				SBPS_NORMAL, sz.cx + 12);
 			m_wndStatusBar.SetPaneText(idx, ver);
 		}
+	}
+	// Load PAL... button hosted on the status bar (child of the bar, so it sits
+	// in the window's fixed bottom strip and never scrolls like the file view's
+	// own children did). Starts hidden with a zero-width pane; the file-info
+	// pane calls show_load_pal_button() to reveal it for paletted files.
+	{
+		m_load_pal_btn.Create("Load PAL...", WS_CHILD | BS_PUSHBUTTON,
+			CRect(0, 0, 0, 0), &m_wndStatusBar, IDC_LOAD_PAL);
+		if (CFont* f = m_wndStatusBar.GetFont())
+			m_load_pal_btn.SetFont(f);
+		theme::apply_window(m_load_pal_btn.GetSafeHwnd());
+		int idx = m_wndStatusBar.CommandToIndex(ID_INDICATOR_LOAD_PAL);
+		if (idx >= 0)
+			m_wndStatusBar.SetPaneInfo(idx, ID_INDICATOR_LOAD_PAL, SBPS_NOBORDERS, 0);
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	recents::load();
@@ -676,6 +692,55 @@ void CMainFrame::OnSize(UINT nType, int cx, int cy)
 {
 	CFrameWnd::OnSize(nType, cx, cy);
 	layout_filter_bar();
+	// The status bar's right-anchored panes shift on resize; keep the Load PAL
+	// button parked over its pane.
+	layout_load_pal_button();
+}
+
+void CMainFrame::OnLoadPalClicked()
+{
+	// The button lives on the frame's status bar; the actual palette picker is
+	// owned by the file-info pane (it knows the current file + source MIX).
+	if (m_file_info_pane)
+		m_file_info_pane->open_load_pal_dialog();
+}
+
+void CMainFrame::show_load_pal_button(bool show)
+{
+	if (!m_load_pal_btn.GetSafeHwnd())
+		return;
+	int idx = m_wndStatusBar.CommandToIndex(ID_INDICATOR_LOAD_PAL);
+	if (idx < 0)
+		return;
+	int w = 0;
+	if (show)
+	{
+		// Size the pane to the button text (+ padding) so it sits flush left of
+		// the version pane.
+		CClientDC dc(&m_wndStatusBar);
+		CFont* oldf = dc.SelectObject(m_wndStatusBar.GetFont());
+		CSize sz = dc.GetTextExtent(_T("Load PAL..."));
+		if (oldf) dc.SelectObject(oldf);
+		w = sz.cx + 20;
+	}
+	m_wndStatusBar.SetPaneInfo(idx, ID_INDICATOR_LOAD_PAL, SBPS_NOBORDERS, w);
+	m_load_pal_btn.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	layout_load_pal_button();
+}
+
+void CMainFrame::layout_load_pal_button()
+{
+	if (!m_load_pal_btn.GetSafeHwnd())
+		return;
+	int idx = m_wndStatusBar.CommandToIndex(ID_INDICATOR_LOAD_PAL);
+	if (idx < 0)
+		return;
+	CRect rc;
+	m_wndStatusBar.GetItemRect(idx, &rc);
+	// Inset 1px vertically so the button doesn't touch the bar's edges.
+	rc.DeflateRect(0, 1);
+	if (rc.Width() > 0 && rc.Height() > 0)
+		m_load_pal_btn.MoveWindow(&rc);
 }
 
 BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
@@ -3143,6 +3208,12 @@ void CMainFrame::apply_theme_to_children()
 	{
 		theme::apply_window(m_wndStatusBar.GetSafeHwnd());
 		::RedrawWindow(m_wndStatusBar.GetSafeHwnd(), NULL, NULL, inv_flags);
+	}
+	if (m_load_pal_btn.GetSafeHwnd())
+	{
+		// Status-bar-hosted button; the dialog child-walk never reaches it.
+		theme::apply_window(m_load_pal_btn.GetSafeHwnd());
+		::RedrawWindow(m_load_pal_btn.GetSafeHwnd(), NULL, NULL, inv_flags);
 	}
 	if (m_wndSplitter.GetSafeHwnd())
 	{

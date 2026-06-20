@@ -67,6 +67,10 @@
 // inline/static guards beyond what's natural for a single-TU embed).
 #include "gif.h"
 
+// Defined further down this TU; forward-declared so the early Load-PAL button
+// helpers (which route through the frame) can use it.
+static CMainFrame* GetMainFrame();
+
 IMPLEMENT_DYNCREATE(CXCCFileView, CListView)
 
 CXCCFileView::CXCCFileView()
@@ -111,7 +115,7 @@ BEGIN_MESSAGE_MAP(CXCCFileView, CScrollView)
 	ON_BN_CLICKED(IDC_VXL_HVA_LOOP, OnVxlHvaLoop)
 	ON_BN_CLICKED(IDC_VXL_VPL_LOAD, OnVxlVplLoad)
 	ON_BN_CLICKED(IDC_LOAD_PAL, OnLoadPal)
-	ON_CBN_SELCHANGE(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
+	ON_BN_CLICKED(IDC_PLAYER_GRID_SEL, OnPlayerGridSel)
 	ON_WM_DRAWITEM()
 	ON_WM_MEASUREITEM()
 	ON_WM_PAINT()
@@ -338,7 +342,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	const char* msg = nullptr;
 	if (h == m_player_play.GetSafeHwnd())          msg = "Play / pause animation.";
 	else if (h == m_player_reverse.GetSafeHwnd())  msg = "Reverse playback direction.";
-	else if (h == m_player_grid.GetSafeHwnd())     msg = "Show static grid of all frames instead of animation.";
+	else if (h == m_player_grid.GetSafeHwnd())     msg = "Back: exit the player and return to the static grid of all frames.";
 	else if (h == m_player_native.GetSafeHwnd())   msg = "Display at native resolution (no scaling).";
 	else if (h == m_player_screenshot.GetSafeHwnd()) msg = "Screenshot: Save As... (PNG/TGA/PCX, Ctrl+Shift+S) or Copy to Clipboard (format: Theme > Image > Clipboard Format).";
 	else if (h == m_player_slider.GetSafeHwnd())   msg = "Scrub timeline. Pauses playback while dragging.";
@@ -347,7 +351,7 @@ void CXCCFileView::update_player_hover_help(CWnd* pWnd)
 	else if (h == m_player_shadows.GetSafeHwnd())  msg = "Cycle: Off / Shadows RA2-TS (palette idx 0 = transparent) / Shadows TD-RA1 (palette idx 4 = transparent). Composites frame[i + cf/2] as shadow; halves the timeline.";
 	else if (h == m_player_bg.GetSafeHwnd())       msg = "Cycle background for transparent pixels: palette color 0 / alpha checker / pane color.";
 	else if (h == m_player_side_custom.GetSafeHwnd()) msg = "Custom side color: opens picker. Click again to clear.";
-	else if (h == m_player_iso_grid.GetSafeHwnd()) msg = "Overlay isometric tile grid (TS 48px / RA2 60px). Drawn before scaling.";
+	else if (h == m_player_iso_grid.GetSafeHwnd()) msg = "Overlay isometric tile grid: click cycles off / TS 48px / RA2 60px. Drawn before scaling.";
 	else if (h == m_vxl_hva_load.GetSafeHwnd())    msg = "Load an HVA animation. Lists matching HVAs from the source MIX.";
 	else if (h == m_vxl_hva_loop.GetSafeHwnd())    msg = "Loop HVA animation. When off, playback stops at the last keyframe.";
 	else if (h == m_vxl_vpl_load.GetSafeHwnd())    msg = "Load a VPL palette mapper for engine-faithful VXL shading. Auto-loads voxels.vpl on file open.";
@@ -648,14 +652,9 @@ void CXCCFileView::OnInitialUpdate()
 	m_font.CreateFont(12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Lucida Console");
 	//m_font.CreateFont(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Consolas");
 	//m_font.CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, ""); //default font, but if it isn't monospace it sucks
-	// Persistent "Load PAL..." button. Lives across the whole view lifetime
-	// so it appears in grid view too (not just player mode). Visibility is
-	// driven by is_paletted_file() in load_pal_btn_update_visibility().
-	CRect r0(0, 0, 0, 0);
-	m_load_pal_btn.Create("Load PAL...", WS_CHILD | BS_PUSHBUTTON, r0, this, IDC_LOAD_PAL);
-	m_load_pal_btn.SetFont(&m_font);
-	theme::apply_window(m_load_pal_btn.GetSafeHwnd());
-	m_load_pal_btn_created = true;
+	// The "Load PAL..." button now lives on the frame's status bar (see
+	// CMainFrame::show_load_pal_button) so it never scrolls with this view.
+	// Visibility is still driven from here via load_pal_btn_update_visibility().
 }
 
 bool CXCCFileView::is_paletted_file() const
@@ -678,45 +677,14 @@ bool CXCCFileView::is_paletted_file() const
 	}
 }
 
-void CXCCFileView::load_pal_btn_layout()
-{
-	if (!m_load_pal_btn_created)
-		return;
-	CRect cr;
-	GetClientRect(&cr);
-	const int W = 90;
-	const int H = 24;
-	const int pad = 4;
-	if (m_player_mode)
-	{
-		// In player mode the player band owns the bottom; park the button on
-		// the upper row at the right edge so it doesn't overlap transport
-		// controls (which start from the left). For VXL the HVA button is on
-		// the upper row at the right end — shift our button further left.
-		const bool vxl = (m_ft == ft_vxl);
-		int y = cr.bottom - 2 * H - 2 * pad;	// upper row of two-row band
-		int x = cr.right - W - pad;
-		if (vxl)
-			x -= (90 + pad);	// leave room for the HVA load button to our right
-		m_load_pal_btn.MoveWindow(x, y, W, H);
-	}
-	else
-	{
-		// Grid view: bottom-right corner, inside the pal mini-band.
-		int y = cr.bottom - H - (pal_band_h() - H) / 2;
-		int x = cr.right - W - pad;
-		m_load_pal_btn.MoveWindow(x, y, W, H);
-	}
-}
-
 void CXCCFileView::load_pal_btn_update_visibility()
 {
-	if (!m_load_pal_btn_created)
-		return;
+	// The button is hosted on the frame's status bar now; just tell the frame
+	// whether the current file warrants it. The view still owns this decision
+	// because only it knows the open file's type.
 	const bool show = m_is_open && is_paletted_file();
-	m_load_pal_btn.ShowWindow(show ? SW_SHOW : SW_HIDE);
-	if (show)
-		load_pal_btn_layout();
+	if (CMainFrame* mf = GetMainFrame())
+		mf->show_load_pal_button(show);
 }
 
 void CXCCFileView::draw_image8(const byte* s, int cx_s, int cy_s, CDC* pDC, int x_d)
@@ -2560,8 +2528,10 @@ void CXCCFileView::close_f()
 {
 	m_is_open = false;
 	m_text_cache.clear();
-	if (m_load_pal_btn_created)
-		m_load_pal_btn.ShowWindow(SW_HIDE);
+	// Hide the status-bar Load PAL button — no file open means nothing to load
+	// a palette for.
+	if (CMainFrame* mf = GetMainFrame())
+		mf->show_load_pal_button(false);
 }
 
 bool CXCCFileView::is_playable_file() const
@@ -3554,6 +3524,12 @@ void CXCCFileView::player_enter()
 	// user didn't even ask for it" surprise.
 	m_player_playing = false;
 	m_player_zoom_pct = 0;
+	// Open at native 100% for every player kind (VXL/SHP/WSA/PCX/...). The
+	// default-fit path scales small sprites up to fill the pane ("zoom in"),
+	// which the user doesn't want — pin Native on so the image opens 1:1.
+	// The Native button / Ctrl+wheel still let the user deviate per view; it
+	// re-defaults to 100% on the next open.
+	m_player_native_size = true;
 	m_player_pan_x = m_player_pan_y = 0;
 	m_player_panning = false;
 	if (m_ft == ft_vxl)
@@ -3567,7 +3543,7 @@ void CXCCFileView::player_enter()
 		CRect r(0, 0, 1, 1);
 		m_player_play.Create("Pause", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_PLAY);
 		m_player_reverse.Create("<<", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_REVERSE);
-		m_player_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
+		m_player_grid.Create("Back", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID);
 		m_player_native.Create("Native", WS_CHILD | BS_AUTOCHECKBOX | BS_PUSHLIKE, r, this, IDC_PLAYER_NATIVE);
 		m_player_screenshot.Create("Screenshot", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_SCREENSHOT);
 		m_player_turntable.Create("Record", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_TURNTABLE);
@@ -3613,36 +3589,19 @@ void CXCCFileView::player_enter()
 			m_player_side[i].Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE0 + i);
 		}
 		m_player_side_custom.Create("", WS_CHILD | BS_OWNERDRAW, r, this, IDC_PLAYER_SIDE_CUSTOM);
-		// Game Grid combobox: plain CBS_DROPDOWNLIST + CBS_HASSTRINGS. Dark
-		// theming comes from theme::subclass_combobox (Notepad++ pattern,
-		// owns WM_PAINT in dark mode, falls through to system painting in
-		// light). Previously CBS_OWNERDRAWFIXED with hand painting in
-		// OnDrawItem — that bugged out on dark→light transitions.
-		m_player_iso_grid.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
-			| CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-			r, this, IDC_PLAYER_GRID_SEL);
-		m_player_iso_grid.AddString("No Grid");
-		m_player_iso_grid.AddString("TS Grid");
-		m_player_iso_grid.AddString("RA2 Grid");
-		m_player_iso_grid.SetCurSel(m_player_grid_mode);
+		// Game Grid: 3-state pushbutton (was a combobox). Click cycles
+		// off -> TS -> RA2; label reflects the current state, starting "Grid".
+		// Pushbutton matches the BG button idiom and themes via apply_window —
+		// no dropdown listbox to theme, so the old subclass_combobox plumbing
+		// is gone.
+		m_player_iso_grid.Create("Grid", WS_CHILD | BS_PUSHBUTTON, r, this, IDC_PLAYER_GRID_SEL);
 		m_player_shadows.SetFont(&m_font);
 		m_player_bg.SetFont(&m_font);
 		m_player_iso_grid.SetFont(&m_font);
 		theme::apply_window(m_player_shadows.GetSafeHwnd());
 		theme::apply_window(m_player_bg.GetSafeHwnd());
 		theme::apply_window(m_player_iso_grid.GetSafeHwnd());
-		theme::subclass_combobox(m_player_iso_grid.GetSafeHwnd());
-		// Combobox internals: theme the dropdown listbox + edit field too,
-		// otherwise the dropped-down list paints white in dark mode.
-		{
-			COMBOBOXINFO cbi = {};
-			cbi.cbSize = sizeof(cbi);
-			if (::GetComboBoxInfo(m_player_iso_grid.GetSafeHwnd(), &cbi))
-			{
-				if (cbi.hwndList) theme::apply_window(cbi.hwndList);
-				if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
-			}
-		}
+		player_update_grid_label();
 		for (int i = 0; i < 8; i++)
 			theme::apply_window(m_player_side[i].GetSafeHwnd());
 		theme::apply_window(m_player_side_custom.GetSafeHwnd());
@@ -3749,10 +3708,10 @@ void CXCCFileView::player_enter()
 	const int hva_loop_show = vxl_hva ? SW_SHOW : SW_HIDE;
 	m_vxl_hva_loop.ShowWindow(hva_loop_show);
 	m_vxl_hva_loop.SetCheck(m_hva_loop ? BST_CHECKED : BST_UNCHECKED);
-	// Game Grid combobox shows for both SHP and VXL — the overlay applies in
+	// Game Grid button shows for both SHP and VXL — the overlay applies in
 	// either case (already drawn for VXL via the post-stretch path below).
 	m_player_iso_grid.ShowWindow(SW_SHOW);
-	m_player_iso_grid.SetCurSel(m_player_grid_mode);
+	player_update_grid_label();
 	player_layout_controls();
 	player_update_label();
 	// Reflect the not-playing default on the button label so the user sees
@@ -3866,12 +3825,22 @@ void CXCCFileView::player_layout_controls()
 	const int H = 24;
 	const int pad = 4;
 	const bool vxl = is_vxl_view();
+	// Transport sub-row (Play, <<, frame label, FPS, slider) is live for
+	// SHP/WSA and for VXL only once an HVA supplies multiple frames. When it's
+	// hidden (VXL without HVA) its controls must NOT consume layout width —
+	// otherwise Grid/Native and the Game Grid combo float out across the empty
+	// slots the hidden controls would have occupied (the reported bug).
+	const bool vxl_hva = m_hva_loaded && m_player_cf > 1;
+	const bool transport = (!vxl || vxl_hva);
 	// Bottom row: transport controls (Play, <<, Grid, Native, slider, FPS).
 	int y = cr.bottom - H - pad;
 	int x = pad;
 	m_player_screenshot.MoveWindow(x, y, 80, H);      x += 80 + pad;
-	m_player_play.MoveWindow(x, y, 60, H);            x += 60 + pad;
-	m_player_reverse.MoveWindow(x, y, 30, H);         x += 30 + pad;
+	if (transport)
+	{
+		m_player_play.MoveWindow(x, y, 60, H);        x += 60 + pad;
+		m_player_reverse.MoveWindow(x, y, 30, H);     x += 30 + pad;
+	}
 	m_player_grid.MoveWindow(x, y, 50, H);            x += 50 + pad;
 	m_player_native.MoveWindow(x, y, 96, H);          x += 96 + pad;
 	// SHP/WSA Record button slot — only consumes layout space when this is
@@ -3881,29 +3850,30 @@ void CXCCFileView::player_layout_controls()
 	{
 		m_player_turntable.MoveWindow(x, y, 70, H);   x += 70 + pad;
 	}
-	int label_w = 110;
-	m_player_label.MoveWindow(x, y, label_w, H); x += label_w + pad;
-	int fps_label_w = 26;
-	m_player_fps_label.MoveWindow(x, y, fps_label_w, H); x += fps_label_w + 2;
-	int fps_w = 44;
-	m_player_fps_edit.MoveWindow(x, y, fps_w, H);     x += fps_w + pad;
-	int slider_x = x;
-	int slider_w = cr.right - slider_x - pad;
-	if (slider_w < 60) slider_w = 60;
-	m_player_slider.MoveWindow(slider_x, y, slider_w, H);
+	if (transport)
+	{
+		int label_w = 110;
+		m_player_label.MoveWindow(x, y, label_w, H); x += label_w + pad;
+		int fps_label_w = 26;
+		m_player_fps_label.MoveWindow(x, y, fps_label_w, H); x += fps_label_w + 2;
+		int fps_w = 44;
+		m_player_fps_edit.MoveWindow(x, y, fps_w, H);     x += fps_w + pad;
+		int slider_x = x;
+		int slider_w = cr.right - slider_x - pad;
+		if (slider_w < 60) slider_w = 60;
+		m_player_slider.MoveWindow(slider_x, y, slider_w, H);
+	}
 	if (vxl)
 	{
 		// VXL without HVA: transport row is hidden, so the iso-grid combo
-		// gets parked to the right of the Native button on the single
-		// visible row. With HVA loaded the transport is live and the combo
-		// stays on the upper row (placed below) next to the swatches.
-		const bool vxl_hva = m_hva_loaded && m_player_cf > 1;
+		// gets parked right after the Native button on the single visible
+		// row. With HVA loaded the transport is live and the combo stays on
+		// the upper row (placed below) next to the swatches.
 		if (!vxl_hva)
 		{
-			// Place the Game Grid combo just past where the transport row's
-			// running x left off (after Native). Hardcoded sums got stale
-			// when Native bumped to 96px (was 60px); use the live x instead.
-			m_player_iso_grid.MoveWindow(x, y, 90, H * 8);
+			// `x` is the running edge right after Native — the transport
+			// advances above were gated out — so the button packs flush.
+			m_player_iso_grid.MoveWindow(x, y, 70, H);
 		}
 		// Upper row: BG toggle + 9 VXL side-color swatches + HVA button
 		// (+ iso-grid when HVA is loaded).
@@ -3928,7 +3898,7 @@ void CXCCFileView::player_layout_controls()
 		// Loop checkbox — only visible while an HVA is loaded.
 		m_vxl_hva_loop.MoveWindow(x2, y2, 56, H); x2 += 56 + pad;
 		if (vxl_hva)
-			m_player_iso_grid.MoveWindow(x2, y2, 90, H * 8);
+			m_player_iso_grid.MoveWindow(x2, y2, 70, H);
 		return;
 	}
 	// Upper row (SHP family only): Shadows, BG, 8 side-color swatches.
@@ -3947,8 +3917,8 @@ void CXCCFileView::player_layout_controls()
 	}
 	// 9th swatch — custom (opens color picker).
 	m_player_side_custom.MoveWindow(x2, y2, swatch, H); x2 += swatch + pad;
-	// Game Grid combo. Use a tall MoveWindow so the dropdown list fits.
-	m_player_iso_grid.MoveWindow(x2, y2, 90, H * 8);
+	// Game Grid cycle button.
+	m_player_iso_grid.MoveWindow(x2, y2, 70, H);
 }
 
 void CXCCFileView::player_update_label()
@@ -5358,7 +5328,6 @@ void CXCCFileView::OnSize(UINT nType, int cx, int cy)
 	CScrollView::OnSize(nType, cx, cy);
 	if (m_player_mode)
 		player_layout_controls();
-	load_pal_btn_layout();
 }
 
 void CXCCFileView::OnPaint()
@@ -6940,14 +6909,8 @@ HBRUSH CXCCFileView::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
 void CXCCFileView::reapply_player_theme()
 {
-	// Persistent Load PAL button outlives player mode (created in
-	// OnInitialUpdate), so theme it regardless of whether the player band
-	// controls were created.
-	if (HWND h = m_load_pal_btn.GetSafeHwnd())
-	{
-		theme::apply_window(h);
-		::InvalidateRect(h, NULL, TRUE);
-	}
+	// (The Load PAL button is hosted on the frame's status bar and re-themed
+	// in CMainFrame's theme-switch walk, not here.)
 	if (!m_player_controls_created)
 		return;
 	HWND ctrls[] = {
@@ -6991,24 +6954,8 @@ void CXCCFileView::reapply_player_theme()
 		theme::apply_window(h);
 		::InvalidateRect(h, NULL, TRUE);
 	}
-	// Comboboxes are composed: closed-state edit/button (themed by apply_window
-	// on the combobox HWND) + dropped-down listbox (separate HWND). Pull the
-	// listbox out via CB_GETCOMBOBOXINFO and theme it explicitly so the
-	// dropdown also paints dark.
-	if (HWND h = m_player_iso_grid.GetSafeHwnd())
-	{
-		// Reinstall subclass if missing (idempotent) and force a repaint —
-		// theme flips don't tear down the subclass, but bumping the cache
-		// lets the new mode's WM_PAINT branch take effect immediately.
-		theme::subclass_combobox(h);
-		COMBOBOXINFO cbi = {};
-		cbi.cbSize = sizeof(cbi);
-		if (::GetComboBoxInfo(h, &cbi))
-		{
-			if (cbi.hwndList) theme::apply_window(cbi.hwndList);
-			if (cbi.hwndItem) theme::apply_window(cbi.hwndItem);
-		}
-	}
+	// (Game Grid is now a plain pushbutton, themed by the apply_window walk
+	// above — no combobox dropdown listbox to pull out and theme separately.)
 	// Theme switch changes theme::bg(), which feeds BG=Pane mode. Invalidate
 	// the SHP/WSA BGRA cache so the next paint rebuilds against the new pane
 	// color; the VXL cache key includes pane_c so it self-invalidates.
@@ -7129,6 +7076,17 @@ void CXCCFileView::player_update_bg_label()
 	if (m_player_bg_mode == 1) label = "BG Alpha";
 	else if (m_player_bg_mode == 2) label = "BG Pane";
 	m_player_bg.SetWindowText(label);
+}
+
+void CXCCFileView::player_update_grid_label()
+{
+	if (!m_player_iso_grid.GetSafeHwnd()) return;
+	// Off state reads plain "Grid" (per the request) so the control is
+	// self-describing; active states name the game ruleset.
+	const char* label = "Grid";
+	if (m_player_grid_mode == 1) label = "TS Grid";
+	else if (m_player_grid_mode == 2) label = "RA2 Grid";
+	m_player_iso_grid.SetWindowText(label);
 }
 
 void CXCCFileView::OnPlayerSide(UINT id)
@@ -7952,6 +7910,11 @@ void CXCCFileView::try_auto_load_paired_pal()
 
 void CXCCFileView::OnLoadPal()
 {
+	open_load_pal_dialog();
+}
+
+void CXCCFileView::open_load_pal_dialog()
+{
 	if (!m_is_open || !is_paletted_file())
 		return;
 	// Searchable picker dialog. Replaces the unmanageably-tall TrackPopupMenu
@@ -7966,9 +7929,9 @@ void CXCCFileView::OnLoadPal()
 void CXCCFileView::OnPlayerGridSel()
 {
 	if (!m_player_controls_created) return;
-	int sel = m_player_iso_grid.GetCurSel();
-	if (sel == CB_ERR) sel = 0;
-	m_player_grid_mode = sel;
+	// 3-state cycle: 0 (off) -> 1 (TS) -> 2 (RA2).
+	m_player_grid_mode = (m_player_grid_mode + 1) % 3;
+	player_update_grid_label();
 	// Grid lines are baked into the cached BGRA bytes (per-paint cost is then
 	// memcpy + StretchBlt). Bump version + re-prefill so the next animation
 	// tick is a hit. VXL gets its grid drawn per-paint (no SHP cache there).

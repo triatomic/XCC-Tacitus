@@ -43,6 +43,10 @@ class CThemedStatusBar : public CStatusBar
 protected:
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	// Controls hosted on the status bar (e.g. the Load PAL button) send their
+	// WM_COMMAND notifications here, since we are their parent. Bubble them up
+	// to the frame so its ON_BN_CLICKED handlers run.
+	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 };
 

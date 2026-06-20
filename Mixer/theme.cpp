@@ -3941,6 +3941,20 @@ void CThemedStatusBar::OnPaint()
 		dc.SelectObject(old_font);
 }
 
+BOOL CThemedStatusBar::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	// lParam != 0 means a control notification (a child sent it), not a menu
+	// command. Forward those to the frame so its command handlers (e.g. the
+	// Load PAL button's ON_BN_CLICKED) get a chance to run.
+	if (lParam)
+	{
+		CWnd* p = GetParent();
+		if (p && p->SendMessage(WM_COMMAND, wParam, lParam))
+			return TRUE;
+	}
+	return CStatusBar::OnCommand(wParam, lParam);
+}
+
 // ---------- CThemedSplitterWnd ----------
 
 BEGIN_MESSAGE_MAP(CThemedSplitterWnd, CSplitterWnd)

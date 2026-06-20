@@ -241,6 +241,7 @@ protected:
 	void player_layout_controls();
 	void player_update_label();
 	void player_update_bg_label();
+	void player_update_grid_label();
 	void update_player_hover_help(CWnd* pWnd);
 	const char* m_last_hover_help = nullptr;
 	int player_total_frames() const;
@@ -288,7 +289,7 @@ protected:
 	CButton m_player_bg;            // "BG" — show palette-color-0 background
 	CButton m_player_side[8];       // 8 side-color preset swatches
 	CButton m_player_side_custom;   // 9th swatch — opens color picker
-	CComboBox m_player_iso_grid;    // Game Grid: None / TS / RA2
+	CButton m_player_iso_grid;     // Grid cycle button: off / TS / RA2
 	bool m_player_shadows_on = false;
 	// Shadow button is a 3-state cycle:
 	//   0 = Off
@@ -427,20 +428,13 @@ protected:
 	// find_in_sources. Called from post_open when the toggle is on.
 	void vxl_load_parts();
 
-	// Persistent "Load PAL..." button. Unlike the HVA button, this lives
-	// across the whole view lifetime (created in OnInitialUpdate) so it can
-	// also appear in grid view, not just in player mode. Shown for all
-	// paletted file types (SHP/WSA/TMP/PCX/CPS/VXL). Loading a PAL appends
+	// "Load PAL..." for all paletted file types (SHP/WSA/TMP/PCX/CPS/VXL). The
+	// button itself is hosted on the frame's status bar (CMainFrame) so it
+	// never scrolls with this view; this view only decides when it's relevant
+	// (is_paletted_file) and drives the frame's show/hide. Loading a PAL appends
 	// to MainFrame::m_pal_list and selects it via set_palette(), keeping
 	// Ctrl+Q traversal and auto_select() compatible with the new entry.
-	CButton m_load_pal_btn;
-	bool m_load_pal_btn_created = false;
-	// Height of the bottom mini-band reserved for the Load PAL button when
-	// the current file is paletted AND the player is not active. Player mode
-	// uses its own band (player_band_h) and parks the button into it.
-	int pal_band_h() const { return 32; }
 	bool is_paletted_file() const;
-	void load_pal_btn_layout();
 	void load_pal_btn_update_visibility();
 	// Wires the PAL bytes into MainFrame's palette list as a fresh entry
 	// (under a synthetic "Loaded" tree node) and calls set_palette() so the
@@ -448,6 +442,9 @@ protected:
 	// CLoadPalDlg calls it directly to apply MIX-entry or disk picks.
 public:
 	bool apply_loaded_pal(const Cvirtual_binary& data, const string& display_name);
+	// Open the searchable Load-PAL picker for the current file. Public so the
+	// frame's status-bar Load PAL button can invoke it.
+	void open_load_pal_dialog();
 protected:
 	// On opening a paletted file, scan the source MIX for a .pal whose
 	// basename (sans extension, lowercased) matches the file's basename
