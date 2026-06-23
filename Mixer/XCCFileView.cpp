@@ -2768,6 +2768,44 @@ void CXCCFileView::player_decode_frames()
 			kf_t = static_cast<float>(rem) / static_cast<float>(span);
 		};
 
+		// Render-resolution normalization. The splat footprint and the
+		// auto-fit framebuffer are both sized assuming one voxel spans ~1
+		// world unit -- true for stock VXLs, where BoundScale =
+		// (max-min)/size is ~1. High-resolution models authored at a small
+		// in-game size (e.g. 3dToVxl "Lock-Size" exports) have BoundScale
+		// << 1: the world-extent framebuffer becomes far too coarse AND the
+		// unit-cube footprint over-splats by ~1/BoundScale, so the model
+		// collapses into a featureless blob. Scale every emitted world
+		// position by render_scale = 1/min(BoundScale) so the finest voxel
+		// maps back to ~1 framebuffer pixel. It is uniform, so aspect ratio,
+		// the section transform and multi-section placement are all
+		// preserved, and stretch_image fits the buffer to the window
+		// downstream -- the on-screen size is unchanged, only the internal
+		// sampling resolution. ~1.0 for stock files (no behavioral change).
+		double min_bound_scale = 1e30;
+		for (auto& src : sources)
+		{
+			Cvxl_file& f = src.vxl;
+			const int n = f.get_c_section_headers();
+			for (int i = 0; i < n; i++)
+			{
+				const t_vxl_section_tailer& st = *f.get_section_tailer(i);
+				const double bsc[3] = {
+					(st.x_max_scale - st.x_min_scale) / std::max(1, static_cast<int>(st.cx)),
+					(st.y_max_scale - st.y_min_scale) / std::max(1, static_cast<int>(st.cy)),
+					(st.z_max_scale - st.z_min_scale) / std::max(1, static_cast<int>(st.cz)) };
+				for (double b : bsc)
+					if (b > 1e-6 && b < min_bound_scale) min_bound_scale = b;
+			}
+		}
+		double render_scale = 1.0;
+		if (min_bound_scale < 1e29)
+			render_scale = 1.0 / min_bound_scale;
+		// Never shrink below stock scale (a BoundScale slightly > 1 would
+		// otherwise cost resolution for nothing); the m_vxl_half cap below
+		// bounds the framebuffer for a pathologically tiny BoundScale.
+		if (render_scale < 1.0) render_scale = 1.0;
+
 		// Build the object-space point cloud once. The viewer rasterizes it
 		// per frame at the current m_vxl_yaw/m_vxl_pitch.
 		m_vxl_cloud.clear();
@@ -3004,6 +3042,12 @@ void CXCCFileView::player_decode_frames()
 				// their authored axes — important so HVA matrices compose
 				// correctly with sibling sections.
 				wy = -wy;
+				// Normalize to ~1-pixel-per-voxel render space (see render_scale
+				// derivation above). Uniform on all three axes, so shape and
+				// placement are untouched.
+				wx *= render_scale;
+				wy *= render_scale;
+				wz *= render_scale;
 				// Local-space normal — branches on user's preference.
 				float lnx = 0.0f, lny = 0.0f, lnz = 0.0f;
 				if (norm_src == theme::vxl_normals_file)
@@ -3438,9 +3482,9 @@ void CXCCFileView::player_decode_frames()
 										double lx = st.x_min_scale + (x + 0.5) * sx;
 										double ly = st.y_min_scale + (y + 0.5) * sy;
 										double lz = st.z_min_scale + (z + 0.5) * sz;
-										double wx = tm[0][0] * lx + tm[0][1] * ly + tm[0][2] * lz + tm[0][3];
-										double wy = tm[1][0] * lx + tm[1][1] * ly + tm[1][2] * lz + tm[1][3];
-										double wz = tm[2][0] * lx + tm[2][1] * ly + tm[2][2] * lz + tm[2][3];
+										double wx = (tm[0][0] * lx + tm[0][1] * ly + tm[0][2] * lz + tm[0][3]) * render_scale;
+										double wy = (tm[1][0] * lx + tm[1][1] * ly + tm[1][2] * lz + tm[1][3]) * render_scale;
+										double wz = (tm[2][0] * lx + tm[2][1] * ly + tm[2][2] * lz + tm[2][3]) * render_scale;
 										wy = -wy;
 										double r2 = wx * wx + wy * wy + wz * wz;
 										if (r2 > worst_r2) worst_r2 = r2;
@@ -3473,6 +3517,14 @@ void CXCCFileView::player_decode_frames()
 			const double bound = std::sqrt(max_r2);
 			m_vxl_half = std::max(8, static_cast<int>(std::ceil(bound)) + 2);
 		}
+		// Bound the supersample framebuffer. render_scale (above) pushes
+		// high-resolution / tiny-BoundScale models into a ~1px-per-voxel
+		// space; a 255-axis model centered on the section origin can reach
+		// ~440 half-units, and at SS=8/16 that is a multi-hundred-MB buffer.
+		// Cap the logical half so the buffer stays bounded — any model past
+		// the cap loses a little fine detail instead of blobbing or OOMing.
+		// Stock and normal Lock-Size models sit well under it.
+		if (m_vxl_half > 256) m_vxl_half = 256;
 		m_player_cx = 2 * m_vxl_half;
 		m_player_cy = 2 * m_vxl_half;
 		// Timeline length = max across all sources. A part with fewer keyframes
