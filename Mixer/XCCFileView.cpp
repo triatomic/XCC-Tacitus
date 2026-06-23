@@ -2547,7 +2547,7 @@ int CXCCFileView::player_total_frames() const
 	return m_player_cf;
 }
 
-void CXCCFileView::player_decode_frames()
+void CXCCFileView::player_decode_frames(bool reload_palette)
 {
 	m_player_frames.clear();
 	m_player_bgra.clear();
@@ -2561,7 +2561,7 @@ void CXCCFileView::player_decode_frames()
 	{
 		Cshp_file f;
 		f.load(m_data);
-		load_color_table(get_default_palette(), true);
+		if (reload_palette) load_color_table(get_default_palette(), true);
 		m_player_cx = f.cx();
 		m_player_cy = f.cy();
 		m_player_cf = f.cf();
@@ -2580,7 +2580,7 @@ void CXCCFileView::player_decode_frames()
 	{
 		Cshp_dune2_file f;
 		f.load(m_data);
-		load_color_table(get_default_palette(), true);
+		if (reload_palette) load_color_table(get_default_palette(), true);
 		m_player_cf = f.get_c_images();
 		// Frames have different sizes; find a bounding box.
 		int max_cx = 0, max_cy = 0;
@@ -2622,7 +2622,7 @@ void CXCCFileView::player_decode_frames()
 	{
 		Cshp_ts_file f;
 		f.load(m_data);
-		load_color_table(get_default_palette(), true);
+		if (reload_palette) load_color_table(get_default_palette(), true);
 		m_player_cx = f.cx();
 		m_player_cy = f.cy();
 		m_player_cf = f.cf();
@@ -2667,7 +2667,7 @@ void CXCCFileView::player_decode_frames()
 	{
 		Cwsa_file f;
 		f.load(m_data);
-		load_color_table(f.palette(), true);
+		if (reload_palette) load_color_table(f.palette(), true);
 		m_player_cx = f.cx();
 		m_player_cy = f.cy();
 		m_player_cf = f.cf();
@@ -2686,7 +2686,7 @@ void CXCCFileView::player_decode_frames()
 	{
 		Cwsa_dune2_file f;
 		f.load(m_data);
-		load_color_table(get_default_palette(), true);
+		if (reload_palette) load_color_table(get_default_palette(), true);
 		Cvirtual_image image = f.vimage();
 		m_player_cx = image.cx();
 		m_player_cy = image.cy();
@@ -3536,6 +3536,44 @@ void CXCCFileView::player_decode_frames()
 			if (s.hva_ok) n_kf_max = std::max(n_kf_max, s.hva.get_c_frames());
 		m_player_cf = (n_kf_max <= 1) ? 1 : (n_kf_max - 1) * c_HVA_INTER + 1;
 	}
+
+	// Iso-grid margin (paletted SHP/WSA only). A building SHP's canvas is sized
+	// tight to the sprite, so a baked-in grid covers only the sprite's bounding
+	// box and gives no sense of where the footprint sits on the tile field.
+	// When a grid mode is active, enlarge every paletted frame with a
+	// background-filled border (~3 tiles each side; tiles are half as tall as
+	// wide in screen space, hence pad_y = pad_x / 2). The sprite is copied at
+	// (pad_x, pad_y); player_convert_frame_to_bgra fills the border as
+	// background and bakes the grid over it, anchoring the grid origin to the
+	// original sprite via m_player_pad_*. VXL keeps its per-paint grid (no pad).
+	m_player_pad_x = 0;
+	m_player_pad_y = 0;
+	if (m_player_grid_mode > 0 && m_ft != ft_vxl && !m_player_frames.empty() &&
+		m_player_cx > 0 && m_player_cy > 0)
+	{
+		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
+		const int pad_x = 3 * tileW;
+		const int pad_y = 3 * tileW / 2;
+		const int new_cx = m_player_cx + 2 * pad_x;
+		const int new_cy = m_player_cy + 2 * pad_y;
+		const int old_cx = m_player_cx;
+		const int old_cy = m_player_cy;
+		const byte bg = static_cast<byte>(m_player_bg_idx);
+		for (auto& fr : m_player_frames)
+		{
+			Cvirtual_binary v;
+			byte* w = v.write_start(new_cx * new_cy);
+			memset(w, bg, new_cx * new_cy);
+			const byte* src = fr.data();
+			for (int y = 0; y < old_cy; y++)
+				memcpy(w + (y + pad_y) * new_cx + pad_x, src + y * old_cx, old_cx);
+			fr = v;
+		}
+		m_player_pad_x = pad_x;
+		m_player_pad_y = pad_y;
+		m_player_cx = new_cx;
+		m_player_cy = new_cy;
+	}
 }
 
 void CXCCFileView::notify_palette_changed()
@@ -4118,8 +4156,13 @@ void CXCCFileView::player_convert_frame_to_bgra(int frame_idx, DWORD* dst) const
 	{
 		const int cy_s = m_player_cy;
 		const int tileW = (m_player_grid_mode == 1) ? 48 : 60;
+		// Anchor the iso origin to the original sprite's bottom-center, not the
+		// padded canvas: horizontal pad is symmetric so cx_s/2 still lands on
+		// the sprite center, but the bottom moved up by m_player_pad_y. This
+		// keeps the grid passing through exactly the same sprite pixels as the
+		// unpadded view — the border just extends the lattice outward.
 		const int gcx = cx_s / 2;
-		const int gcy = cy_s;
+		const int gcy = cy_s - m_player_pad_y;
 		const DWORD line = 0x00FFFFFF;
 		for (int py = 0; py < cy_s; py++)
 		{
@@ -7988,7 +8031,18 @@ void CXCCFileView::OnPlayerGridSel()
 	// memcpy + StretchBlt). Bump version + re-prefill so the next animation
 	// tick is a hit. VXL gets its grid drawn per-paint (no SHP cache there).
 	m_player_bgra_version++;
-	if (m_player_mode && !is_vxl_view()) player_prefill_bgra_cache();
+	if (m_player_mode && !is_vxl_view())
+	{
+		// The grid margin changes the paletted canvas size, so re-decode (cheap
+		// for SHP/WSA) to add / resize (TS<->RA2 tile size) / drop the border.
+		// reload_palette = false: a user Load PAL must survive the toggle.
+		player_decode_frames(false);
+		if (m_player_frame >= m_player_cf)
+			m_player_frame = std::max(0, m_player_cf - 1);
+		m_player_pan_x = 0;
+		m_player_pan_y = 0;
+		player_prefill_bgra_cache();
+	}
 	CRect cr; GetClientRect(&cr); cr.bottom -= player_band_h();
 	if (cr.bottom < cr.top) cr.bottom = cr.top;
 	InvalidateRect(&cr, FALSE);

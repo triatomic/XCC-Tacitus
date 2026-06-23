@@ -245,7 +245,7 @@ protected:
 	void update_player_hover_help(CWnd* pWnd);
 	const char* m_last_hover_help = nullptr;
 	int player_total_frames() const;
-	void player_decode_frames();
+	void player_decode_frames(bool reload_palette = true);
 	void player_draw(CDC* pDC);
 
 	bool m_player_mode = false;
@@ -313,6 +313,14 @@ protected:
 	int m_player_side_idx = -1;     // -1 = no remap; 0..7 = preset; 8 = custom
 	COLORREF m_player_side_custom_color = RGB(0xff, 0xff, 0xff);
 	int m_player_grid_mode = 0;     // 0 = none, 1 = TS (48px), 2 = RA2 (60px)
+	// When a grid mode is active the paletted SHP/WSA canvas is enlarged with a
+	// background-filled border so the iso grid extends past the sprite (small
+	// building canvases otherwise gave no sense of footprint placement). The
+	// sprite is offset by (pad_x, pad_y) into the padded canvas; the grid origin
+	// is anchored back to the original sprite bottom-center via these. 0 when no
+	// grid / VXL (VXL draws its grid per-paint, no padding).
+	int m_player_pad_x = 0;
+	int m_player_pad_y = 0;
 
 	// VXL-only parallel of the SHP side-color swatches. Kept separate from the
 	// SHP set so toggling house color on a VXL doesn't leak state into a SHP
