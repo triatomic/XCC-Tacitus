@@ -295,6 +295,10 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_WM_SETFOCUS()
 	ON_WM_NCCALCSIZE()
 	ON_WM_NCPAINT()
+	ON_NOTIFY_REFLECT(LVN_BEGINDRAG, OnBeginDrag)
+	ON_WM_MOUSEMOVE()
+	ON_WM_LBUTTONUP()
+	ON_WM_CAPTURECHANGED()
 END_MESSAGE_MAP()
 
 enum t_error_message
@@ -1344,6 +1348,131 @@ void CXCCMixerView::OnXButtonUp(UINT nFlags, UINT nButton, CPoint point)
 		CListView::OnXButtonUp(nFlags, nButton, point);
 }
 
+// ===========================================================================
+// Cross-pane drag & drop
+//
+// The listview already selects the item on button-down, then fires LVN_BEGINDRAG
+// when the user starts dragging it. We take over with a manual CImageList drag:
+// the ghost image is locked to the desktop window so it can cross the splitter
+// into the other pane. On button-up, if the cursor sits over the OTHER mix pane,
+// the snapshotted selection is handed to copy_as(-1) -- the same raw-copy path
+// the right-click "Copy" command uses, which extracts from a MIX source, writes
+// to a folder destination, and inserts into a MIX destination as appropriate.
+// No temp files, no OLE / CF_HDROP marshalling.
+// ===========================================================================
+
+CXCCMixerView* CXCCMixerView::pane_under_point(CPoint screen) const
+{
+	CWnd* w = WindowFromPoint(screen);
+	while (w)
+	{
+		HWND h = w->GetSafeHwnd();
+		if (h == GetSafeHwnd())
+			return const_cast<CXCCMixerView*>(this);
+		if (m_other_pane && h == m_other_pane->GetSafeHwnd())
+			return m_other_pane;
+		w = w->GetParent();
+	}
+	return nullptr;
+}
+
+void CXCCMixerView::cancel_drag_visual()
+{
+	if (!m_dragging)
+		return;
+	m_dragging = false;
+	CImageList::DragLeave(CWnd::GetDesktopWindow());
+	CImageList::EndDrag();
+	delete m_drag_image;
+	m_drag_image = nullptr;
+}
+
+void CXCCMixerView::OnBeginDrag(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	NM_LISTVIEW* nm = reinterpret_cast<NM_LISTVIEW*>(pNMHDR);
+	// Need a real, draggable selection and a second pane to drop on. can_delete()
+	// populates m_index_selected from the listview selection and rejects the
+	// anchor rows ("..", "Browse...", drives), which we must never drag/copy.
+	if (m_dragging || !m_other_pane || !can_delete() || m_index_selected.empty())
+		return;
+	m_drag_sel = m_index_selected;
+
+	CPoint origin;
+	m_drag_image = GetListCtrl().CreateDragImage(nm->iItem, &origin);
+	if (!m_drag_image)
+	{
+		m_drag_sel.clear();
+		return;
+	}
+	// Hotspot = cursor offset within the item image at drag start. The ghost is
+	// locked to the desktop, so DragEnter/DragMove use screen coordinates.
+	CPoint action(nm->ptAction);
+	m_drag_image->BeginDrag(0, CPoint(action.x - origin.x, action.y - origin.y));
+	CPoint screen(action);
+	ClientToScreen(&screen);
+	m_drag_image->DragEnter(CWnd::GetDesktopWindow(), screen);
+	SetCapture();
+	m_dragging = true;
+}
+
+void CXCCMixerView::OnMouseMove(UINT nFlags, CPoint point)
+{
+	if (m_dragging)
+	{
+		// Manual capture doesn't auto-handle Escape -- cancel the drag on it.
+		if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+		{
+			m_drag_sel.clear();
+			ReleaseCapture();   // -> OnCaptureChanged tears down the visual; no drop
+			return;
+		}
+		CPoint screen(point);
+		ClientToScreen(&screen);
+		CImageList::DragMove(screen);
+		// Feedback: a plain arrow over a valid drop pane, "no" elsewhere. We hold
+		// capture, so WM_SETCURSOR doesn't fire -- set it here each move.
+		::SetCursor(::LoadCursor(NULL, pane_under_point(screen) == m_other_pane ? IDC_ARROW : IDC_NO));
+		return;
+	}
+	CListView::OnMouseMove(nFlags, point);
+}
+
+void CXCCMixerView::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_dragging)
+	{
+		CPoint screen(point);
+		ClientToScreen(&screen);
+		CXCCMixerView* target = pane_under_point(screen);
+		cancel_drag_visual();            // clears m_dragging, tears down the image list
+		if (GetCapture() == this)
+			ReleaseCapture();
+		::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+		if (target == m_other_pane && !m_drag_sel.empty())
+		{
+			m_index_selected = m_drag_sel;
+			copy_as(static_cast<t_file_type>(-1));   // raw copy into the other pane
+		}
+		m_drag_sel.clear();
+		return;
+	}
+	CListView::OnLButtonUp(nFlags, point);
+}
+
+void CXCCMixerView::OnCaptureChanged(CWnd* pWnd)
+{
+	// Capture yanked away mid-drag (Escape release, focus steal, a popup, ...):
+	// abort the visual without performing a drop.
+	if (m_dragging)
+	{
+		cancel_drag_visual();
+		m_drag_sel.clear();
+		::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+	}
+	CListView::OnCaptureChanged(pWnd);
+}
+
 void CXCCMixerView::clear_list()
 {
 	GetListCtrl().DeleteAllItems();
@@ -1642,6 +1771,7 @@ void CXCCMixerView::OnColumnclick(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CXCCMixerView::OnDestroy()
 {
+	cancel_drag_visual();   // safety: don't leak the drag image if torn down mid-drag
 	AfxGetApp()->WriteProfileString(m_reg_key, "path", m_dir.c_str());
 	close_all_locations();
 }
@@ -2223,6 +2353,10 @@ void CXCCMixerView::copy_as(t_file_type ft)
 
 	CWaitCursor wait;
 	int error;
+	// Tally insert results so a MIX-destination drop/copy can report a clear
+	// summary -- the trailing OnPopupCompact() otherwise leaves "Compact done"
+	// as the last status, hiding whether anything was actually inserted.
+	int n_ok = 0, n_fail = 0;
 	for (auto& i : m_index_selected)
 	{
 		const Cfname fname = m_other_pane->get_dir() + find_ref(m_index, get_id(i)).name;
@@ -2248,13 +2382,18 @@ void CXCCMixerView::copy_as(t_file_type ft)
 					error = f.open(m_other_pane->m_mix_fname);
 					if (!error)
 					{
-						Cvirtual_binary d;
 						DWORD file_attributes = GetFileAttributes(fname.get_all().c_str());
 						if (file_attributes == INVALID_FILE_ATTRIBUTES || ~file_attributes & FILE_ATTRIBUTE_DIRECTORY)
 						{
-							Cvirtual_binary d;
-							if (!d.load(fname))
-								error = error ? f.insert(Cfname(fname).get_fname(), d) : f.insert(Cfname(fname).get_fname(), d), error;
+							// Source-aware bytes: get_vdata reads from the source MIX
+							// when this pane is a MIX, or from disk for a folder source.
+							// d.load(fname) only worked for folder sources (a MIX
+							// entry has no on-disk path), so MIX->MIX never inserted.
+							Cvirtual_binary d = get_vdata(i);
+							if (d.data() && d.size() > 0)
+								error = f.insert(Cfname(fname).get_fname(), d);
+							else
+								error = 1;
 						}
 						else
 							error = error ? big_insert_dir(f, string(fname) + '/', Cfname(fname).get_fname() + '\\'), error : big_insert_dir(f, string(fname) + '/', Cfname(fname).get_fname() + '\\');
@@ -2270,9 +2409,11 @@ void CXCCMixerView::copy_as(t_file_type ft)
 					error = f.open(m_other_pane->m_mix_fname);
 					if (!error)
 					{
-						Cvirtual_binary d;
-						if (!d.load(fname))
-							error = error ? f.insert(Cfname(fname).get_fname(), d) : f.insert(Cfname(fname).get_fname(), d), error;
+						Cvirtual_binary d = get_vdata(i);   // source-aware (MIX or folder)
+						if (d.data() && d.size() > 0)
+							error = f.insert(Cfname(fname).get_fname(), d);
+						else
+							error = 1;
 						error = error ? f.write_index(), error : f.write_index();
 						f.close();
 					}
@@ -2284,9 +2425,11 @@ void CXCCMixerView::copy_as(t_file_type ft)
 					error = f.open(m_other_pane->m_mix_fname);
 					if (!error)
 					{
-						Cvirtual_binary d;
-						if (!d.load(fname))
-							error = error ? f.insert(Cfname(fname).get_fname(), d) : f.insert(Cfname(fname).get_fname(), d), error;
+						Cvirtual_binary d = get_vdata(i);   // source-aware (MIX or folder)
+						if (d.data() && d.size() > 0)
+							error = f.insert(Cfname(fname).get_fname(), d);
+						else
+							error = 1;
 						error = error ? f.write_index(), error : f.write_index();
 						f.close();
 					}
@@ -2294,9 +2437,15 @@ void CXCCMixerView::copy_as(t_file_type ft)
 			}
 			m_other_pane->edit_reopen(!error);
 			if (error)
+			{
+				n_fail++;
 				copy_failed(fname, error);
+			}
 			else
+			{
+				n_ok++;
 				copy_succeeded(fname);
+			}
 		}
 		else
 		{
@@ -2317,7 +2466,19 @@ void CXCCMixerView::copy_as(t_file_type ft)
 		update_list();
 	m_other_pane->update_list();
 	if (m_other_pane->m_mix_f)
+	{
 		m_other_pane->OnPopupCompact();
+		// OnPopupCompact left "Compact done" as the status; replace it with a
+		// summary of what was actually inserted so the user knows the files
+		// landed in the MIX (not just that a compact ran).
+		if (n_ok || n_fail)
+		{
+			string msg = "Inserted " + n(n_ok) + (n_ok == 1 ? " file" : " files");
+			if (n_fail)
+				msg += ", " + n(n_fail) + " failed";
+			set_msg(msg);
+		}
+	}
 }
 
 int CXCCMixerView::copy(int i, Cfname fname) const

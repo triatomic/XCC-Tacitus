@@ -244,6 +244,13 @@ protected:
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
 	afx_msg void OnNcPaint();
+	// Cross-pane drag & drop. LVN_BEGINDRAG starts a manual image-list drag; on
+	// button-up over the OTHER mix pane the snapshotted selection is handed to
+	// copy_as(-1) (the same raw-copy path the "Copy" command uses).
+	afx_msg void OnBeginDrag(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnCaptureChanged(CWnd* pWnd);
 	DECLARE_MESSAGE_MAP()
 public:
 	bool nav_go_up();
@@ -391,4 +398,19 @@ private:
 	int m_sort_column;
 	bool m_sort_reverse;
 	bool m_reading = false;
+
+	// --- Cross-pane drag & drop ---------------------------------------------
+	// Drag selected entries from this pane and drop them on the OTHER mix pane.
+	// On drop the existing raw-copy path (copy_as(-1)) runs, so a folder source
+	// extracts to the destination folder and a MIX destination inserts the
+	// bytes -- all four source/dest combinations reuse copy_as. Implemented with
+	// a manual CImageList drag (locked to the desktop so the ghost crosses the
+	// splitter) rather than OLE: no temp files, no CF_HDROP marshalling.
+	bool m_dragging = false;
+	CImageList* m_drag_image = nullptr;
+	vector<int> m_drag_sel;          // listview indices snapshotted at drag start
+	// Which mix pane (this or m_other_pane) sits under a screen point, or null.
+	CXCCMixerView* pane_under_point(CPoint screen) const;
+	// Tear down the drag visual (image list + m_dragging). Does NOT perform a drop.
+	void cancel_drag_visual();
 };
