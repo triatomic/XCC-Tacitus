@@ -299,6 +299,7 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
 	ON_WM_CAPTURECHANGED()
+	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 enum t_error_message
@@ -1473,6 +1474,145 @@ void CXCCMixerView::OnCaptureChanged(CWnd* pWnd)
 	CListView::OnCaptureChanged(pWnd);
 }
 
+// --- Auto-refresh (folder views) --------------------------------------------
+
+static const UINT_PTR k_watch_timer_id = 0x5743;   // per-view, arbitrary ('WC')
+
+void CXCCMixerView::arm_dir_watch()
+{
+	// Off via the Configure > Auto-refresh toggle, MIX panes (held in memory) and
+	// the pre-navigation empty state aren't watched.
+	if (!theme::auto_refresh() || m_mix_f || m_dir.empty())
+	{
+		stop_dir_watch();
+		return;
+	}
+	// Already watching this exact folder -- keep the live handle so our own
+	// auto-refresh doesn't tear it down and rebuild it every change.
+	if (m_watch_handle != INVALID_HANDLE_VALUE && m_watch_dir == m_dir)
+		return;
+	stop_dir_watch();
+	HANDLE h = FindFirstChangeNotification(m_dir.c_str(), FALSE,
+		FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+		FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE |
+		FILE_NOTIFY_CHANGE_ATTRIBUTES);
+	if (h == INVALID_HANDLE_VALUE)
+		return;   // unwatchable volume (some network/removable): manual Refresh still works
+	m_watch_handle = h;
+	m_watch_dir = m_dir;
+	m_watch_pending = false;
+	if (!m_watch_timer)
+		m_watch_timer = (SetTimer(k_watch_timer_id, 500, nullptr) != 0);
+}
+
+void CXCCMixerView::stop_dir_watch()
+{
+	if (m_watch_handle != INVALID_HANDLE_VALUE)
+	{
+		FindCloseChangeNotification(m_watch_handle);
+		m_watch_handle = INVALID_HANDLE_VALUE;
+	}
+	m_watch_dir.clear();
+	m_watch_pending = false;
+	if (m_watch_timer)
+	{
+		KillTimer(k_watch_timer_id);
+		m_watch_timer = false;
+	}
+}
+
+void CXCCMixerView::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == k_watch_timer_id)
+	{
+		if (m_watch_handle != INVALID_HANDLE_VALUE)
+		{
+			if (WaitForSingleObject(m_watch_handle, 0) == WAIT_OBJECT_0)
+			{
+				// A change landed. Re-arm for the next one and defer the rebuild
+				// to the first quiet tick, so a burst (a large copy, an archive
+				// extraction) collapses into a single refresh once it settles.
+				FindNextChangeNotification(m_watch_handle);
+				m_watch_pending = true;
+			}
+			else if (m_watch_pending && !m_dragging)
+			{
+				m_watch_pending = false;
+				refresh_preserving();
+			}
+		}
+		return;
+	}
+	CListView::OnTimer(nIDEvent);
+}
+
+void CXCCMixerView::refresh_preserving()
+{
+	if (m_mix_f)   // only folders are watched; guard anyway
+		return;
+	CListCtrl& lc = GetListCtrl();
+	// Snapshot selection + focus by id (stable across the rebuild) and the scroll
+	// position by top row, so an automatic refresh doesn't yank the user's place.
+	vector<int> sel_ids;
+	int focus_id = -1;
+	int i = lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+	while (i != -1)
+	{
+		sel_ids.push_back(lc.GetItemData(i));
+		i = lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED);
+	}
+	int f = lc.GetNextItem(-1, LVNI_FOCUSED);
+	if (f != -1)
+		focus_id = lc.GetItemData(f);
+	int top = lc.GetTopIndex();
+	int per_page = lc.GetCountPerPage();
+
+	// Re-read the folder without disturbing the filter or sort, then rebuild the
+	// (possibly filtered) rows in the current sort order. m_reading drives OnIdle
+	// to re-resolve file types of any newly seen entries.
+	read_dir_into_index();
+	SetRedraw(false);
+	lc.DeleteAllItems();
+	insert_filtered_rows();
+	sort_list(m_sort_column < 0 ? 1 : m_sort_column, m_sort_reverse);
+
+	// Restore selection + focus by matching item data. Preview is suppressed so a
+	// background pane's refresh doesn't hijack the file-view pane.
+	m_suppress_sel_preview = true;
+	int n = lc.GetItemCount();
+	int focus_row = -1;
+	for (int r = 0; r < n; r++)
+	{
+		int id = lc.GetItemData(r);
+		if (id == focus_id)
+		{
+			lc.SetItemState(r, LVIS_FOCUSED, LVIS_FOCUSED);
+			focus_row = r;
+		}
+		for (int s : sel_ids)
+		{
+			if (s == id)
+			{
+				lc.SetItemState(r, LVIS_SELECTED, LVIS_SELECTED);
+				break;
+			}
+		}
+	}
+	m_suppress_sel_preview = false;
+	SetRedraw(true);
+
+	// Restore scroll: pin the previous top row, then keep the focused row visible.
+	if (n > 0)
+	{
+		lc.EnsureVisible(min(top + per_page - 1, n - 1), FALSE);
+		lc.EnsureVisible(min(top, n - 1), FALSE);
+		if (focus_row != -1)
+			lc.EnsureVisible(focus_row, FALSE);
+	}
+	lc.Invalidate();
+	m_reading = true;
+}
+
 void CXCCMixerView::clear_list()
 {
 	GetListCtrl().DeleteAllItems();
@@ -1535,58 +1675,7 @@ void CXCCMixerView::update_list()
 		}
 	}
 	else
-	{
-		m_game = game_ts;
-		e.name = "Browse...";
-		e.ft = ft_drive;
-		e.size = "";
-		e.description = "";
-		m_index[0] = e;
-		//int drivemap = GetLogicalDrives();
-		//char drive_name[] = "a:\\";
-		//for (int i = 0; i < 26; i++)
-		//{
-		//	if (drivemap >> i & 1)
-		//	{
-		//		e.name = drive_name;
-		//		e.ft = ft_drive;
-		//		e.size = "";
-		//		e.description = "";
-		//		m_index[Cmix_file::get_id(get_game(), e.name)] = e;
-		//	}
-		//	drive_name[0]++;
-		//}
-		WIN32_FIND_DATA finddata;
-		HANDLE findhandle = FindFirstFile((m_dir + "*").c_str(), &finddata);
-		if (findhandle != INVALID_HANDLE_VALUE)
-		{
-			Ccc_file f(false);
-			do
-			{
-				e.name = finddata.cFileName;
-				e.size = "";
-				e.size_bytes = 0;
-				if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-				{
-					if (e.name == ".")
-						continue;
-					e.ft = ft_dir;
-					e.size_bytes = -1;
-				}
-				else
-				{
-					e.ft = static_cast<t_file_type>(-1);
-					e.size_bytes = (static_cast<long long>(finddata.nFileSizeHigh) << 32) | finddata.nFileSizeLow;
-					e.size = totalSize(e.size_bytes);
-				}
-				int id = Cmix_file::get_id(get_game(), finddata.cFileName);
-				e.description = mix_database::get_description(get_game(), id);
-				m_index[id] = e;
-			}
-			while (FindNextFile(findhandle, &finddata));
-			FindClose(findhandle);
-		}
-	}
+		read_dir_into_index();
 	SetRedraw(false);
 	insert_filtered_rows();
 	sort_list(1, false);
@@ -1600,6 +1689,56 @@ void CXCCMixerView::update_list()
 	// doesn't stomp the focused pane's edit.
 	if (CMainFrame* mf = GetMainFrame())
 		mf->sync_filter_ui();
+	// (Re)point the directory watcher at this location: a folder arms a watch on
+	// m_dir, a MIX stops it. Navigation always funnels through update_list, so
+	// this keeps the watch following wherever the pane goes.
+	arm_dir_watch();
+}
+
+void CXCCMixerView::read_dir_into_index()
+{
+	// Folder branch of update_list, factored out: rebuild m_index from the
+	// on-disk listing of m_dir. Does NOT touch the filter, sort or selection so
+	// the auto-refresh can re-read silently. File types are left as the -1
+	// placeholder and resolved lazily by OnIdle while m_reading is set.
+	m_index.clear();
+	m_game = game_ts;
+	m_palette_loaded = false;
+	t_index_entry e;
+	e.name = "Browse...";
+	e.ft = ft_drive;
+	e.size = "";
+	e.description = "";
+	m_index[0] = e;
+	WIN32_FIND_DATA finddata;
+	HANDLE findhandle = FindFirstFile((m_dir + "*").c_str(), &finddata);
+	if (findhandle != INVALID_HANDLE_VALUE)
+	{
+		do
+		{
+			e.name = finddata.cFileName;
+			e.size = "";
+			e.size_bytes = 0;
+			if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			{
+				if (e.name == ".")
+					continue;
+				e.ft = ft_dir;
+				e.size_bytes = -1;
+			}
+			else
+			{
+				e.ft = static_cast<t_file_type>(-1);
+				e.size_bytes = (static_cast<long long>(finddata.nFileSizeHigh) << 32) | finddata.nFileSizeLow;
+				e.size = totalSize(e.size_bytes);
+			}
+			int id = Cmix_file::get_id(get_game(), finddata.cFileName);
+			e.description = mix_database::get_description(get_game(), id);
+			m_index[id] = e;
+		}
+		while (FindNextFile(findhandle, &finddata));
+		FindClose(findhandle);
+	}
 }
 
 void CXCCMixerView::insert_filtered_rows()
@@ -1772,6 +1911,7 @@ void CXCCMixerView::OnColumnclick(NMHDR* pNMHDR, LRESULT* pResult)
 void CXCCMixerView::OnDestroy()
 {
 	cancel_drag_visual();   // safety: don't leak the drag image if torn down mid-drag
+	stop_dir_watch();       // close the folder-watch handle + kill its timer
 	AfxGetApp()->WriteProfileString(m_reg_key, "path", m_dir.c_str());
 	close_all_locations();
 }
@@ -1787,6 +1927,13 @@ void CXCCMixerView::OnDblclk(NMHDR* pNMHDR, LRESULT* pResult)
 void CXCCMixerView::OnItemchanged(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	NM_LISTVIEW* pNMListView = reinterpret_cast<NM_LISTVIEW*>(pNMHDR);
+	// Programmatic re-selection during an auto-refresh must not re-open the
+	// preview (it would steal the file-view pane from the active pane).
+	if (m_suppress_sel_preview)
+	{
+		*pResult = 0;
+		return;
+	}
 	if (pNMListView->uNewState & LVIS_FOCUSED)
 	{
 		LV_ITEM lvi;

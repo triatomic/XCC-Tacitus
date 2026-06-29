@@ -273,6 +273,7 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Use &External Programs",      ID_THEME_USE_EXTERNAL_PROGRAMS
         MENUITEM "&Parallel Extract",           ID_THEME_PARALLEL_EXTRACT
+        MENUITEM "&Auto-refresh",               ID_THEME_AUTO_REFRESH
         POPUP "&Settings Directory"
         BEGIN
             MENUITEM "&AppData",                    ID_SETTINGS_DIR_APPDATA
@@ -853,6 +854,8 @@ BEGIN
     ID_THEME_VXL_SHADING    "Toggle camera-relative directional lighting on voxel models"
     ID_THEME_PARALLEL_EXTRACT
                             "Extract batch selections in parallel (faster on SSDs)"
+    ID_THEME_AUTO_REFRESH
+                            "Auto-refresh folder panes when files change on disk (MIX panes unaffected)"
     ID_FILE_RELOAD_MIX_DB   "Reload the global mix names database from disk (or embedded fallback)"
 END
 

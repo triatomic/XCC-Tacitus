@@ -1629,6 +1629,7 @@
 #define ID_SHADOW_TRANSPARENT           41043
 #define ID_SHADOW_TRANSPARENT_32        41044
 #define ID_SHADOW_TRANSPARENT_PNG       41045
+#define ID_THEME_AUTO_REFRESH           41064
 
 // Next default values for new objects
 // 

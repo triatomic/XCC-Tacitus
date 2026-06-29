@@ -251,6 +251,8 @@ protected:
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnCaptureChanged(CWnd* pWnd);
+	// Polls the folder-watch handle (see m_watch_handle) on a low-frequency timer.
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	DECLARE_MESSAGE_MAP()
 public:
 	bool nav_go_up();
@@ -260,6 +262,11 @@ public:
 	// VXL full-hierarchy auto-load checking the opposite pane's MIX for a
 	// sibling `<base>tur.vxl` that's missing from the body's source MIX.
 	Cmix_file* current_mix() const { return m_mix_f; }
+
+	// Re-evaluate the folder watch after the global Auto-refresh setting toggles:
+	// arms a watch on the current folder when on, tears it down when off (or for
+	// a MIX pane). Called by CMainFrame::OnThemeAutoRefresh for both panes.
+	void apply_auto_refresh_setting() { arm_dir_watch(); }
 
 	// Ordered, human-readable segments of this pane's current location, from
 	// root (leftmost) to current (rightmost) — drives the frame's breadcrumb.
@@ -413,4 +420,31 @@ private:
 	CXCCMixerView* pane_under_point(CPoint screen) const;
 	// Tear down the drag visual (image list + m_dragging). Does NOT perform a drop.
 	void cancel_drag_visual();
+
+	// --- Auto-refresh (folder views) ----------------------------------------
+	// Folder panes watch their directory and rebuild the list when files appear,
+	// vanish, are renamed or resized on disk -- no manual Refresh needed. Uses a
+	// FindFirstChangeNotification handle polled from a low-frequency timer (no
+	// worker thread); a one-tick debounce coalesces bursts (e.g. a large copy or
+	// an archive extraction). MIX panes are NOT watched: the archive is held in
+	// memory and in-Mixer edits already refresh the view, while reloading an open
+	// MIX from disk could fight pending edits.
+	HANDLE m_watch_handle = INVALID_HANDLE_VALUE;
+	string m_watch_dir;            // directory m_watch_handle currently watches
+	bool m_watch_pending = false;  // a change was seen; refresh on next quiet tick
+	bool m_watch_timer = false;    // the polling timer is running
+	// While true, OnItemchanged skips opening the preview -- set around the
+	// programmatic re-selection in refresh_preserving so a background folder's
+	// auto-refresh doesn't steal the preview pane from the active pane.
+	bool m_suppress_sel_preview = false;
+	// Point the watch at the current location: folder => (re)arm on m_dir, MIX or
+	// pre-navigation empty state => stop. Idempotent for the same folder.
+	void arm_dir_watch();
+	void stop_dir_watch();
+	// Fill m_index from the on-disk m_dir (the folder branch of update_list,
+	// factored out so the auto-refresh can re-read without resetting the filter).
+	void read_dir_into_index();
+	// Rebuild a folder list in place, preserving selection + focus (by id), the
+	// active filter, the sort order and the scroll position.
+	void refresh_preserving();
 };

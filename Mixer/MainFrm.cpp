@@ -281,6 +281,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_VXL_LIGHTING, OnThemeVxlLighting)
 	ON_COMMAND(ID_THEME_PARALLEL_EXTRACT, OnThemeParallelExtract)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
+	ON_COMMAND(ID_THEME_AUTO_REFRESH, OnThemeAutoRefresh)
+	ON_UPDATE_COMMAND_UI(ID_THEME_AUTO_REFRESH, OnUpdateThemeAutoRefresh)
 	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
 	ON_UPDATE_COMMAND_UI(ID_THEME_LIMIT_VXL_CPU, OnUpdateThemeLimitVxlCpu)
 	ON_COMMAND(ID_THEME_VXL_FULL_HIER, OnThemeVxlFullHier)
@@ -2966,6 +2968,17 @@ void CMainFrame::OnThemeParallelExtract()
 }
 
 void CMainFrame::OnUpdateThemeParallelExtract(CCmdUI* p) { p->SetCheck(theme::parallel_extract()); }
+
+void CMainFrame::OnThemeAutoRefresh()
+{
+	theme::set_auto_refresh(!theme::auto_refresh());
+	// Re-evaluate both panes: a folder pane arms or tears down its watch to match.
+	for (CXCCMixerView* pane : { m_left_mix_pane, m_right_mix_pane })
+		if (pane)
+			pane->apply_auto_refresh_setting();
+}
+
+void CMainFrame::OnUpdateThemeAutoRefresh(CCmdUI* p) { p->SetCheck(theme::auto_refresh()); }
 
 void CMainFrame::OnThemeLimitVxlCpu()
 {

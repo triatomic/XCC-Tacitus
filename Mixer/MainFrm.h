@@ -507,6 +507,8 @@ protected:
 	afx_msg void OnThemeVxlLighting();
 	afx_msg void OnThemeParallelExtract();
 	afx_msg void OnUpdateThemeParallelExtract(CCmdUI* pCmdUI);
+	afx_msg void OnThemeAutoRefresh();
+	afx_msg void OnUpdateThemeAutoRefresh(CCmdUI* pCmdUI);
 	afx_msg void OnThemeLimitVxlCpu();
 	afx_msg void OnUpdateThemeLimitVxlCpu(CCmdUI* pCmdUI);
 	afx_msg void OnThemeVxlFullHier();

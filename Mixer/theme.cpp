@@ -106,6 +106,7 @@ namespace theme
 		int g_vxl_splat_pad_extra = 0;
 		vxl_light_frame g_vxl_light_frame = vlf_camera_fixed;
 		bool g_parallel_extract = true;
+		bool g_auto_refresh = true;
 		bool g_shp_transparency = false;
 		COLORREF g_alpha_color = RGB(0, 255, 0);
 		bool g_use_checkerboard = true;
@@ -314,6 +315,7 @@ namespace theme
 			g_vxl_light_frame = (v == vlf_world_fixed) ? vlf_world_fixed : vlf_camera_fixed;
 		}
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
+		g_auto_refresh = AfxGetApp()->GetProfileInt("Theme", "auto_refresh", 1) != 0;
 		create_brushes();
 	}
 
@@ -360,6 +362,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_splat_pad_extra", g_vxl_splat_pad_extra);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_frame", static_cast<int>(g_vxl_light_frame));
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "auto_refresh", g_auto_refresh ? 1 : 0);
 	}
 
 	mode get() { return g_mode; }
@@ -749,6 +752,16 @@ namespace theme
 		if (g_parallel_extract == v)
 			return;
 		g_parallel_extract = v;
+		save();
+	}
+
+	bool auto_refresh() { return g_auto_refresh; }
+
+	void set_auto_refresh(bool v)
+	{
+		if (g_auto_refresh == v)
+			return;
+		g_auto_refresh = v;
 		save();
 	}
 

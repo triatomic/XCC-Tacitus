@@ -388,6 +388,12 @@ namespace theme
 	bool parallel_extract();
 	void set_parallel_extract(bool v);
 
+	// When on, folder panes watch their directory and auto-refresh the listing as
+	// files appear/vanish/change on disk (FindFirstChangeNotification polled on a
+	// timer). MIX panes are unaffected. Default on; persisted to the INI.
+	bool auto_refresh();
+	void set_auto_refresh(bool v);
+
 	// When on, paletted Westwood images (SHP/PCX/CPS/WSA) treat palette index 0
 	// as transparent — the engine convention. Off = paint index 0 with whatever
 	// color the palette says, like older XCC builds.
