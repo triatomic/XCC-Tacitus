@@ -214,6 +214,8 @@ protected:
 	afx_msg void OnPopupClipboardPasteAsJpeg();
 	afx_msg void OnPopupExplore();
 	afx_msg void OnUpdatePopupExplore(CCmdUI* pCmdUI);
+	afx_msg void OnPopupBookmark();
+	afx_msg void OnUpdatePopupBookmark(CCmdUI* pCmdUI);
 	afx_msg void OnGetdispinfo(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 	afx_msg void OnPopupCompact();

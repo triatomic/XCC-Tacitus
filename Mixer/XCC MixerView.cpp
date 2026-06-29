@@ -8,6 +8,7 @@
 #include "AudioPlayerDlg.h"
 #include "keybinds.h"
 #include "recents.h"
+#include "bookmarks.h"
 #include "resource.h"
 #include "XSTE_dlg.h"
 #include <algorithm>
@@ -268,6 +269,8 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_COMMAND(ID_POPUP_CLIPBOARD_PASTE_AS_JPEG, OnPopupClipboardPasteAsJpeg)
 	ON_COMMAND(ID_POPUP_EXPLORE, OnPopupExplore)
 	ON_UPDATE_COMMAND_UI(ID_POPUP_EXPLORE, OnUpdatePopupExplore)
+	ON_COMMAND(ID_POPUP_BOOKMARK, OnPopupBookmark)
+	ON_UPDATE_COMMAND_UI(ID_POPUP_BOOKMARK, OnUpdatePopupBookmark)
 	ON_NOTIFY_REFLECT(LVN_GETDISPINFO, OnGetdispinfo)
 	ON_WM_DROPFILES()
 	ON_COMMAND(ID_POPUP_COMPACT, OnPopupCompact)
@@ -4344,6 +4347,42 @@ void CXCCMixerView::OnPopupExplore()
 void CXCCMixerView::OnUpdatePopupExplore(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(!m_mix_f);
+}
+
+// Right-click bookmark toggle. Operates on THIS pane (the one right-clicked,
+// which is the active view by the time the popup shows): bookmarks its current
+// MIX root path / folder, or removes it if already bookmarked.
+void CXCCMixerView::OnPopupBookmark()
+{
+	std::string cur = nav_current_path();
+	if (cur.empty())
+		return;
+	CMainFrame* mf = GetMainFrame();
+	if (bookmarks::contains(cur))
+	{
+		bookmarks::remove(cur);
+		if (mf) mf->set_msg(("Removed bookmark: " + cur).c_str());
+	}
+	else
+	{
+		bookmarks::add(cur);
+		if (mf) mf->set_msg(("Bookmarked: " + cur).c_str());
+	}
+}
+
+void CXCCMixerView::OnUpdatePopupBookmark(CCmdUI* pCmdUI)
+{
+	std::string cur = nav_current_path();
+	if (cur.empty())
+	{
+		pCmdUI->Enable(FALSE);
+		pCmdUI->SetText("Bookmark This Location");
+		return;
+	}
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetText(bookmarks::contains(cur)
+		? "Remove This Location from Bookmarks"
+		: "Bookmark This Location");
 }
 
 void CXCCMixerView::OnPopupRefresh()

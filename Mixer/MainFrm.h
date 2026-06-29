@@ -524,6 +524,9 @@ protected:
 	afx_msg void OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu);
 	afx_msg void OnFileRecent(UINT id);
 	afx_msg void OnFileRecentClear();
+	afx_msg void OnFileBookmark(UINT id);
+	afx_msg void OnFileBookmarkAdd();
+	afx_msg void OnFileBookmarkClear();
 
 	// Replace the frame's accelerator table with one built from current
 	// keybinds. Safe to call repeatedly; frees the old table.

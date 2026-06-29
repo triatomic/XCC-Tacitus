@@ -17,6 +17,7 @@
 #include "KeybindsDlg.h"
 #include "keybinds.h"
 #include "recents.h"
+#include "bookmarks.h"
 #include "SelectPaletteDlg.h"
 #include "VxlLightingDlg.h"
 #include "string_conversion.h"
@@ -83,6 +84,9 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_VIEW_PALETTE_PAL000, ID_VIEW_PALETTE_PAL999, OnUpdateViewPalette)
 	ON_COMMAND_RANGE(ID_FILE_RECENT_00, ID_FILE_RECENT_LAST, OnFileRecent)
 	ON_COMMAND(ID_FILE_RECENT_CLEAR, OnFileRecentClear)
+	ON_COMMAND_RANGE(ID_FILE_BOOKMARK_00, ID_FILE_BOOKMARK_LAST, OnFileBookmark)
+	ON_COMMAND(ID_FILE_BOOKMARK_ADD, OnFileBookmarkAdd)
+	ON_COMMAND(ID_FILE_BOOKMARK_CLEAR, OnFileBookmarkClear)
 	ON_WM_INITMENUPOPUP()
 	ON_WM_CREATE()
 	ON_WM_SIZE()
@@ -368,6 +372,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 	theme::apply_titlebar(GetSafeHwnd());
 	recents::load();
+	bookmarks::load();
 	rebuild_menu_owner_draw();
 	// Load user-overridden keybinds from registry; defer the accel table
 	// rebuild until after LoadFrame finishes. LoadFrame calls Create (which
@@ -3417,36 +3422,129 @@ void CMainFrame::OnKeybindsConfigure()
 	}
 }
 
-// Rebuild the File > Recents popup just before it is shown so the list always
-// reflects the latest recents::list(). Identified by a stable sentinel item
-// (ID_FILE_RECENT_00) that the .rc template seeds; we never address the popup
-// by position. After rebuild, set_menu_owner_draw is re-applied so freshly
-// inserted items get the dark-mode treatment.
+// Escape '&' so a literal ampersand in a path doesn't become a menu mnemonic.
+static std::string amp_escape(const std::string& s)
+{
+	std::string r;
+	for (char c : s) { if (c == '&') r += '&'; r += c; }
+	return r;
+}
+
+// Split a path into a display leaf + parent-folder label for menu rows. Folder
+// paths arrive with a trailing slash (m_dir); strip one so the leaf is the
+// folder name rather than empty.
+static void split_path_label(std::string full, std::string& leaf, std::string& parent)
+{
+	if (!full.empty() && (full.back() == '\\' || full.back() == '/'))
+		full.pop_back();
+	std::string::size_type slash = full.find_last_of("\\/");
+	leaf = (slash == std::string::npos) ? full : full.substr(slash + 1);
+	parent.clear();
+	if (slash != std::string::npos)
+	{
+		parent = full.substr(0, slash);
+		std::string::size_type s2 = parent.find_last_of("\\/");
+		if (s2 != std::string::npos)
+			parent = parent.substr(s2 + 1);
+	}
+}
+
+// Rebuild the File > Recents and File > Bookmarks popups just before they show
+// so each reflects the latest list(). Identified by the presence of a recents
+// or bookmark id (sentinels the .rc template seeds), never by position. Native
+// popups render in the dark palette via SetPreferredAppMode, so no
+// rebuild_menu_owner_draw call here (it flashes the bar white).
 void CMainFrame::OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu)
 {
 	CFrameWnd::OnInitMenuPopup(pPopupMenu, nIndex, bSysMenu);
 	if (bSysMenu || !pPopupMenu || !pPopupMenu->GetSafeHmenu())
 		return;
 	HMENU hm = pPopupMenu->GetSafeHmenu();
-	// Match by presence of any recents id rather than position.
+	// Match by presence of a recents/bookmark id rather than position.
 	bool is_recents = false;
+	bool is_bookmarks = false;
 	int n = ::GetMenuItemCount(hm);
 	for (int i = 0; i < n; i++)
 	{
 		UINT id = ::GetMenuItemID(hm, i);
 		if (id == ID_FILE_RECENT_CLEAR ||
 			(id >= ID_FILE_RECENT_00 && id <= static_cast<UINT>(ID_FILE_RECENT_LAST)))
-		{
 			is_recents = true;
-			break;
-		}
+		else if (id == ID_FILE_BOOKMARK_ADD || id == ID_FILE_BOOKMARK_CLEAR ||
+			(id >= ID_FILE_BOOKMARK_00 && id <= static_cast<UINT>(ID_FILE_BOOKMARK_LAST)))
+			is_bookmarks = true;
 	}
-	if (!is_recents)
+	if (!is_recents && !is_bookmarks)
 		return;
 
 	// Wipe and repopulate.
 	while (::GetMenuItemCount(hm) > 0)
 		::RemoveMenu(hm, 0, MF_BYPOSITION);
+
+	if (is_bookmarks)
+	{
+		// "Add current location" item, with inline enabled/grayed state. The base
+		// OnInitMenuPopup already ran its auto-enable pass on the pre-wipe items,
+		// so the flags we set here are final (mirrors the Recents "(empty)" item).
+		CXCCMixerView* bpane = active_mix_pane();
+		std::string cur = bpane ? bpane->nav_current_path() : std::string();
+		if (cur.empty())
+		{
+			::AppendMenuA(hm, MF_STRING | MF_GRAYED, ID_FILE_BOOKMARK_ADD,
+				"&Add Current Location");
+		}
+		else if (bookmarks::contains(cur))
+		{
+			::AppendMenuA(hm, MF_STRING | MF_GRAYED, ID_FILE_BOOKMARK_ADD,
+				"Current Location Already Bookmarked");
+		}
+		else
+		{
+			std::string leaf, parent;
+			split_path_label(cur, leaf, parent);
+			std::string label = "&Add \"" + amp_escape(leaf) + "\"";
+			::AppendMenuA(hm, MF_STRING, ID_FILE_BOOKMARK_ADD, label.c_str());
+		}
+		::AppendMenuA(hm, MF_SEPARATOR, 0, NULL);
+
+		const auto& bv = bookmarks::list();
+		if (bv.empty())
+		{
+			::AppendMenuA(hm, MF_STRING | MF_GRAYED, ID_FILE_BOOKMARK_00,
+				"(no bookmarks)");
+		}
+		else
+		{
+			int slots = static_cast<int>(bv.size());
+			if (slots > bookmarks::hard_cap()) slots = bookmarks::hard_cap();
+			for (int i = 0; i < slots; i++)
+			{
+				std::string leaf, parent;
+				split_path_label(bv[i], leaf, parent);
+				// Same mnemonic scheme as Recents: 1-9 -> &1..&9, 10th -> 1&0
+				// (mnemonic '0', reads "10"), 11+ plain (no single digit left).
+				char prefix[16];
+				if (i < 9)
+					_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "&%d.  ", i + 1);
+				else if (i == 9)
+					_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "1&0.  ");
+				else
+					_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "%d.  ", i + 1);
+				std::string label = prefix;
+				label += amp_escape(leaf);
+				if (!parent.empty())
+				{
+					label += "  (";
+					label += amp_escape(parent);
+					label += ')';
+				}
+				::AppendMenuA(hm, MF_STRING, ID_FILE_BOOKMARK_00 + i, label.c_str());
+			}
+			::AppendMenuA(hm, MF_SEPARATOR, 0, NULL);
+			::AppendMenuA(hm, MF_STRING, ID_FILE_BOOKMARK_CLEAR, "&Clear bookmarks");
+		}
+		return;
+	}
 
 	const auto& v = recents::list();
 	if (v.empty())
@@ -3521,4 +3619,43 @@ void CMainFrame::OnFileRecent(UINT id)
 void CMainFrame::OnFileRecentClear()
 {
 	recents::clear();
+}
+
+// Open the clicked bookmark (MIX or folder) in the focused pane.
+void CMainFrame::OnFileBookmark(UINT id)
+{
+	int i = static_cast<int>(id) - ID_FILE_BOOKMARK_00;
+	const auto& v = bookmarks::list();
+	if (i < 0 || i >= static_cast<int>(v.size()))
+		return;
+	std::string path = v[i];
+	CXCCMixerView* pane = active_mix_pane();
+	if (!pane)
+		pane = left_mix_pane();
+	if (!pane)
+		return;
+	if (!pane->nav_open_path(path))
+		set_msg(("Bookmark no longer exists: " + path).c_str());
+}
+
+// Bookmark the focused pane's current MIX (its on-disk root path) or folder.
+void CMainFrame::OnFileBookmarkAdd()
+{
+	CXCCMixerView* pane = active_mix_pane();
+	if (!pane)
+		pane = left_mix_pane();
+	if (!pane)
+		return;
+	std::string cur = pane->nav_current_path();
+	if (cur.empty())
+		return;
+	if (bookmarks::add(cur))
+		set_msg(("Bookmarked: " + cur).c_str());
+	else
+		set_msg("Location is already bookmarked");
+}
+
+void CMainFrame::OnFileBookmarkClear()
+{
+	bookmarks::clear();
 }

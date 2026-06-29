@@ -246,6 +246,13 @@
 // INI honours [Recents] max_items (default 20).
 #define ID_FILE_RECENT_00               33150
 #define ID_FILE_RECENT_LAST             33405
+#define ID_FILE_BOOKMARK_ADD            33143
+#define ID_FILE_BOOKMARK_CLEAR          33144
+#define ID_POPUP_BOOKMARK               33145
+// 256 contiguous IDs (33410..33665) for the File > Bookmarks popup, matching
+// bookmarks::hard_cap(). Click a slot to open that MIX/folder in the focused pane.
+#define ID_FILE_BOOKMARK_00             33410
+#define ID_FILE_BOOKMARK_LAST           33665
 #define IDC_LOADPAL_FILTER_LABEL        1217
 #define IDC_LOADPAL_FILTER              1218
 #define IDC_LOADPAL_LIST                1219

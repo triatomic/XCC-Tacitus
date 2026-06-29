@@ -202,6 +202,7 @@
     </ClCompile>
     <ClCompile Include="Breadcrumb.cpp">
     </ClCompile>
+    <ClCompile Include="bookmarks.cpp" />
     <ClCompile Include="recents.cpp">
     </ClCompile>
     <ClCompile Include="SearchStringDlg.cpp">
@@ -296,6 +297,7 @@
     <ClInclude Include="XCC MixerDoc.h" />
     <ClInclude Include="XCC MixerView.h" />
     <ClInclude Include="Breadcrumb.h" />
+    <ClInclude Include="bookmarks.h" />
     <ClInclude Include="recents.h" />
     <ClInclude Include="XCCFileView.h" />
     <ClInclude Include="xm_types.h" />

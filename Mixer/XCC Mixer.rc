@@ -103,6 +103,12 @@ BEGIN
         BEGIN
             MENUITEM "(empty)",                     ID_FILE_RECENT_00, GRAYED
         END
+        POPUP "&Bookmarks"
+        BEGIN
+            MENUITEM "&Add Current Location",       ID_FILE_BOOKMARK_ADD
+            MENUITEM SEPARATOR
+            MENUITEM "(no bookmarks)",              ID_FILE_BOOKMARK_00, GRAYED
+        END
         MENUITEM SEPARATOR
         MENUITEM "E&xit",                       ID_APP_EXIT
     END
@@ -295,6 +301,7 @@ BEGIN
         MENUITEM "Open\tEnter",                 ID_POPUP_OPEN
         MENUITEM "Open &With...",               ID_POPUP_OPEN_WITH
         MENUITEM "&Explore...\tCtrl+E",         ID_POPUP_EXPLORE
+        MENUITEM "&Bookmark This Location",     ID_POPUP_BOOKMARK
         MENUITEM "&New Archive...",             ID_FILE_NEW
         MENUITEM SEPARATOR
         POPUP "Clipboard"
@@ -866,6 +873,9 @@ BEGIN
     ID_THEME_AUTO_REFRESH
                             "Auto-refresh folder panes when files change on disk (MIX panes unaffected)"
     ID_FILE_RELOAD_MIX_DB   "Reload the global mix names database from disk (or embedded fallback)"
+    ID_FILE_BOOKMARK_ADD    "Bookmark the focused pane's current MIX or folder"
+    ID_FILE_BOOKMARK_CLEAR  "Remove all bookmarks"
+    ID_POPUP_BOOKMARK       "Bookmark or unbookmark this pane's current MIX or folder"
 END
 
 STRINGTABLE
