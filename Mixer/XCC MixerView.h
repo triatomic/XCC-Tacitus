@@ -268,6 +268,11 @@ public:
 	// a MIX pane). Called by CMainFrame::OnThemeAutoRefresh for both panes.
 	void apply_auto_refresh_setting() { arm_dir_watch(); }
 
+	// Re-evaluate the pane after the global Mode Banner setting changes: refresh
+	// the label, recalc the frame (strip mode reserves NC space) and repaint
+	// (inline mode owner-draws the anchor row). Called by CMainFrame for both panes.
+	void apply_banner_mode();
+
 	// Ordered, human-readable segments of this pane's current location, from
 	// root (leftmost) to current (rightmost) — drives the frame's breadcrumb.
 	// Filesystem: drive + folder components of m_dir. MIX: the root MIX's
@@ -447,4 +452,13 @@ private:
 	// Rebuild a folder list in place, preserving selection + focus (by id), the
 	// active filter, the sort order and the scroll position.
 	void refresh_preserving();
+
+	// --- Mode banner (pinned anchor row) ------------------------------------
+	// The pinned top row (item data 0) is owner-drawn in OnCustomDraw as a banner
+	// identifying the pane's mode: an archive glyph + MIX name when a MIX is open,
+	// a folder glyph + path when browsing a directory. The label is cached here
+	// and refreshed by update_banner_label() on every navigation / refresh.
+	string m_banner_label;
+	void update_banner_label();
+	void draw_mode_banner(HDC hdc, const CRect& rc);
 };

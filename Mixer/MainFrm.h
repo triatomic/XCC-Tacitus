@@ -487,6 +487,13 @@ protected:
 	afx_msg void OnThemeSizeFormatBytes();
 	afx_msg void OnUpdateThemeSizeFormatAuto(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateThemeSizeFormatBytes(CCmdUI* pCmdUI);
+	void apply_banner_mode(theme::banner_mode v);
+	afx_msg void OnThemeBannerOff();
+	afx_msg void OnThemeBannerInline();
+	afx_msg void OnThemeBannerStrip();
+	afx_msg void OnUpdateThemeBannerOff(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeBannerInline(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateThemeBannerStrip(CCmdUI* pCmdUI);
 	afx_msg void OnThemeClipboardIndexed();
 	afx_msg void OnThemeClipboardRgb();
 	afx_msg void OnUpdateThemeClipboardIndexed(CCmdUI* pCmdUI);

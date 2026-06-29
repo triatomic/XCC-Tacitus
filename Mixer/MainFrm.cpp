@@ -262,6 +262,12 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_SIZE_FORMAT_BYTES, OnThemeSizeFormatBytes)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_AUTO, OnUpdateThemeSizeFormatAuto)
 	ON_UPDATE_COMMAND_UI(ID_THEME_SIZE_FORMAT_BYTES, OnUpdateThemeSizeFormatBytes)
+	ON_COMMAND(ID_THEME_BANNER_OFF, OnThemeBannerOff)
+	ON_COMMAND(ID_THEME_BANNER_INLINE, OnThemeBannerInline)
+	ON_COMMAND(ID_THEME_BANNER_STRIP, OnThemeBannerStrip)
+	ON_UPDATE_COMMAND_UI(ID_THEME_BANNER_OFF, OnUpdateThemeBannerOff)
+	ON_UPDATE_COMMAND_UI(ID_THEME_BANNER_INLINE, OnUpdateThemeBannerInline)
+	ON_UPDATE_COMMAND_UI(ID_THEME_BANNER_STRIP, OnUpdateThemeBannerStrip)
 	ON_COMMAND(ID_THEME_CLIPBOARD_INDEXED, OnThemeClipboardIndexed)
 	ON_COMMAND(ID_THEME_CLIPBOARD_RGB, OnThemeClipboardRgb)
 	ON_UPDATE_COMMAND_UI(ID_THEME_CLIPBOARD_INDEXED, OnUpdateThemeClipboardIndexed)
@@ -2864,6 +2870,24 @@ void CMainFrame::OnThemeSizeFormatBytes() { apply_size_format(theme::size_bytes)
 
 void CMainFrame::OnUpdateThemeSizeFormatAuto(CCmdUI* p)  { p->SetCheck(theme::size_fmt() == theme::size_auto); }
 void CMainFrame::OnUpdateThemeSizeFormatBytes(CCmdUI* p) { p->SetCheck(theme::size_fmt() == theme::size_bytes); }
+
+void CMainFrame::apply_banner_mode(theme::banner_mode v)
+{
+	theme::set_banner_mode(v);
+	// Each pane re-evaluates: the strip mode reserves NC space (needs a frame
+	// recalc) and the inline mode owner-draws the anchor row (needs a redraw).
+	for (CXCCMixerView* pane : { m_left_mix_pane, m_right_mix_pane })
+		if (pane && pane->GetSafeHwnd())
+			pane->apply_banner_mode();
+}
+
+void CMainFrame::OnThemeBannerOff()    { apply_banner_mode(theme::banner_off); }
+void CMainFrame::OnThemeBannerInline() { apply_banner_mode(theme::banner_inline); }
+void CMainFrame::OnThemeBannerStrip()  { apply_banner_mode(theme::banner_strip); }
+
+void CMainFrame::OnUpdateThemeBannerOff(CCmdUI* p)    { p->SetCheck(theme::banner_mode_v() == theme::banner_off); }
+void CMainFrame::OnUpdateThemeBannerInline(CCmdUI* p) { p->SetCheck(theme::banner_mode_v() == theme::banner_inline); }
+void CMainFrame::OnUpdateThemeBannerStrip(CCmdUI* p)  { p->SetCheck(theme::banner_mode_v() == theme::banner_strip); }
 
 void CMainFrame::OnThemeClipboardIndexed() { theme::set_clipboard_fmt(theme::clipboard_indexed); }
 void CMainFrame::OnThemeClipboardRgb()     { theme::set_clipboard_fmt(theme::clipboard_rgb); }

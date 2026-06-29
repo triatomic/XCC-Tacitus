@@ -201,6 +201,12 @@ BEGIN
             MENUITEM "Show Bread&crumb",            ID_THEME_SHOW_BREADCRUMB
             MENUITEM "S&wap Filter && Breadcrumb",  ID_THEME_SWAP_TOPBAR
         END
+        POPUP "Mode &Banner"
+        BEGIN
+            MENUITEM "&Off",                        ID_THEME_BANNER_OFF
+            MENUITEM "&Inline (on anchor row)",     ID_THEME_BANNER_INLINE
+            MENUITEM "&Header Strip",               ID_THEME_BANNER_STRIP
+        END
         MENUITEM "Show &Grid Lines",            ID_THEME_SHOW_GRID
         MENUITEM "Show Column &Headers",        ID_THEME_SHOW_COLUMN_HEADERS
         MENUITEM "Hide Results When Search Is &Empty", ID_THEME_HIDE_EMPTY_RESULTS
@@ -842,6 +848,9 @@ BEGIN
     ID_THEME_SWAP_TOPBAR "Swap the breadcrumb and filter box positions (left/right)"
     ID_THEME_SIZE_FORMAT_AUTO "Display file sizes scaled (e.g. 1.5 MB)"
     ID_THEME_SIZE_FORMAT_BYTES "Display file sizes as raw byte counts"
+    ID_THEME_BANNER_OFF     "No pane banner"
+    ID_THEME_BANNER_INLINE  "Show the MIX/folder banner on the pinned anchor row"
+    ID_THEME_BANNER_STRIP   "Show the MIX/folder banner as a strip above the list"
     ID_THEME_VXL_SS_OFF     "No supersampling (1x). Fastest, aliased edges."
     ID_THEME_VXL_SS_2       "2x supersampling. Slight edge smoothing."
     ID_THEME_VXL_SS_4       "4x supersampling. Default. Good balance of quality and speed."

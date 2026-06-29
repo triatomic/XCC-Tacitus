@@ -321,6 +321,21 @@ void CXCCMixerView::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		*pResult = CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
 		break;
 	case CDDS_ITEMPREPAINT:
+	{
+		// Inline banner mode: owner-draw the pinned anchor row (item data 0).
+		const int item = static_cast<int>(cd->nmcd.dwItemSpec);
+		if (theme::banner_mode_v() == theme::banner_inline
+			&& item >= 0 && GetListCtrl().GetItemData(item) == 0)
+		{
+			CRect rc = cd->nmcd.rc;
+			CRect client;
+			GetClientRect(&client);
+			if (rc.right < client.right)   // some report-view rcs cover col 0 only
+				rc.right = client.right;
+			draw_mode_banner(cd->nmcd.hdc, rc);
+			*pResult = CDRF_SKIPDEFAULT;
+			break;
+		}
 		if (dark)
 		{
 			cd->clrText = theme::text();
@@ -332,6 +347,7 @@ void CXCCMixerView::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 			*pResult = CDRF_DODEFAULT | CDRF_NOTIFYPOSTPAINT;
 		}
 		break;
+	}
 	case CDDS_ITEMPOSTPAINT:
 		// Dark-mode grid: LVS_EX_GRIDLINES is stripped in apply_grid (dark
 		// mode hardcodes light gray), so paint our own row + column
@@ -364,6 +380,172 @@ void CXCCMixerView::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 	}
 }
 
+// --- Mode banner (pinned anchor row) ----------------------------------------
+
+// Linear blend of two colors; t in [0,1] (0 = a, 1 = b).
+static COLORREF banner_blend(COLORREF a, COLORREF b, double t)
+{
+	auto m = [&](int x, int y) { return static_cast<int>(x + (y - x) * t + 0.5); };
+	return RGB(m(GetRValue(a), GetRValue(b)),
+		m(GetGValue(a), GetGValue(b)),
+		m(GetBValue(a), GetBValue(b)));
+}
+
+// Small folder silhouette (a body with a tab) drawn inside r.
+static void draw_folder_glyph(HDC hdc, CRect r, COLORREF c)
+{
+	HBRUSH br = ::CreateSolidBrush(banner_blend(c, RGB(255, 255, 255), 0.55));
+	HPEN pen = ::CreatePen(PS_SOLID, 1, c);
+	HGDIOBJ ob = ::SelectObject(hdc, br);
+	HGDIOBJ op = ::SelectObject(hdc, pen);
+	const int tab_h = max(2, r.Height() / 4);
+	::Rectangle(hdc, r.left, r.top, r.left + (r.Width() * 3) / 5, r.top + tab_h + 2);
+	::RoundRect(hdc, r.left, r.top + tab_h, r.right, r.bottom, 3, 3);
+	::SelectObject(hdc, ob);
+	::SelectObject(hdc, op);
+	::DeleteObject(br);
+	::DeleteObject(pen);
+}
+
+// Small parcel/box (square + lid line + vertical strap) drawn inside r.
+static void draw_archive_glyph(HDC hdc, CRect r, COLORREF c)
+{
+	HBRUSH br = ::CreateSolidBrush(banner_blend(c, RGB(255, 255, 255), 0.55));
+	HPEN pen = ::CreatePen(PS_SOLID, 1, c);
+	HGDIOBJ ob = ::SelectObject(hdc, br);
+	HGDIOBJ op = ::SelectObject(hdc, pen);
+	::RoundRect(hdc, r.left, r.top, r.right, r.bottom, 2, 2);
+	const int midx = r.left + r.Width() / 2;
+	const int lidy = r.top + r.Height() / 3;
+	::MoveToEx(hdc, r.left, lidy, NULL);
+	::LineTo(hdc, r.right, lidy);
+	::MoveToEx(hdc, midx, r.top, NULL);
+	::LineTo(hdc, midx, r.bottom);
+	::SelectObject(hdc, ob);
+	::SelectObject(hdc, op);
+	::DeleteObject(br);
+	::DeleteObject(pen);
+}
+
+void CXCCMixerView::update_banner_label()
+{
+	if (m_mix_f)
+	{
+		std::vector<std::string> segs = nav_segments();
+		m_banner_label = segs.empty() ? Cfname(m_mix_fname).get_fname() : segs.back();
+	}
+	else
+		m_banner_label = m_dir;
+}
+
+void CXCCMixerView::apply_banner_mode()
+{
+	if (!GetSafeHwnd())
+		return;
+	update_banner_label();
+	// Strip mode reserves NC space; toggling it on/off must recalc the frame so
+	// the header + rows reflow. SWP_FRAMECHANGED forces WM_NCCALCSIZE + WM_NCPAINT.
+	SetWindowPos(NULL, 0, 0, 0, 0,
+		SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	Invalidate(FALSE);   // inline mode repaints the anchor row
+}
+
+void CXCCMixerView::draw_mode_banner(HDC hdc, const CRect& rc)
+{
+	const bool dark = theme::is_dark();
+	const bool is_mix = (m_mix_f != nullptr);
+	// Mode colour language: amber/box = MIX archive, blue/folder = filesystem.
+	const COLORREF accent = is_mix ? RGB(206, 145, 42) : RGB(58, 124, 201);
+	const COLORREF base = dark ? theme::bg() : ::GetSysColor(COLOR_WINDOW);
+	const COLORREF bg = banner_blend(base, accent, dark ? 0.22 : 0.12);
+	const COLORREF txt = dark ? theme::text() : RGB(30, 30, 30);
+
+	// Background wash, accent left spine, and a bottom rule.
+	HBRUSH bbr = ::CreateSolidBrush(bg);
+	::FillRect(hdc, &rc, bbr);
+	::DeleteObject(bbr);
+	{
+		RECT spine = { rc.left, rc.top, rc.left + 2, rc.bottom };
+		HBRUSH sbr = ::CreateSolidBrush(accent);
+		::FillRect(hdc, &spine, sbr);
+		::DeleteObject(sbr);
+		HPEN pen = ::CreatePen(PS_SOLID, 1, banner_blend(base, accent, 0.5));
+		HGDIOBJ op = ::SelectObject(hdc, pen);
+		::MoveToEx(hdc, rc.left, rc.bottom - 1, NULL);
+		::LineTo(hdc, rc.right, rc.bottom - 1);
+		::SelectObject(hdc, op);
+		::DeleteObject(pen);
+	}
+
+	// Glyph, vertically centred.
+	int gs = min(16, rc.Height() - 4);
+	if (gs < 8)
+		gs = max(6, rc.Height() - 2);
+	CRect gr(rc.left + 7, rc.top + (rc.Height() - gs) / 2, rc.left + 7 + gs, rc.top + (rc.Height() - gs) / 2 + gs);
+	if (is_mix)
+		draw_archive_glyph(hdc, gr, accent);
+	else
+		draw_folder_glyph(hdc, gr, accent);
+
+	// Build the label font. Prefer the list's own font; if the control has none
+	// set (WM_GETFONT == NULL here) fall back to the system *message* font (Segoe
+	// UI on Win10/11) -- NOT GetStockObject(DEFAULT_GUI_FONT) or the window DC's
+	// default stock font, both of which are the dated MS Sans Serif bitmap face
+	// and render blocky/aliased next to the ClearType row text. Force ClearType
+	// so the strip matches. A regular-weight twin draws the trailing tag (we must
+	// NOT restore the DC's stock font for it).
+	LOGFONT lf = {};
+	HFONT list_font = reinterpret_cast<HFONT>(::SendMessage(GetSafeHwnd(), WM_GETFONT, 0, 0));
+	if (list_font)
+		::GetObject(list_font, sizeof lf, &lf);
+	else
+	{
+		NONCLIENTMETRICS ncm = {};
+		ncm.cbSize = sizeof ncm;
+		if (::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0))
+			lf = ncm.lfMessageFont;
+		else
+			::GetObject(static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT)), sizeof lf, &lf);
+	}
+	lf.lfQuality = CLEARTYPE_QUALITY;
+	LOGFONT lfb = lf;
+	lfb.lfWeight = FW_BOLD;
+	HFONT reg_font = ::CreateFontIndirect(&lf);
+	HFONT bold_font = ::CreateFontIndirect(&lfb);
+
+	::SetBkMode(hdc, TRANSPARENT);
+	::SetTextColor(hdc, txt);
+	const std::string label = m_banner_label.empty()
+		? std::string(is_mix ? "MIX archive" : "Folder")
+		: m_banner_label;
+	CRect name_rc(gr.right + 7, rc.top, rc.right - 7, rc.bottom);
+
+	HGDIOBJ of = ::SelectObject(hdc, bold_font);
+	CRect calc = name_rc;
+	::DrawText(hdc, label.c_str(), -1, &calc, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+	const int name_w = min(static_cast<int>(calc.Width()), name_rc.Width());
+	CRect draw_rc(name_rc.left, name_rc.top, name_rc.left + name_w, name_rc.bottom);
+	const UINT name_fmt = DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX
+		| (is_mix ? DT_END_ELLIPSIS : (DT_PATH_ELLIPSIS | DT_END_ELLIPSIS));
+	::DrawText(hdc, label.c_str(), -1, &draw_rc, name_fmt);
+
+	if (is_mix)
+	{
+		CRect tag_rc(draw_rc.right + 9, rc.top, rc.right - 7, rc.bottom);
+		if (tag_rc.left < tag_rc.right)
+		{
+			::SelectObject(hdc, reg_font);
+			::SetTextColor(hdc, banner_blend(txt, bg, 0.45));
+			::DrawText(hdc, "MIX archive", -1, &tag_rc,
+				DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+		}
+	}
+
+	::SelectObject(hdc, of);
+	::DeleteObject(bold_font);
+	::DeleteObject(reg_font);
+}
+
 const char* error_messages[] =
 {
 	"Bad filename. All files should have a name like \"image ####.pcx\" where #### is the zero based index.",
@@ -385,6 +567,10 @@ static CMainFrame* GetMainFrame()
 // by OnNcCalcSize and painted by OnNcPaint.
 static const int kPaneFocusBorder = 1;
 
+// Height (px) of the mode banner strip reserved at the top of the client area by
+// OnNcCalcSize (pushing the column header + rows down) and painted by OnNcPaint.
+static const int kBannerHeight = 20;
+
 void CXCCMixerView::OnSetFocus(CWnd* pOldWnd)
 {
 	CListView::OnSetFocus(pOldWnd);
@@ -401,7 +587,14 @@ void CXCCMixerView::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp
 	// dark_edit_proc's WM_NCCALCSIZE (theme.cpp). Always reserve it (not only
 	// when active) so toggling focus doesn't reflow the list.
 	if (lpncsp)
+	{
 		::InflateRect(&lpncsp->rgrc[0], -kPaneFocusBorder, -kPaneFocusBorder);
+		// Strip banner mode reserves a fixed strip at the very top (painted in
+		// OnNcPaint), pushing the column header + rows down. Off / inline modes
+		// reserve nothing here.
+		if (theme::banner_mode_v() == theme::banner_strip)
+			lpncsp->rgrc[0].top += kBannerHeight;
+	}
 }
 
 void CXCCMixerView::OnNcPaint()
@@ -419,6 +612,18 @@ void CXCCMixerView::OnNcPaint()
 	CRect rc;
 	GetWindowRect(rc);
 	rc.OffsetRect(-rc.left, -rc.top);   // window DC coords are window-relative
+	// Strip banner mode fills the reserved top strip (between the border and the
+	// column header). Trim short of a visible vertical scrollbar so we don't paint
+	// over the scrollbar's top arrow.
+	if (theme::banner_mode_v() == theme::banner_strip)
+	{
+		CRect strip(rc.left + kPaneFocusBorder, rc.top + kPaneFocusBorder,
+			rc.right - kPaneFocusBorder, rc.top + kPaneFocusBorder + kBannerHeight);
+		if (GetStyle() & WS_VSCROLL)
+			strip.right -= ::GetSystemMetrics(SM_CXVSCROLL);
+		if (strip.right > strip.left)
+			draw_mode_banner(hdc, strip);
+	}
 	// Active: accent frame. Inactive: paint the strip with the surrounding bg
 	// (theme bg in dark, window color in light) so no stale border lingers.
 	const COLORREF c = active ? theme::accent()
@@ -1693,6 +1898,10 @@ void CXCCMixerView::update_list()
 	// m_dir, a MIX stops it. Navigation always funnels through update_list, so
 	// this keeps the watch following wherever the pane goes.
 	arm_dir_watch();
+	update_banner_label();
+	// Repaint the reserved NC strip so the banner reflects the new location.
+	if (GetSafeHwnd())
+		RedrawWindow(NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
 void CXCCMixerView::read_dir_into_index()

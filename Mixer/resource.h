@@ -1630,6 +1630,9 @@
 #define ID_SHADOW_TRANSPARENT_32        41044
 #define ID_SHADOW_TRANSPARENT_PNG       41045
 #define ID_THEME_AUTO_REFRESH           41064
+#define ID_THEME_BANNER_OFF             41065
+#define ID_THEME_BANNER_INLINE          41066
+#define ID_THEME_BANNER_STRIP           41067
 
 // Next default values for new objects
 // 

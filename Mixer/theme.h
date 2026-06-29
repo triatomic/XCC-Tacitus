@@ -394,6 +394,17 @@ namespace theme
 	bool auto_refresh();
 	void set_auto_refresh(bool v);
 
+	// Per-pane banner identifying whether the pane shows a MIX archive or a
+	// folder (glyph + label). Three presentations; default = strip.
+	enum banner_mode
+	{
+		banner_off = 0,      // no banner (original behaviour)
+		banner_inline = 1,   // owner-drawn over the pinned anchor row (Browse.../..)
+		banner_strip = 2,    // reserved strip above the column header
+	};
+	banner_mode banner_mode_v();
+	void set_banner_mode(banner_mode v);
+
 	// When on, paletted Westwood images (SHP/PCX/CPS/WSA) treat palette index 0
 	// as transparent — the engine convention. Off = paint index 0 with whatever
 	// color the palette says, like older XCC builds.
