@@ -232,6 +232,10 @@ protected:
 public:
 	void set_pane_layout(bool two_panes);
 	bool two_panes() const { return m_two_panes; }
+	// Restore the persisted splitter column widths (left pane / middle pane).
+	// Called from InitInstance once the frame has its real size, so RecalcLayout
+	// distributes the remaining width to the file-info pane correctly.
+	void restore_splitter_widths();
 	// Walk every themed child window and re-apply dark-mode state. Public
 	// because the listview's "Open With..." path needs to call this after
 	// SHOpenWithDialog returns — the picker invalidates our process-wide

@@ -780,6 +780,21 @@ void CXCCMixerView::OnInitialUpdate()
 	GetListCtrl().InsertColumn(3, "Description", LVCFMT_LEFT);
 	theme::apply_column_headers(GetListCtrl().GetSafeHwnd());
 	update_list();
+
+	// Reopen the MIX this pane had open last session, if it still exists on disk.
+	// Skip the recents push (it's already recorded) by flagging a nav replay.
+	{
+		string saved_mix(AfxGetApp()->GetProfileString(m_reg_key, "mix", ""));
+		DWORD attr = saved_mix.empty() ? INVALID_FILE_ATTRIBUTES
+			: ::GetFileAttributesA(saved_mix.c_str());
+		if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+		{
+			bool was_replaying = m_nav_replaying;
+			m_nav_replaying = true;
+			open_location_mix(saved_mix);
+			m_nav_replaying = was_replaying;
+		}
+	}
 }
 
 void CXCCMixerView::OnFileNew()
@@ -2211,6 +2226,13 @@ void CXCCMixerView::OnDestroy()
 	cancel_drag_visual();   // safety: don't leak the drag image if torn down mid-drag
 	stop_dir_watch();       // close the folder-watch handle + kill its timer
 	AfxGetApp()->WriteProfileString(m_reg_key, "path", m_dir.c_str());
+	// Remember the root on-disk MIX so the pane reopens it next session. For a
+	// nested MIX the root is the front of the fname stack; otherwise m_mix_fname.
+	// Empty when browsing a folder, so the folder path (above) is used instead.
+	string root_mix = m_mix_f
+		? (m_mix_fname_stack.empty() ? m_mix_fname : m_mix_fname_stack.front())
+		: string();
+	AfxGetApp()->WriteProfileString(m_reg_key, "mix", root_mix.c_str());
 	close_all_locations();
 }
 

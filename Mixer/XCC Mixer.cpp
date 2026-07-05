@@ -255,6 +255,12 @@ BOOL CXCCMixerApp::InitInstance()
 	}
 	m_pMainWnd->UpdateWindow();
 
+	// Now that the frame has its real size, restore the saved splitter column
+	// widths (the mix panes). Deferred to here because RecalcLayout needs the
+	// true client width to hand the remainder to the file-info pane.
+	if (CMainFrame* frame = DYNAMIC_DOWNCAST(CMainFrame, m_pMainWnd))
+		frame->restore_splitter_widths();
+
 	return TRUE;
 }
 

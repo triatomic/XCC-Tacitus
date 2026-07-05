@@ -325,6 +325,9 @@ CMainFrame::CMainFrame()
 	m_split_shadows = AfxGetApp()->GetProfileInt(m_reg_key, "split_shadows", false);
 	m_use_palette_for_conversion = AfxGetApp()->GetProfileInt(m_reg_key, "use_palette_for_conversion", false);
 	m_two_panes = AfxGetApp()->GetProfileInt(m_reg_key, "two_panes", 1) != 0;
+	// Seed the saved middle-pane width so a one-pane start still expands to the
+	// user's last width. 0 = no saved value (set_pane_layout falls back to 400).
+	m_saved_middle_pane_w = AfxGetApp()->GetProfileInt(m_reg_key, "col1_w", 0);
 }
 
 CMainFrame::~CMainFrame()
@@ -1822,6 +1825,24 @@ void CMainFrame::OnDestroy()
 			wp.showCmd == SW_SHOWMAXIMIZED ? 1 : 0);
 	}
 
+	// Persist the splitter column widths: col 0 = left pane, col 1 = middle
+	// (right mix) pane. In one-pane mode col 1 is collapsed to 0, so save the
+	// stashed pre-collapse width (m_saved_middle_pane_w) instead of the live 0.
+	// The file-info pane (col 2) gets the remaining width on RecalcLayout, so it
+	// isn't persisted.
+	if (m_wndSplitter.GetSafeHwnd())
+	{
+		int w0 = 0, min0 = 0, w1 = 0, min1 = 0;
+		m_wndSplitter.GetColumnInfo(0, w0, min0);
+		m_wndSplitter.GetColumnInfo(1, w1, min1);
+		if (!m_two_panes)
+			w1 = m_saved_middle_pane_w;
+		if (w0 > 0)
+			AfxGetApp()->WriteProfileInt(m_reg_key, "col0_w", w0);
+		if (w1 > 0)
+			AfxGetApp()->WriteProfileInt(m_reg_key, "col1_w", w1);
+	}
+
 	CFrameWnd::OnDestroy();
 }
 
@@ -2851,6 +2872,31 @@ void CMainFrame::set_pane_layout(bool two)
 	if (m_right_mix_pane && m_right_mix_pane->GetSafeHwnd())
 		m_right_mix_pane->RedrawWindow(NULL, NULL, nc);
 	AfxGetApp()->WriteProfileInt(m_reg_key, "two_panes", two ? 1 : 0);
+}
+
+void CMainFrame::restore_splitter_widths()
+{
+	if (!m_wndSplitter.GetSafeHwnd())
+		return;
+	int w0 = AfxGetApp()->GetProfileInt(m_reg_key, "col0_w", 0);
+	int w1 = AfxGetApp()->GetProfileInt(m_reg_key, "col1_w", 0);
+	if (w0 <= 0 && w1 <= 0)
+		return;   // first run / nothing saved -- keep the CreateView defaults
+	if (w0 > 0)
+		m_wndSplitter.SetColumnInfo(0, w0, 50);
+	// col1 is the collapsible middle pane. In one-pane mode it stays collapsed
+	// (set_pane_layout already ran in OnCreateClient); just keep the saved width
+	// in m_saved_middle_pane_w so a later expand uses it. In two-pane mode apply
+	// it live. The file-info pane (col 2) absorbs the remaining width.
+	if (w1 > 0)
+	{
+		m_saved_middle_pane_w = w1;
+		if (m_two_panes)
+			m_wndSplitter.SetColumnInfo(1, w1, 50);
+	}
+	m_wndSplitter.RecalcLayout();
+	m_wndSplitter.RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void CMainFrame::OnThemePanesOne() { set_pane_layout(false); }
