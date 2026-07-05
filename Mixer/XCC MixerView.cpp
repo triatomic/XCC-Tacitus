@@ -298,6 +298,8 @@ BEGIN_MESSAGE_MAP(CXCCMixerView, CListView)
 	ON_WM_SETFOCUS()
 	ON_WM_NCCALCSIZE()
 	ON_WM_NCPAINT()
+	ON_WM_NCHITTEST()
+	ON_WM_NCLBUTTONDBLCLK()
 	ON_NOTIFY_REFLECT(LVN_BEGINDRAG, OnBeginDrag)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
@@ -439,6 +441,38 @@ void CXCCMixerView::update_banner_label()
 	}
 	else
 		m_banner_label = m_dir;
+}
+
+// Full path shown by the mode banner, for the double-click "copy path" action.
+// Folder mode: the on-disk directory. MIX mode: the on-disk root MIX path, then
+// " > <nested>" per nested level (nested MIXes have no real filesystem path).
+std::string CXCCMixerView::banner_path() const
+{
+	if (!m_mix_f)
+	{
+		std::string d = m_dir;
+		while (!d.empty() && (d.back() == '\\' || d.back() == '/'))
+			d.pop_back();
+		return d;
+	}
+	std::string p = m_mix_fname;
+	std::vector<std::string> segs = const_cast<CXCCMixerView*>(this)->nav_segments();
+	// nav_segments = folder parts + root MIX filename + one entry per nested MIX.
+	// The root MIX filename is already covered by m_mix_fname; append only the
+	// nested names that follow it.
+	bool past_root = false;
+	const std::string root_leaf = Cfname(m_mix_fname).get_fname();
+	for (const std::string& s : segs)
+	{
+		if (!past_root)
+		{
+			if (s == root_leaf)
+				past_root = true;
+			continue;
+		}
+		p += " > " + s;
+	}
+	return p;
 }
 
 void CXCCMixerView::apply_banner_mode()
@@ -639,6 +673,58 @@ void CXCCMixerView::OnNcPaint()
 	::SelectObject(hdc, old_pen);
 	::DeleteObject(pen);
 	::ReleaseDC(GetSafeHwnd(), hdc);
+}
+
+LRESULT CXCCMixerView::OnNcHitTest(CPoint point)
+{
+	// The strip banner is reserved from the client area by OnNcCalcSize, but the
+	// default hit-test still reports it as HTCLIENT -- so clicks there generate
+	// client mouse messages, never WM_NCLBUTTONDBLCLK. Claim the strip as a
+	// (benign) non-client region so the double-click reaches OnNcLButtonDblClk.
+	if (theme::banner_mode_v() == theme::banner_strip)
+	{
+		CRect wr;
+		GetWindowRect(wr);
+		CPoint pt = point;
+		pt.Offset(-wr.left, -wr.top);   // window-relative, matching OnNcPaint
+		CRect strip(kPaneFocusBorder, kPaneFocusBorder,
+			wr.Width() - kPaneFocusBorder, kPaneFocusBorder + kBannerHeight);
+		if (strip.PtInRect(pt))
+			return HTBORDER;
+	}
+	return CListView::OnNcHitTest(point);
+}
+
+void CXCCMixerView::OnNcLButtonDblClk(UINT nHitTest, CPoint point)
+{
+	// Strip banner mode: double-clicking the reserved top strip copies the
+	// current path. point is in screen coords; the strip rect mirrors OnNcPaint
+	// (window-relative). Inline mode is handled in OnDblclk instead.
+	if (theme::banner_mode_v() == theme::banner_strip)
+	{
+		CRect wr;
+		GetWindowRect(wr);
+		CPoint pt = point;
+		pt.Offset(-wr.left, -wr.top);   // window-relative, matching OnNcPaint
+		CRect strip(kPaneFocusBorder, kPaneFocusBorder,
+			wr.Width() - kPaneFocusBorder, kPaneFocusBorder + kBannerHeight);
+		if (strip.PtInRect(pt))
+		{
+			copy_banner_path();
+			return;
+		}
+	}
+	CListView::OnNcLButtonDblClk(nHitTest, point);
+}
+
+void CXCCMixerView::copy_banner_path()
+{
+	std::string p = banner_path();
+	if (p.empty())
+		return;
+	set_clipboard_text(p);
+	if (CMainFrame* mf = GetMainFrame())
+		mf->SetMessageText(("Copied path: " + p).c_str());
 }
 
 CXCCMixerView::CXCCMixerView()
@@ -2131,6 +2217,15 @@ void CXCCMixerView::OnDestroy()
 void CXCCMixerView::OnDblclk(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	int id = get_current_id();
+	// Inline banner mode paints the mode banner over the pinned anchor row
+	// (item data 0). Double-clicking the banner copies the current path
+	// instead of navigating. Strip mode handles this in OnNcLButtonDblClk.
+	if (id == 0 && theme::banner_mode_v() == theme::banner_inline)
+	{
+		copy_banner_path();
+		*pResult = 0;
+		return;
+	}
 	if (id != -1)
 		open_item(id);
 	*pResult = 0;
@@ -4601,7 +4696,12 @@ void CXCCMixerView::OnPopupCopyName()
 		if (text.empty() || text == ".." || text == "Browse...")
 			return;
 	}
-	if (!OpenClipboard())
+	set_clipboard_text(text);
+}
+
+void CXCCMixerView::set_clipboard_text(const string& text)
+{
+	if (text.empty() || !OpenClipboard())
 		return;
 	EmptyClipboard();
 	size_t cb = text.size() + 1;

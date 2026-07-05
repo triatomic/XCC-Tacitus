@@ -246,6 +246,8 @@ protected:
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
 	afx_msg void OnNcPaint();
+	afx_msg LRESULT OnNcHitTest(CPoint point);
+	afx_msg void OnNcLButtonDblClk(UINT nHitTest, CPoint point);
 	// Cross-pane drag & drop. LVN_BEGINDRAG starts a manual image-list drag; on
 	// button-up over the OTHER mix pane the snapshotted selection is handed to
 	// copy_as(-1) (the same raw-copy path the "Copy" command uses).
@@ -463,4 +465,9 @@ private:
 	string m_banner_label;
 	void update_banner_label();
 	void draw_mode_banner(HDC hdc, const CRect& rc);
+	// Full path the banner represents (folder path, or root MIX path + nested
+	// " > <mix>" chain); copied to the clipboard on double-clicking the banner.
+	std::string banner_path() const;
+	void copy_banner_path();
+	void set_clipboard_text(const string& text);
 };
