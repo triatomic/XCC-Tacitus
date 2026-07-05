@@ -286,6 +286,7 @@ BEGIN
         MENUITEM "Use &External Programs",      ID_THEME_USE_EXTERNAL_PROGRAMS
         MENUITEM "&Parallel Extract",           ID_THEME_PARALLEL_EXTRACT
         MENUITEM "&Auto-refresh",               ID_THEME_AUTO_REFRESH
+        MENUITEM "&Silent Delete",              ID_THEME_SILENT_DELETE
         POPUP "&Settings Directory"
         BEGIN
             MENUITEM "&AppData",                    ID_SETTINGS_DIR_APPDATA
@@ -872,6 +873,8 @@ BEGIN
                             "Extract batch selections in parallel (faster on SSDs)"
     ID_THEME_AUTO_REFRESH
                             "Auto-refresh folder panes when files change on disk (MIX panes unaffected)"
+    ID_THEME_SILENT_DELETE
+                            "Delete without the confirmation prompt (Shift+Delete already skips it per-action)"
     ID_FILE_RELOAD_MIX_DB   "Reload the global mix names database from disk (or embedded fallback)"
     ID_FILE_BOOKMARK_ADD    "Bookmark the focused pane's current MIX or folder"
     ID_FILE_BOOKMARK_CLEAR  "Remove all bookmarks"

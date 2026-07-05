@@ -291,6 +291,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_COMMAND(ID_THEME_VXL_LIGHTING, OnThemeVxlLighting)
 	ON_COMMAND(ID_THEME_PARALLEL_EXTRACT, OnThemeParallelExtract)
 	ON_UPDATE_COMMAND_UI(ID_THEME_PARALLEL_EXTRACT, OnUpdateThemeParallelExtract)
+	ON_COMMAND(ID_THEME_SILENT_DELETE, OnThemeSilentDelete)
+	ON_UPDATE_COMMAND_UI(ID_THEME_SILENT_DELETE, OnUpdateThemeSilentDelete)
 	ON_COMMAND(ID_THEME_AUTO_REFRESH, OnThemeAutoRefresh)
 	ON_UPDATE_COMMAND_UI(ID_THEME_AUTO_REFRESH, OnUpdateThemeAutoRefresh)
 	ON_COMMAND(ID_THEME_LIMIT_VXL_CPU, OnThemeLimitVxlCpu)
@@ -2997,6 +2999,13 @@ void CMainFrame::OnThemeParallelExtract()
 }
 
 void CMainFrame::OnUpdateThemeParallelExtract(CCmdUI* p) { p->SetCheck(theme::parallel_extract()); }
+
+void CMainFrame::OnThemeSilentDelete()
+{
+	theme::set_silent_delete(!theme::silent_delete());
+}
+
+void CMainFrame::OnUpdateThemeSilentDelete(CCmdUI* p) { p->SetCheck(theme::silent_delete()); }
 
 void CMainFrame::OnThemeAutoRefresh()
 {

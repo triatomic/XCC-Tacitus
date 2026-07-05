@@ -1640,6 +1640,7 @@
 #define ID_THEME_BANNER_OFF             41065
 #define ID_THEME_BANNER_INLINE          41066
 #define ID_THEME_BANNER_STRIP           41067
+#define ID_THEME_SILENT_DELETE          41068
 
 // Next default values for new objects
 // 

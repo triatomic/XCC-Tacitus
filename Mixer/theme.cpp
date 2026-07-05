@@ -106,6 +106,7 @@ namespace theme
 		int g_vxl_splat_pad_extra = 0;
 		vxl_light_frame g_vxl_light_frame = vlf_camera_fixed;
 		bool g_parallel_extract = true;
+		bool g_silent_delete = false;
 		bool g_auto_refresh = true;
 		banner_mode g_banner_mode = banner_strip;
 		bool g_shp_transparency = false;
@@ -316,6 +317,7 @@ namespace theme
 			g_vxl_light_frame = (v == vlf_world_fixed) ? vlf_world_fixed : vlf_camera_fixed;
 		}
 		g_parallel_extract = AfxGetApp()->GetProfileInt("Theme", "parallel_extract", 1) != 0;
+		g_silent_delete = AfxGetApp()->GetProfileInt("Theme", "silent_delete", 0) != 0;
 		g_auto_refresh = AfxGetApp()->GetProfileInt("Theme", "auto_refresh", 1) != 0;
 		{
 			int bm = AfxGetApp()->GetProfileInt("Theme", "banner_mode", banner_strip);
@@ -368,6 +370,7 @@ namespace theme
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_splat_pad_extra", g_vxl_splat_pad_extra);
 		AfxGetApp()->WriteProfileInt("Theme", "vxl_light_frame", static_cast<int>(g_vxl_light_frame));
 		AfxGetApp()->WriteProfileInt("Theme", "parallel_extract", g_parallel_extract ? 1 : 0);
+		AfxGetApp()->WriteProfileInt("Theme", "silent_delete", g_silent_delete ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "auto_refresh", g_auto_refresh ? 1 : 0);
 		AfxGetApp()->WriteProfileInt("Theme", "banner_mode", static_cast<int>(g_banner_mode));
 	}
@@ -759,6 +762,16 @@ namespace theme
 		if (g_parallel_extract == v)
 			return;
 		g_parallel_extract = v;
+		save();
+	}
+
+	bool silent_delete() { return g_silent_delete; }
+
+	void set_silent_delete(bool v)
+	{
+		if (g_silent_delete == v)
+			return;
+		g_silent_delete = v;
 		save();
 	}
 

@@ -2475,9 +2475,11 @@ bool CXCCMixerView::can_edit() const
 {
 	// Disk-root MIX (m_location.size()==1) edits in place. Nested MIXes edit a
 	// temp copy that is re-injected into the parent on the way up (see
-	// t_nested_edit). Both are editable; only the pre-MIX filesystem state
-	// (size 0) and the degenerate no-mix case are not.
-	return m_location.size() >= 1;
+	// t_nested_edit). Both are editable.
+	// Folder view (no MIX open, but a real filesystem dir) is also editable:
+	// OnPopupDelete's !del_into_mix branch deletes the selected files/dirs on
+	// disk directly. Only the degenerate no-mix/no-dir case is not editable.
+	return m_location.size() >= 1 || (!m_mix_f && !m_dir.empty());
 }
 
 string CXCCMixerView::get_dir() const
@@ -4157,8 +4159,36 @@ bool DeleteDirectory(string strPath, const int uiEndLevel = -1, int iCurrentLeve
 
 void CXCCMixerView::OnPopupDelete()
 {
-	if (~GetAsyncKeyState(VK_SHIFT) < 0 && MessageBox("Are you sure you want to delete these files?", NULL, MB_ICONQUESTION | MB_YESNO) != IDYES)
+	// Re-populate m_index_selected from the live selection. Menus fire the
+	// OnUpdate* handler first (which calls can_delete), but the Del-key
+	// accelerator does not, so do it here to stay correct on both paths and
+	// to bail when the selection holds only undeletable rows (drives, "..").
+	if (!can_edit() || !can_delete() || m_index_selected.empty())
 		return;
+	// Confirm unless Silent Delete is on (Configure menu) or Shift is held.
+	// The prompt names the actual targets so the user sees what's being
+	// removed (capped so a huge multi-select can't overflow the message box).
+	if (!theme::silent_delete() && ~GetAsyncKeyState(VK_SHIFT) < 0)
+	{
+		const size_t n = m_index_selected.size();
+		string prompt = n == 1 ? "Are you sure you want to delete this item?\n\n"
+		                       : "Are you sure you want to delete these " + std::to_string(n) + " items?\n\n";
+		const size_t max_shown = 15;
+		size_t shown = 0;
+		for (auto& i : m_index_selected)
+		{
+			if (shown == max_shown)
+			{
+				prompt += "... and " + std::to_string(n - shown) + " more";
+				break;
+			}
+			const t_index_entry& index = find_ref(m_index, get_id(i));
+			prompt += (index.ft == ft_dir ? "[" + index.name + "]" : index.name) + "\n";
+			shown++;
+		}
+		if (MessageBox(prompt.c_str(), "Delete", MB_ICONQUESTION | MB_YESNO) != IDYES)
+			return;
+	}
 	CWaitCursor wait;
 	int error = 0;
 	t_file_type del_ft = m_mix_f ? m_mix_f->get_file_type() : ft_unknown;

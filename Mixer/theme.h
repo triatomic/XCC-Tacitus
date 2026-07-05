@@ -388,6 +388,11 @@ namespace theme
 	bool parallel_extract();
 	void set_parallel_extract(bool v);
 
+	// When on, Delete skips the "Are you sure?" confirmation prompt (the same
+	// prompt Shift-Delete bypasses per-action). Persisted to the Theme INI.
+	bool silent_delete();
+	void set_silent_delete(bool v);
+
 	// When on, folder panes watch their directory and auto-refresh the listing as
 	// files appear/vanish/change on disk (FindFirstChangeNotification polled on a
 	// timer). MIX panes are unaffected. Default on; persisted to the INI.
