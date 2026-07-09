@@ -152,11 +152,43 @@ namespace theme
 		fnFlushMenuThemes p_FlushMenuThemes = NULL;
 		bool g_uxtheme_loaded = false;
 
+		// The dark-mode uxtheme ordinals below only exist as these functions on
+		// Win10 1809 (build 17763) and later. On Windows 7/8/early Win10, uxtheme
+		// exports DIFFERENT internal functions at ordinals 133/135/136, so
+		// GetProcAddress returns a valid-but-wrong pointer that passes the NULL
+		// guards at every call site and gets called with a mismatched signature
+		// -- corrupting the process (observed as an AV at CWinApp::Run on Win7).
+		// Gate resolution on the real OS build via RtlGetVersion (GetVersionEx
+		// lies on Win8.1+ without a manifest; RtlGetVersion reports the true build).
+		bool os_supports_dark_ordinals()
+		{
+			using fnRtlGetVersion = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+			HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+			if (!ntdll)
+				return false;
+			auto p = reinterpret_cast<fnRtlGetVersion>(
+				::GetProcAddress(ntdll, "RtlGetVersion"));
+			if (!p)
+				return false;
+			RTL_OSVERSIONINFOW vi = {};
+			vi.dwOSVersionInfoSize = sizeof(vi);
+			if (p(&vi) != 0)
+				return false;
+			// Win10 = major 10; 1809 = build 17763.
+			return vi.dwMajorVersion > 10
+				|| (vi.dwMajorVersion == 10 && vi.dwBuildNumber >= 17763);
+		}
+
 		void load_uxtheme()
 		{
 			if (g_uxtheme_loaded)
 				return;
 			g_uxtheme_loaded = true;
+			// Only resolve the ordinals where they mean what we expect. On older
+			// OSes leave the pointers NULL so every call site no-ops (no dark mode
+			// there anyway) instead of calling the wrong function.
+			if (!os_supports_dark_ordinals())
+				return;
 			g_uxtheme = ::LoadLibraryEx("uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 			if (!g_uxtheme)
 				return;
